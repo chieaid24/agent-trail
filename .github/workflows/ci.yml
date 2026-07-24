@@ -11,11 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Docs-only phase gate. Milestone 0 replaces this with real format, lint,
-      # test, and build jobs for the Go/Next.js monorepo (keep the job name `test`).
-      - name: Docs are printable ASCII
-        run: |
-          if grep -rPn '[^\x20-\x7E\t]' --include='*.md' .; then
-            echo "Non-ASCII characters found in markdown files." >&2
-            exit 1
-          fi
+      # Deterministic pre-merge gate: format, lint, test, docs ASCII. Auto-detects
+      # stack and skips absent tooling, so gates fill in as the Go/Next.js monorepo
+      # lands (keep the job name `test` - branch protection requires this check).
+      # AI gates (review, docs-sync) run pre-merge on the agent side; see
+      # docs/operations/validation-pipeline.md.
+      - name: Gate
+        run: bash scripts/gate.sh
