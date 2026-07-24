@@ -34,6 +34,7 @@ test:
 
 ## integration-test: unit tests plus the suites needing a real database
 integration-test:
+	@echo "integration-test: currently covers the migration path only; grows with milestone 2"
 	cd apps/api && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test ./...
 
 ## e2e: browser end-to-end suite (lands with the dashboard, milestone 8)

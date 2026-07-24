@@ -74,6 +74,10 @@ event
 message
 ```
 
+Scoping: `trace_id` is required on request-scoped lines (process lifecycle
+lines carry none); `task_id`, `task_attempt_id`, and `runner_id` are required
+once the task domain and runners exist, on lines with that context.
+
 Do not log:
 
 - Tokens

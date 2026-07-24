@@ -21,7 +21,7 @@ func TestNewTraceIDShape(t *testing.T) {
 
 func TestMiddlewareGeneratesTraceID(t *testing.T) {
 	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, nil)).With("service", "test")
+	logger := NewLogger(&buf, "test", slog.LevelInfo)
 
 	var seen string
 	h := Middleware(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +42,8 @@ func TestMiddlewareGeneratesTraceID(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
 		t.Fatalf("log line is not JSON: %v", err)
 	}
-	for _, key := range []string{"time", "level", "service", "event", "trace_id", "msg"} {
+	// Key names per docs/operations/observability.md.
+	for _, key := range []string{"timestamp", "level", "service", "event", "trace_id", "message"} {
 		if _, ok := line[key]; !ok {
 			t.Errorf("log line missing %q: %s", key, buf.String())
 		}

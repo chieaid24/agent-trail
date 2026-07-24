@@ -1,16 +1,18 @@
 // Package observability provides structured JSON logging and request
-// correlation for the control plane. Every log line carries the fields
-// required by docs/operations/observability.md; trace_id is the correlation
-// id until OpenTelemetry tracing lands.
+// correlation for the control plane. Field names follow
+// docs/operations/observability.md (timestamp, service, level, message);
+// request-scoped lines carry trace_id, the correlation id until
+// OpenTelemetry tracing lands. Task-context fields (task_id, runner_id)
+// arrive with the milestones that create them.
 package observability
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"regexp"
 	"time"
 )
@@ -20,14 +22,32 @@ const TraceIDHeader = "X-Trace-Id"
 
 type ctxKey struct{}
 
-// validTraceID bounds accepted inbound ids: hex-ish tokens only, so a hostile
-// header cannot inject log content or unbounded data.
+// validTraceID bounds accepted inbound ids to alphanumerics plus dash, so a
+// hostile header cannot inject log content or unbounded data.
 var validTraceID = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
 
-// NewLogger returns a JSON slog.Logger tagged with the service name.
-func NewLogger(service string, level slog.Level) *slog.Logger {
-	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+// NewLogger returns a JSON slog.Logger writing to w, tagged with the service
+// name. Keys are renamed to the observability doc's names (timestamp, message).
+func NewLogger(w io.Writer, service string, level slog.Level) *slog.Logger {
+	h := slog.NewJSONHandler(w, &slog.HandlerOptions{
+		Level:       level,
+		ReplaceAttr: renameDefaultKeys,
+	})
 	return slog.New(h).With("service", service)
+}
+
+// renameDefaultKeys maps slog's built-in keys to the names required by
+// docs/operations/observability.md.
+func renameDefaultKeys(groups []string, a slog.Attr) slog.Attr {
+	if len(groups) == 0 {
+		switch a.Key {
+		case slog.TimeKey:
+			a.Key = "timestamp"
+		case slog.MessageKey:
+			a.Key = "message"
+		}
+	}
+	return a
 }
 
 // NewTraceID returns a 32-char hex correlation id.

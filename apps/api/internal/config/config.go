@@ -5,7 +5,9 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -27,8 +29,8 @@ func Load() (Config, error) {
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 	}
 
-	if !strings.Contains(cfg.APIAddr, ":") {
-		return Config{}, fmt.Errorf("API_ADDR %q: missing port", cfg.APIAddr)
+	if err := validateAddr(cfg.APIAddr); err != nil {
+		return Config{}, err
 	}
 
 	level, err := parseLogLevel(envOr("LOG_LEVEL", "info"))
@@ -37,6 +39,19 @@ func Load() (Config, error) {
 	}
 	cfg.LogLevel = level
 	return cfg, nil
+}
+
+// validateAddr accepts host:port with a numeric port (host may be empty).
+func validateAddr(addr string) error {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("API_ADDR %q: %w", addr, err)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 0 || n > 65535 {
+		return fmt.Errorf("API_ADDR %q: port must be 0-65535", addr)
+	}
+	return nil
 }
 
 func envOr(key, fallback string) string {

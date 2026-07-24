@@ -22,7 +22,7 @@ func main() {
 		slog.Error("worker exited", "error", err.Error())
 		os.Exit(1)
 	}
-	logger := observability.NewLogger("worker", cfg.LogLevel)
+	logger := observability.NewLogger(os.Stdout, "worker", cfg.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

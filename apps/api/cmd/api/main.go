@@ -31,7 +31,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := observability.NewLogger("api", cfg.LogLevel)
+	logger := observability.NewLogger(os.Stdout, "api", cfg.LogLevel)
 
 	var db *sql.DB
 	if cfg.DatabaseURL != "" {

@@ -46,7 +46,7 @@ func run(args []string) error {
 	if cfg.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
-	logger := observability.NewLogger("migrate", cfg.LogLevel)
+	logger := observability.NewLogger(os.Stdout, "migrate", cfg.LogLevel)
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {

@@ -42,19 +42,17 @@ go_fmt_gate() {
 }
 go_in() { local dir=$1; shift; (cd "$dir" && "$@"); }
 
-go_mods=$(find . -name go.mod \
+found_go=0
+while IFS= read -r mod; do
+  found_go=1
+  dir=$(dirname "$mod")
+  gate "go: gofmt ($dir)" go_fmt_gate "$dir"
+  gate "go: vet ($dir)" go_in "$dir" go vet ./...
+  gate "go: test ($dir)" go_in "$dir" go test ./...
+  gate "go: build ($dir)" go_in "$dir" go build ./...
+done < <(find . -name go.mod \
   -not -path './.git/*' -not -path '*/node_modules/*' -not -path './.worktrees/*')
-if [ -n "$go_mods" ]; then
-  for mod in $go_mods; do
-    dir=$(dirname "$mod")
-    gate "go: gofmt ($dir)" go_fmt_gate "$dir"
-    gate "go: vet ($dir)" go_in "$dir" go vet ./...
-    gate "go: test ($dir)" go_in "$dir" go test ./...
-    gate "go: build ($dir)" go_in "$dir" go build ./...
-  done
-else
-  skip "go: format/vet/test/build" "no go.mod"
-fi
+[ "$found_go" = 1 ] || skip "go: format/vet/test/build" "no go.mod"
 
 # --- node: format-check, lint, test, build (per app) -------------------------
 npm_script() { # npm_script <dir> <script>
@@ -62,25 +60,29 @@ npm_script() { # npm_script <dir> <script>
 }
 npm_in() { local dir=$1; shift; (cd "$dir" && "$@"); }
 
-pkgs=$(find . -maxdepth 3 -name package.json \
-  -not -path '*/node_modules/*' -not -path './.git/*' -not -path './.worktrees/*')
-if [ -n "$pkgs" ]; then
-  for pkg in $pkgs; do
-    dir=$(dirname "$pkg")
-    if [ ! -d "$dir/node_modules" ]; then
-      gate "node: npm ci ($dir)" npm_in "$dir" npm ci --silent
+node_modules_stale() {
+  # Missing node_modules, or a lockfile changed since the last install.
+  [ ! -d "$1/node_modules" ] ||
+    [ "$1/package-lock.json" -nt "$1/node_modules/.package-lock.json" ]
+}
+
+found_node=0
+while IFS= read -r pkg; do
+  found_node=1
+  dir=$(dirname "$pkg")
+  if node_modules_stale "$dir"; then
+    gate "node: npm ci ($dir)" npm_in "$dir" npm ci --silent
+  fi
+  for s in format:check lint test build; do
+    if npm_script "$dir" "$s"; then
+      gate "node: npm run $s ($dir)" npm_in "$dir" npm run "$s" --silent
+    else
+      skip "node: npm run $s ($dir)" "no such script"
     fi
-    for s in format:check lint test build; do
-      if npm_script "$dir" "$s"; then
-        gate "node: npm run $s ($dir)" npm_in "$dir" npm run "$s" --silent
-      else
-        skip "node: npm run $s ($dir)" "no such script"
-      fi
-    done
   done
-else
-  skip "node: format-check/lint/test/build" "no package.json"
-fi
+done < <(find . -maxdepth 3 -name package.json \
+  -not -path '*/node_modules/*' -not -path './.git/*' -not -path './.worktrees/*')
+[ "$found_node" = 1 ] || skip "node: format-check/lint/test/build" "no package.json"
 
 if [ "$failed" -ne 0 ]; then
   printf '\ngate: FAILED\n' >&2

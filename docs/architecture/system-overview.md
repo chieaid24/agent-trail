@@ -159,6 +159,7 @@ agent-trail/
 |-- packages/
 |   `-- contracts/
 |-- deploy/
+|   |-- dev/
 |   |-- terraform/
 |   |-- helm/
 |   `-- kubernetes/

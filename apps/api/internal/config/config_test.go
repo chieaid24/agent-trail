@@ -52,10 +52,22 @@ func TestLoadOverrides(t *testing.T) {
 }
 
 func TestLoadRejectsBadAddr(t *testing.T) {
+	for _, bad := range []string{"8080", ":http", ":99999", "host:", "host"} {
+		t.Run(bad, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("API_ADDR", bad)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted API_ADDR %q", bad)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsEphemeralPort(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("API_ADDR", "8080")
-	if _, err := Load(); err == nil {
-		t.Fatal("Load accepted API_ADDR without a colon")
+	t.Setenv("API_ADDR", "127.0.0.1:0")
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load rejected 127.0.0.1:0: %v", err)
 	}
 }
 

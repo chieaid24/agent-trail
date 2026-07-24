@@ -37,6 +37,7 @@ Deterministic, in CI (the required `test` check, `scripts/gate.sh`):
 - **format** - `gofmt` for Go, `format:check` for Node. Absent tooling skips.
 - **lint** - `go vet`, or the `lint` npm script.
 - **test** - `go test ./...`, or the `test` npm script.
+- **build** - `go build ./...`, or the `build` npm script.
 - **docs ASCII** - markdown is printable ASCII only.
 
 Then **push** -> **PR** (`Closes #<issue>`) -> **CI** -> **merge**.
@@ -74,6 +75,7 @@ bash scripts/gate.sh
 ```
 
 The deterministic gates run in the no-mistakes order and report each as PASS,
-FAIL, or SKIP. Absent tooling skips and stays green, so the gates fill in as the
-Go/Next.js monorepo lands - add a `go.mod`, or `format:check`/`lint`/`test`
-scripts to `package.json`, and the gate picks them up with no config change.
+FAIL, or SKIP. The stack is auto-detected per directory: every `go.mod` module
+gets the Go gates and every `package.json` app gets whichever of the
+`format:check`/`lint`/`test`/`build` scripts it defines, so new modules and
+apps are gated with no config change.
