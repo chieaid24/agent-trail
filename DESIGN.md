@@ -91,6 +91,29 @@ Canonical patterns as they stabilize. Seed rules:
 - Destructive actions (cancel task): inline confirmation, not a modal, unless data loss is
   irreversible.
 
+## UI verification (mandatory)
+
+Code reading is never enough to ship UI. **Every change that touches UI gets an in-browser
+audit before merge, every single time** - run the app and drive each changed flow with
+Playwright (or the repo's browser runner if one is committed), screenshot every changed
+screen and state (default viewports 1280 and 1024), and audit the shots against this
+checklist:
+
+- Structure: alignment to the spacing scale, no overlap, no clipped text, no overflow,
+  consistent gutters
+- Balance: visual weight distributed deliberately - no lopsided screens, no orphaned
+  controls, hierarchy readable at a squint
+- System conformance: colors, type scale, spacing rhythm, elevation, and motion match this
+  file; trusted-vs-claimed badges correct
+- States: empty, loading, error, and long-content states all shot, not just the happy path
+- Best practices: focus visible, contrast sufficient, hit targets adequate, no layout shift
+  while streaming
+
+Fix every defect found and re-shoot until the audit is clean - "renders without errors" is
+not the bar; balanced and best-practice is. Attach the final screenshots to the PR body as
+evidence. `/ui-audit` runs the full-sweep version of this protocol; `/impeccable critique`
+is the per-screen deep pass.
+
 ## Absolute bans (match-and-refuse)
 
 If you are about to write one of these, restructure the element instead.

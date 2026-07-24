@@ -37,7 +37,7 @@ labels: ready, afk
 - [ ] CI `test` check green
 - [ ] VISION.md definition of done satisfied (tests, docs, observability, security impact)
 - [ ] Verified locally if runtime behavior or UI changes
-- [ ] Frontend/UI changes conform to `DESIGN.md`
+- [ ] Frontend/UI changes conform to `DESIGN.md` and pass its mandatory in-browser audit (Playwright screenshots of every changed state, attached to the PR)
 - [ ] Architecture changes carry an ADR in `docs/adr/`
 - [ ] PR on branch `<issue#>-<slug>` with `Closes #<this issue>`
 
