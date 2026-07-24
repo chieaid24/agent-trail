@@ -1,5 +1,5 @@
-// Package httpapi wires the control-plane HTTP surface. Milestone 0 exposes
-// health endpoints only; the task API lands with the task domain milestone.
+// Package httpapi wires the control-plane HTTP surface: health endpoints and
+// the /api/v1 task API (docs/architecture/api.md).
 package httpapi
 
 import (
@@ -21,15 +21,16 @@ type DBPinger interface {
 // Server holds the HTTP API dependencies.
 type Server struct {
 	logger *slog.Logger
-	db     DBPinger // nil when DATABASE_URL is not configured
+	db     DBPinger    // nil when DATABASE_URL is not configured
+	tasks  TaskService // nil when DATABASE_URL is not configured
 }
 
 var _ DBPinger = (*sql.DB)(nil)
 
-// New returns a Server. db may be nil; readiness then reports the database
-// as not configured instead of failing.
-func New(logger *slog.Logger, db DBPinger) *Server {
-	return &Server{logger: logger, db: db}
+// New returns a Server. db and tasks may be nil; readiness then reports the
+// database as not configured and the task API answers 503.
+func New(logger *slog.Logger, db DBPinger, tasks TaskService) *Server {
+	return &Server{logger: logger, db: db, tasks: tasks}
 }
 
 // Handler returns the routed HTTP handler with observability middleware.
@@ -37,6 +38,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
+	mux.HandleFunc("GET /api/v1/tasks", s.handleListTasks)
+	mux.HandleFunc("POST /api/v1/tasks", s.handleCreateTask)
+	mux.HandleFunc("GET /api/v1/tasks/{taskId}", s.handleGetTask)
+	mux.HandleFunc("POST /api/v1/tasks/{taskId}/cancel", s.handleCancelTask)
+	mux.HandleFunc("GET /api/v1/tasks/{taskId}/events", s.handleTaskEvents)
 	return observability.Middleware(s.logger)(mux)
 }
 
@@ -79,6 +85,6 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// Encoding a map of strings cannot fail; ignore the error.
+	// Bodies are maps and domain structs; encoding them cannot fail.
 	_ = json.NewEncoder(w).Encode(body)
 }

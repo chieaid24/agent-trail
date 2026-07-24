@@ -17,6 +17,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
 	"github.com/chieaid24/agent-trail/apps/api/internal/httpapi"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 func main() {
@@ -43,12 +44,14 @@ func run() error {
 	}
 
 	var pinger httpapi.DBPinger
+	var tasks httpapi.TaskService
 	if db != nil {
 		pinger = db
+		tasks = task.NewStore(db)
 	}
 	srv := &http.Server{
 		Addr:              cfg.APIAddr,
-		Handler:           httpapi.New(logger, pinger).Handler(),
+		Handler:           httpapi.New(logger, pinger, tasks).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

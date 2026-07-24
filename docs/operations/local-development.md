@@ -35,7 +35,7 @@ values; nothing outside `docker-compose.yml` uses them.
 make dev               # infra + migrations + api + worker + web
 make infra             # compose infrastructure only
 make migrate           # apply database migrations (goose)
-make seed              # demo data - lands with milestone 2
+make seed              # demo tasks (skips when tasks already exist)
 make test              # unit tests, both apps
 make integration-test  # adds the suites that need a real database
 make e2e               # browser suite - lands with milestone 8
