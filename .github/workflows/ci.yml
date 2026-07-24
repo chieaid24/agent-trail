@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Docs-only phase gate. Milestone 0 replaces this with real format, lint,
+      # test, and build jobs for the Go/Next.js monorepo (keep the job name `test`).
+      - name: Docs are printable ASCII
+        run: |
+          if grep -rPn '[^\x20-\x7E\t]' --include='*.md' .; then
+            echo "Non-ASCII characters found in markdown files." >&2
+            exit 1
+          fi
