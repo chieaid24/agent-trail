@@ -62,8 +62,12 @@ with a decision the agent makes and records.
 
 - CI runs `scripts/gate.sh` on every push and every PR, as the job named `test`.
 - `main` is branch-protected: `test` is a required check, with no required
-  reviews. The agent merges its own PR - `gh pr merge <pr> --squash
+  reviews. The agent merges its own PR - `gh pr merge <pr> --merge
   --delete-branch` - once `test` is green, then confirms the PR reads `MERGED`.
+- **Merge commits only, never squash.** Repo override of the global default
+  (which prefers squash): this repo's history must preserve every commit as
+  merged, not squashed into one. `--squash` on this repo is a hard rule
+  violation regardless of what any global config says.
 
 Branch protection is the hard gate: a red or missing `test` check cannot merge.
 The agent-run gates raise quality before CI; they are not the enforcement point.
