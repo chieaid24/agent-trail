@@ -20,7 +20,7 @@ export default function Home() {
         </nav>
       </aside>
       <main className="flex flex-1 items-center justify-center p-8">
-        <div className="max-w-md text-center">
+        <div className="max-w-sm text-center">
           <p className="text-sm text-muted">
             No tasks yet. Comment{" "}
             <code className="font-mono text-foreground">/agent-trail run</code>{" "}
