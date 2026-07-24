@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/dbtest"
 )
 
 func TestRunRejectsBadArgs(t *testing.T) {
@@ -23,13 +25,11 @@ func TestRunRequiresDatabaseURL(t *testing.T) {
 }
 
 // TestRunUpAgainstRealDatabase exercises the full migration path when a test
-// database is available (make integration-test); otherwise it skips.
+// database is available (make integration-test); otherwise it skips. The
+// dbtest harness serializes this against the other packages' DB tests.
 func TestRunUpAgainstRealDatabase(t *testing.T) {
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
-	t.Setenv("DATABASE_URL", url)
+	dbtest.Open(t)
+	t.Setenv("DATABASE_URL", os.Getenv("TEST_DATABASE_URL"))
 	for _, cmd := range []string{"up", "status", "version"} {
 		if err := run([]string{cmd}); err != nil {
 			t.Fatalf("run(%s): %v", cmd, err)

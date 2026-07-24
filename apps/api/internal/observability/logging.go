@@ -2,8 +2,10 @@
 // correlation for the control plane. Field names follow
 // docs/operations/observability.md (timestamp, service, level, message);
 // request-scoped lines carry trace_id, the correlation id until
-// OpenTelemetry tracing lands. Task-context fields (task_id, runner_id)
-// arrive with the milestones that create them.
+// OpenTelemetry tracing lands. Handlers add task_id on task-context lines;
+// task_attempt_id and runner_id join when the scheduler and runners start
+// logging attempt-scoped work (the activity timeline carries attempt
+// context until then).
 package observability
 
 import (

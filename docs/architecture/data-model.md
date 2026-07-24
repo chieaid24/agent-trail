@@ -76,6 +76,12 @@ updated_at
 
 ### Task
 
+Implemented (migration `00002_task_domain.sql`). `organization_id` and
+`repository_id` are nullable UUIDs until the GitHub integration milestone
+creates their tables and adds the foreign keys. `status` holds the state
+machine state and `phase` its derived grouping; the pair is kept consistent
+by a CHECK constraint (docs/architecture/task-state-machine.md).
+
 ```text
 id
 organization_id
@@ -108,6 +114,12 @@ version
 ```
 
 ### Task attempt
+
+Implemented. Attempt 1 is created with the task; a task keeps exactly one
+`active` attempt until it terminates (unique partial index). Attempt
+statuses: `active`, `superseded` (a revision opened the next attempt),
+`completed`, `failed`, `cancelled`, `timed_out`. `runner_id` gains its
+foreign key with the runner milestone.
 
 ```text
 id
@@ -155,7 +167,10 @@ created_at
 
 ### Activity event
 
-Append-only task timeline:
+Append-only task timeline. Implemented: a DB trigger rejects UPDATE and
+DELETE (audit history outlives the task - deleting a task is blocked too),
+`sequence_number` is unique and monotonic per attempt, and
+`idempotency_key` deduplicates replayed transition messages.
 
 ```text
 id
@@ -166,10 +181,14 @@ source
 timestamp
 payload_json
 redaction_status
+idempotency_key
 created_at
 ```
 
-Example event types:
+Every state transition emits `task.<new-status>` (e.g. `task.queued`,
+`task.timed_out`), plus `task.created` when the task is inserted. Other
+families (workspace, agent, command, validation) arrive with their
+milestones. Example event types:
 
 ```text
 task.queued

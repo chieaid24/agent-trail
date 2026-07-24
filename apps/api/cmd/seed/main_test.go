@@ -1,0 +1,46 @@
+package main
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/dbtest"
+)
+
+func TestRunRequiresDatabaseURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("err = %v, want DATABASE_URL error", err)
+	}
+}
+
+// TestRunSeedsOnceAgainstRealDatabase exercises seeding and its idempotence
+// when a test database is available (make integration-test); otherwise skips.
+func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
+	db := dbtest.Open(t) // skips without TEST_DATABASE_URL
+	t.Setenv("DATABASE_URL", os.Getenv("TEST_DATABASE_URL"))
+
+	if err := run(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM tasks`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != len(demoTasks()) {
+		t.Fatalf("tasks = %d, want %d", count, len(demoTasks()))
+	}
+
+	// Second run must not duplicate.
+	if err := run(); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM tasks`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != len(demoTasks()) {
+		t.Fatalf("tasks after second run = %d, want %d", count, len(demoTasks()))
+	}
+}

@@ -23,9 +23,9 @@ infra:
 migrate:
 	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/migrate up
 
-## seed: load demo data (lands with the task domain, milestone 2)
+## seed: load demo tasks (skips when the database already has tasks)
 seed:
-	@echo "seed: not implemented yet; lands with the task domain (milestone 2)" >&2; exit 1
+	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/seed
 
 ## test: unit tests for both apps
 test:
@@ -34,7 +34,6 @@ test:
 
 ## integration-test: unit tests plus the suites needing a real database
 integration-test:
-	@echo "integration-test: currently covers the migration path only; grows with milestone 2"
 	cd apps/api && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test ./...
 
 ## e2e: browser end-to-end suite (lands with the dashboard, milestone 8)
