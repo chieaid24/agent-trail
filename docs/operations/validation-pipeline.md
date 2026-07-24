@@ -16,13 +16,21 @@ coding agent's output for end users.
 
 Two layers, split by whether the gate needs judgment.
 
-Agent-run, pre-merge (the AI gates):
+Agent-run, pre-merge (the AI gates). An **independent reviewer** runs here -
+fresh-context subagents, not the implementing agent re-reading its own work - so a
+second set of eyes checks the change before it can merge:
 
-- **review** - the agent reviews its own diff for defects, regressions, and spec
-  drift.
-- **document** - the agent updates the docs an implementation change touches, per
+- **review** - `/review main` spawns two parallel `general-purpose` subagents
+  against the diff since `main`: **Standards** (does the code follow this repo's
+  documented standards) and **Spec** (does the code implement what the issue
+  asked). A third subagent reviews **Docs**: every doc the change touches still
+  matches the code, and a code change that should have updated a doc did. The
+  three run independently and report findings; they do not merge or rank them.
+- **document** - the implementing agent applies the reviewer's findings: it fixes
+  the objective ones and updates the docs an implementation change touches, per
   the ownership map in `AGENTS.md`. `docs/` is authoritative: when code diverges
-  from a doc, the same PR updates the doc.
+  from a doc, the same PR updates the doc. It then re-runs the reviewer until the
+  axes are clean or the remaining findings are recorded judgment calls.
 
 Deterministic, in CI (the required `test` check, `scripts/gate.sh`):
 
@@ -38,12 +46,13 @@ Then **push** -> **PR** (`Closes #<issue>`) -> **CI** -> **merge**.
 The pipeline never waits for a human. It replaces no-mistakes' `ask-user` parking
 with a decision the agent makes and records.
 
-- Objective finding (a lint break, a failing test, a gofmt diff): the agent fixes
-  it and re-runs the gate. Bounded to 3 attempts per gate, matching the CI babysit
-  cap.
+- Objective finding (a lint break, a failing test, a gofmt diff, an independent
+  reviewer flagging a standards violation or a missing requirement): the agent
+  fixes it and re-runs the gate. Bounded to 3 attempts per gate, matching the CI
+  babysit cap.
 - Judgment call (an ambiguous review finding, a debatable doc placement): the
   agent decides, proceeds, and records the decision in the PR body. It does not
-  pause.
+  pause. The reviewer only reports; it never blocks the merge or waits on a human.
 - Deterministic gate red after 3 fix attempts: the agent labels the issue
   `blocked`, writes the failure into it, releases its claim, and stops the loop.
   It never merges a red `test` check.
