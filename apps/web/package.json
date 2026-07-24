@@ -1,0 +1,36 @@
+{
+  "name": "@agent-trail/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent Trail dashboard",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "next": "15.5.21",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.6",
+    "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "eslint": "9.39.5",
+    "eslint-config-next": "15.5.21",
+    "jsdom": "29.1.1",
+    "prettier": "3.9.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
