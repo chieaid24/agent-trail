@@ -2,3 +2,8 @@
 CLAUDE.md
 AGENTS.md
 .worktrees/
+
+# Secrets - never commit
+.env
+.env.*
+!.env.example
