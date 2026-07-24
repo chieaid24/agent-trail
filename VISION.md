@@ -2,7 +2,7 @@
 
 Agent Trail is a control plane for coding agents. A developer installs the Agent Trail GitHub App, enables a repository, and comments `/agent-trail run` on an issue. Agent Trail creates a durable task, provisions an isolated runner with scoped credentials, streams the agent's actions to a dashboard, independently validates the result, and opens a draft pull request backed by a structured evidence report. A human approves the merge.
 
-The value is not calling an AI model - existing tools do that. The value is converting an unpredictable agent session into a controlled engineering workflow: durable task state, isolated execution, scoped credentials, live observability, reproducible validation, human approval, failure recovery, and audit history.
+The value is not calling an AI model - existing tools do that. The value is converting an unpredictable agent session into a controlled engineering workflow: durable task state, isolated execution, scoped credentials, live observability, reproducible validation, human approval, failure recovery, and audit history. Observability leads that list: the platform exists first so a developer can see exactly what an agent did, why, and what it cost.
 
 This file is the standing direction for the whole project. Every issue, plan, and PR in this repo answers to it.
 
@@ -13,21 +13,23 @@ This file is the standing direction for the whole project. Every issue, plan, an
 - Work flows through the dependency-aware GitHub Issues queue set up by bootstrap-issues. Every change starts as an issue, lands as a PR, passes the CI gate, and merges.
 - Issues default to the `afk` (autonomous) label. Use `hitl` only when a step truly requires the user: registering the GitHub App, provisioning cloud accounts or spend, supplying credentials or secrets, or an irreversible externally visible action. Everything else is agent work.
 - Do not wait for human review on `afk` issues. Merge when the acceptance criteria are demonstrated and CI is green.
-- Decisions that shape architecture get an ADR in `docs/adr/` in the same PR. Docs in `docs/` are the spec; when implementation diverges from them, the same PR updates the doc.
+- Every PR updates the docs it touches: docs in `docs/` are the spec, and when implementation diverges from them, the same PR updates the doc. Decisions that shape architecture also get an ADR in `docs/adr/` in the same PR.
+- Every PR body tells the user what architectural decisions it made and what trade-offs it accepted. Flag trade-offs explicitly - performance vs simplicity, deferred work, weakened guarantees, anything a reviewer would want surfaced rather than discovered. A reader should learn what was chosen and what it cost without reading the diff.
 - Never invent metrics. Benchmark numbers appear only after the benchmark runs.
 
 ## Product principles
 
 These principles bind every milestone:
 
-1. **Human approval is authoritative.** Agent Trail never merges into protected branches automatically in the MVP.
-2. **Enforce rules outside the model.** Do not rely on prompts like "do not access production." The runner simply does not have production credentials.
-3. **Evidence over claims.** Distinguish agent-reported tests, commands the runner actually executed, platform-verified tests, skipped checks, failed checks, and unverified assumptions.
-4. **Provider independence.** Multiple agent providers sit behind one internal interface. The MVP may support only one.
-5. **GitHub remains the collaboration surface.** Do not rebuild pull requests, repository hosting, or merge review.
-6. **Scope control.** A polished single-agent workflow beats a shallow multi-agent demo.
-7. **Safe failure.** A crash, timeout, cancellation, or rate limit results in a clear state with preserved logs.
-8. **Reproducibility.** Record base commit, final commit, runner image, agent provider and model, policy version, validation commands, runtime, files changed, and human interventions.
+1. **Observability is the core product.** Agent Trail exists mainly to make agentic coding observable: every command, file change, decision, validation, and denial is captured, streamed, and auditable. When scope competes, the observability surface wins.
+2. **Human approval is authoritative.** Agent Trail never merges into protected branches automatically in the MVP.
+3. **Enforce rules outside the model.** Do not rely on prompts like "do not access production." The runner simply does not have production credentials.
+4. **Evidence over claims.** Distinguish agent-reported tests, commands the runner actually executed, platform-verified tests, skipped checks, failed checks, and unverified assumptions.
+5. **Provider independence.** Multiple agent providers sit behind one internal interface. The MVP may support only one.
+6. **GitHub remains the collaboration surface.** Do not rebuild pull requests, repository hosting, or merge review.
+7. **Scope control.** A polished single-agent workflow beats a shallow multi-agent demo.
+8. **Safe failure.** A crash, timeout, cancellation, or rate limit results in a clear state with preserved logs.
+9. **Reproducibility.** Record base commit, final commit, runner image, agent provider and model, policy version, validation commands, runtime, files changed, and human interventions.
 
 ## Required vertical slice
 
@@ -55,6 +57,7 @@ An issue closes only when:
 - Observability added
 - Error behavior defined
 - Security impact considered
+- Architectural decisions and trade-offs flagged in the PR body
 - Acceptance criteria demonstrated
 - No secrets committed
 
