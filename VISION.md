@@ -44,34 +44,6 @@ Signed GitHub webhook
 
 This proves the complete system shape.
 
-## Implementation order
-
-1. Architecture docs and ADRs
-2. Monorepo
-3. Database
-4. GitHub webhook
-5. Fake adapter
-6. Complete fake issue-to-PR flow
-7. Real adapter
-8. Trusted validation
-9. Runner isolation
-10. Cloud infrastructure
-11. Benchmarks
-12. Conflict detection
-
-## Coding standards
-
-- Strict typing
-- Structured logging with correlation IDs
-- Input validation and database constraints
-- No shell interpolation; argument arrays only
-- Version pinning
-- Tests with every component
-- Document security limitations
-- Small commits
-- ADR updates for architecture changes
-- No invented metrics; no claim of complete security
-
 ## Definition of done
 
 An issue closes only when:
