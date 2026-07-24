@@ -33,6 +33,12 @@ Implemented: list, create, get, cancel, events. The rest of the surface
 lands with its milestone (retry with the runner, commands/validations/
 evidence/artifacts with validation and evidence).
 
+Security limitation: the implemented task endpoints are currently
+unauthenticated - anyone who can reach the API can create and cancel tasks.
+Acceptable only while the API binds to localhost in development; the
+GitHub OAuth session layer above must land before any deployment exposes
+this surface.
+
 ```text
 GET  /tasks
 POST /tasks

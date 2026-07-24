@@ -166,8 +166,10 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		s.writeTaskError(w, r, err)
 		return
 	}
-	s.logger.LogAttrs(r.Context(), slog.LevelInfo, "task cancelled",
-		slog.String("event", "task_cancelled"),
+	// "requested", not "cancelled": the call is idempotent and may be a no-op
+	// on an already-cancelled task; the activity timeline holds the truth.
+	s.logger.LogAttrs(r.Context(), slog.LevelInfo, "task cancel requested",
+		slog.String("event", "task_cancel_requested"),
 		slog.String("trace_id", observability.TraceIDFrom(r.Context())),
 		slog.String("task_id", t.ID),
 	)

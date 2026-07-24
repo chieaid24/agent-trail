@@ -36,7 +36,10 @@ Deterministic, in CI (the required `test` check, `scripts/gate.sh`):
 
 - **format** - `gofmt` for Go, `format:check` for Node. Absent tooling skips.
 - **lint** - `go vet`, or the `lint` npm script.
-- **test** - `go test ./...`, or the `test` npm script.
+- **test** - `go test ./...`, or the `test` npm script. In CI the job
+  provisions a disposable PostgreSQL service and sets `TEST_DATABASE_URL`,
+  so the database-backed integration suites run inside the required check;
+  locally they skip unless that variable is set (`make integration-test`).
 - **build** - `go build ./...`, or the `build` npm script.
 - **docs ASCII** - markdown is printable ASCII only.
 
