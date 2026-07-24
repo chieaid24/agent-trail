@@ -11,10 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # Deterministic pre-merge gate: format, lint, test, docs ASCII. Auto-detects
-      # stack and skips absent tooling, so gates fill in as the Go/Next.js monorepo
-      # lands (keep the job name `test` - branch protection requires this check).
-      # AI gates (review, docs-sync) run pre-merge on the agent side; see
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      # Deterministic pre-merge gate: format, lint, test, build for every Go
+      # module and Node app, plus the docs ASCII check (keep the job name
+      # `test` - branch protection requires this check). AI gates (review,
+      # docs-sync) run pre-merge on the agent side; see
       # docs/operations/validation-pipeline.md.
       - name: Gate
         run: bash scripts/gate.sh
