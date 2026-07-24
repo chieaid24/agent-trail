@@ -7,3 +7,5 @@ AGENTS.md
 .env
 .env.*
 !.env.example
+secrets/
+*.pem
