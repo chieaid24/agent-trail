@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -213,7 +214,7 @@ func (c *Client) CollaboratorPermission(ctx context.Context, installationID int6
 		Permission string `json:"permission"`
 	}
 	path := fmt.Sprintf("/repos/%s/%s/collaborators/%s/permission",
-		owner, repo, username)
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(username))
 	if err := c.do(ctx, http.MethodGet, path, "Bearer "+token, nil, &resp); err != nil {
 		return "", err
 	}
@@ -231,7 +232,8 @@ func (c *Client) BranchHeadSHA(ctx context.Context, installationID int64, owner,
 			SHA string `json:"sha"`
 		} `json:"commit"`
 	}
-	path := fmt.Sprintf("/repos/%s/%s/branches/%s", owner, repo, branch)
+	path := fmt.Sprintf("/repos/%s/%s/branches/%s",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(branch))
 	if err := c.do(ctx, http.MethodGet, path, "Bearer "+token, nil, &resp); err != nil {
 		return "", err
 	}
@@ -245,7 +247,7 @@ func (c *Client) CreateIssueComment(ctx context.Context, installationID int64, o
 		return err
 	}
 	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments",
-		owner, repo, issueNumber)
+		url.PathEscape(owner), url.PathEscape(repo), issueNumber)
 	return c.do(ctx, http.MethodPost, path, "Bearer "+token,
 		map[string]any{"body": body}, nil)
 }
@@ -259,7 +261,8 @@ func (c *Client) CreateCheckRun(ctx context.Context, installationID int64, owner
 	var resp struct {
 		ID int64 `json:"id"`
 	}
-	path := fmt.Sprintf("/repos/%s/%s/check-runs", owner, repo)
+	path := fmt.Sprintf("/repos/%s/%s/check-runs",
+		url.PathEscape(owner), url.PathEscape(repo))
 	err = c.do(ctx, http.MethodPost, path, "Bearer "+token, map[string]any{
 		"name": name, "head_sha": headSHA, "status": status,
 	}, &resp)

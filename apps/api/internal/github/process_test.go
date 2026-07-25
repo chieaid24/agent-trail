@@ -474,3 +474,57 @@ func TestMalformedPayloadMarksDeliveryFailed(t *testing.T) {
 		t.Fatalf("delivery status = %q, want failed", got)
 	}
 }
+
+func TestInstallationSuspendAndUnsuspend(t *testing.T) {
+	f := newFixture(t)
+	f.recordAndProcess(t, "d-sus-install", "installation", installationJSON(t, "created"))
+
+	suspendedAt := func() sql.NullTime {
+		var at sql.NullTime
+		err := f.db.QueryRow(`
+			SELECT suspended_at FROM github_installations
+			WHERE github_installation_id = 999`).Scan(&at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+
+	f.recordAndProcess(t, "d-sus", "installation", installationJSON(t, "suspend"))
+	if !suspendedAt().Valid {
+		t.Fatal("suspended_at not set after suspend")
+	}
+	f.recordAndProcess(t, "d-unsus", "installation", installationJSON(t, "unsuspend"))
+	if suspendedAt().Valid {
+		t.Fatal("suspended_at still set after unsuspend")
+	}
+}
+
+func TestSelfHealUpsertPreservesPermissions(t *testing.T) {
+	f := newFixture(t)
+	f.recordAndProcess(t, "d-perm-install", "installation", installationJSON(t, "created"))
+
+	// The self-heal path upserts with neither permissions nor events; a
+	// previous sync's values must survive.
+	err := f.store.UpsertInstallation(context.Background(), InstallationParams{
+		GitHubInstallationID: 999, AccountID: 61,
+		AccountLogin: "acme", AccountType: "Organization",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var permissions, events string
+	err = f.db.QueryRow(`
+		SELECT permissions_json::text, events_json::text
+		FROM github_installations
+		WHERE github_installation_id = 999`).Scan(&permissions, &events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permissions != `{"issues": "write"}` {
+		t.Fatalf("permissions_json = %s", permissions)
+	}
+	if events != `["issues", "issue_comment"]` {
+		t.Fatalf("events_json = %s", events)
+	}
+}

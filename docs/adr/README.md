@@ -9,7 +9,8 @@ Create ADRs for:
 3. PostgreSQL queue versus SQS
 4. Docker runner versus Kubernetes Job
 5. SSE versus WebSockets
-6. Git mirror cache and worktrees
+6. Standard-library GitHub client versus an SDK
+7. Git mirror cache and worktrees
 7. Agent adapter boundary
 8. Trusted validation
 9. Log storage

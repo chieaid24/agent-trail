@@ -82,6 +82,7 @@ func (p *Processor) Dispatch(d Delivery, payload []byte) {
 				p.logger.LogAttrs(context.Background(), slog.LevelError,
 					"delivery processing panicked",
 					slog.String("event", "webhook_process_panicked"),
+					slog.String("trace_id", d.TraceID),
 					slog.String("delivery_id", d.ID),
 					slog.String("panic", fmt.Sprint(r)),
 				)
@@ -119,7 +120,11 @@ func (p *Processor) process(ctx context.Context, d Delivery, payload []byte) {
 			slog.String("status", status),
 		)
 	}
-	if err := p.store.MarkDelivery(ctx, d.ID, status, failure); err != nil {
+	// Fresh deadline: if handle consumed the processing budget, the ledger
+	// update must still land or the row is stuck pending forever.
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := p.store.MarkDelivery(markCtx, d.ID, status, failure); err != nil {
 		p.logger.LogAttrs(ctx, slog.LevelError, "delivery status not recorded",
 			slog.String("event", "webhook_mark_failed"),
 			slog.String("trace_id", d.TraceID),
@@ -284,6 +289,9 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 	if err != nil {
 		return "", err
 	}
+	// Known limitation: usage, PR, and disabled-repo replies post before the
+	// permission check, so any commenter can draw one bounded reply. Running
+	// a task stays gated on write access below.
 	reply := func(body string) error {
 		return p.api.CreateIssueComment(ctx, instID, repo.Owner, repo.Name,
 			ev.Issue.Number, body)
@@ -451,6 +459,7 @@ func (p *Processor) appendTaskEvent(ctx context.Context, taskID, eventType strin
 	if err := p.tasks.AppendEvent(ctx, taskID, eventType, "system", payload); err != nil {
 		p.logger.LogAttrs(ctx, slog.LevelWarn, "task event not appended",
 			slog.String("event", "task_event_append_failed"),
+			slog.String("trace_id", observability.TraceIDFrom(ctx)),
 			slog.String("task_id", taskID),
 			slog.String("event_type", eventType),
 			slog.String("error", err.Error()),

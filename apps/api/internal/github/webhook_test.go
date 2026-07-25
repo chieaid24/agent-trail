@@ -166,3 +166,54 @@ func TestRecordDeliveryConcurrentReplaysInsertOnce(t *testing.T) {
 		t.Fatalf("winning inserts = %d, want exactly 1", wins)
 	}
 }
+
+// TestWebhookIssueCommentCreatesTask drives the flagship flow through the
+// real HTTP path: signed issue_comment delivery -> async processing -> one
+// task (acceptance criterion "one real issue comment creates exactly one
+// task").
+func TestWebhookIssueCommentCreatesTask(t *testing.T) {
+	db := dbtest.Open(t)
+	store := NewStore(db)
+	api := &fakeAPI{
+		repos:      []Repository{testRepo(501, "acme/service")},
+		permission: "write",
+		headSHA:    "0123456789012345678901234567890123456789",
+	}
+	proc := NewProcessor(store, task.NewStore(db), api, testLogger(),
+		observability.NewRegistry())
+	h := NewWebhook(testSecret, store, proc, testLogger(),
+		observability.NewRegistry())
+
+	install := installationJSON(t, "created")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, webhookRequest(install, "d-e2e-install", "installation",
+		sign(testSecret, install)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("installation delivery: status %d", rec.Code)
+	}
+	proc.Wait() // the repo sync must land before the command arrives
+
+	comment := issueCommentJSON(t, commentOpts{body: "/agent-trail run"})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, webhookRequest(comment, "d-e2e-comment", "issue_comment",
+		sign(testSecret, comment)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("comment delivery: status %d", rec.Code)
+	}
+	proc.Wait()
+
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM tasks`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("tasks = %d, want exactly 1", n)
+	}
+	var status string
+	err := db.QueryRow(`
+		SELECT processing_status FROM github_webhook_deliveries
+		WHERE github_delivery_id = 'd-e2e-comment'`).Scan(&status)
+	if err != nil || status != "processed" {
+		t.Fatalf("comment delivery status = %q err = %v", status, err)
+	}
+}

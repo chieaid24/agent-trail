@@ -82,14 +82,20 @@ func (s *Store) MarkDelivery(ctx context.Context, deliveryID, status, failureMes
 }
 
 // UpsertInstallation stores the installation and its owning organization.
+// Nil Permissions/Events (the self-heal path has neither) keep any values a
+// previous sync stored.
 func (s *Store) UpsertInstallation(ctx context.Context, p InstallationParams) error {
-	permissions, err := json.Marshal(p.Permissions)
-	if err != nil {
-		return fmt.Errorf("marshal permissions: %w", err)
+	var permissions, events []byte
+	var err error
+	if p.Permissions != nil {
+		if permissions, err = json.Marshal(p.Permissions); err != nil {
+			return fmt.Errorf("marshal permissions: %w", err)
+		}
 	}
-	events, err := json.Marshal(p.Events)
-	if err != nil {
-		return fmt.Errorf("marshal events: %w", err)
+	if p.Events != nil {
+		if events, err = json.Marshal(p.Events); err != nil {
+			return fmt.Errorf("marshal events: %w", err)
+		}
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -106,13 +112,16 @@ func (s *Store) UpsertInstallation(ctx context.Context, p InstallationParams) er
 		INSERT INTO github_installations
 			(organization_id, github_installation_id, account_login,
 			 account_type, permissions_json, events_json)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4,
+			COALESCE($5::jsonb, '{}'::jsonb), COALESCE($6::jsonb, '[]'::jsonb))
 		ON CONFLICT (github_installation_id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
 			account_login = EXCLUDED.account_login,
 			account_type = EXCLUDED.account_type,
-			permissions_json = EXCLUDED.permissions_json,
-			events_json = EXCLUDED.events_json,
+			permissions_json = COALESCE($5::jsonb,
+				github_installations.permissions_json),
+			events_json = COALESCE($6::jsonb,
+				github_installations.events_json),
 			suspended_at = NULL,
 			updated_at = now()`,
 		orgID, p.GitHubInstallationID, p.AccountLogin, p.AccountType,
