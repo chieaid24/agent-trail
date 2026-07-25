@@ -17,7 +17,7 @@ agent_trail_github_api_errors_total
 agent_trail_runner_heartbeats_missed_total
 ```
 
-Runner:
+Runner (spec; the process runner does not emit these yet):
 
 ```text
 agent_trail_runner_active_tasks

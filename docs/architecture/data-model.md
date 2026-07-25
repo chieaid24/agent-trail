@@ -128,8 +128,10 @@ version
 Implemented. Attempt 1 is created with the task; a task keeps exactly one
 `active` attempt until it terminates (unique partial index). Attempt
 statuses: `active`, `superseded` (a revision opened the next attempt),
-`completed`, `failed`, `cancelled`, `timed_out`. `runner_id` gains its
-foreign key with the runner milestone.
+`completed`, `failed`, `cancelled`, `timed_out`. Migration
+`00004_runners_and_leases.sql` adds the `runner_id` foreign key and the
+lease fields: `lease_owner` + `lease_expires_at` are the live lease (a
+CHECK keeps the pair set together), `heartbeat_at` is the last extension.
 
 ```text
 id
@@ -144,10 +146,16 @@ started_at
 completed_at
 failure_code
 failure_message
+lease_owner
+lease_expires_at
+heartbeat_at
 created_at
 ```
 
 ### Runner
+
+Implemented (migration `00004_runners_and_leases.sql`). Statuses: `online`,
+`lost` (heartbeat went stale), `offline` (deliberate shutdown).
 
 ```text
 id

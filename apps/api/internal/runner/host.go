@@ -66,7 +66,7 @@ func (h *Host) Run(ctx context.Context) error {
 		log.LogAttrs(ctx, slog.LevelInfo, "attempt claimed",
 			slog.String("event", "runner_attempt_claimed"),
 			slog.String("task_id", claim.TaskID),
-			slog.String("attempt_id", claim.AttemptID),
+			slog.String("task_attempt_id", claim.AttemptID),
 			slog.String("task_status", string(claim.TaskStatus)),
 		)
 		if err := h.Executor.Execute(ctx, self.ID, claim); err != nil {
@@ -75,7 +75,7 @@ func (h *Host) Run(ctx context.Context) error {
 			log.LogAttrs(ctx, slog.LevelWarn, "attempt did not complete",
 				slog.String("event", "runner_attempt_incomplete"),
 				slog.String("task_id", claim.TaskID),
-				slog.String("attempt_id", claim.AttemptID),
+				slog.String("task_attempt_id", claim.AttemptID),
 				slog.String("error", err.Error()),
 			)
 		}
@@ -155,7 +155,7 @@ func (h *Host) reportLoss(ctx context.Context, log *slog.Logger, lost Runner) {
 		if err != nil {
 			log.LogAttrs(ctx, slog.LevelError, "runner.lost event failed",
 				slog.String("event", "runner_lost_event_failed"),
-				slog.String("attempt_id", attemptID),
+				slog.String("task_attempt_id", attemptID),
 				slog.String("error", err.Error()),
 			)
 		}

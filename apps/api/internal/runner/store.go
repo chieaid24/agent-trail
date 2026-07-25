@@ -79,6 +79,14 @@ const runnerColumns = `id, runner_type, hostname_or_pod, status, capacity,
 
 // Register inserts a new online runner and returns it.
 func (s *Store) Register(ctx context.Context, p RegisterParams) (Runner, error) {
+	switch p.Type {
+	case "process", "docker", "kubernetes":
+	default:
+		return Runner{}, fmt.Errorf("unknown runner type %q", p.Type)
+	}
+	if p.HostnameOrPod == "" || len(p.HostnameOrPod) > 255 {
+		return Runner{}, fmt.Errorf("hostname_or_pod must be 1-255 characters")
+	}
 	if p.Capacity <= 0 {
 		p.Capacity = 1
 	}

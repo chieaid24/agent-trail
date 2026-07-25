@@ -51,7 +51,7 @@ type Executor struct {
 func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error {
 	log := e.Logger.With(
 		slog.String("task_id", c.TaskID),
-		slog.String("attempt_id", c.AttemptID),
+		slog.String("task_attempt_id", c.AttemptID),
 		slog.String("runner_id", runnerID),
 	)
 
@@ -187,11 +187,16 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		return e.failTask(ctx, c, "workspace_failed", err.Error())
 	}
 	defer func() {
-		if err := os.RemoveAll(workspace); err == nil {
-			// Best effort; a failed append must not fail a finished attempt.
-			_ = e.Tasks.AppendAttemptEvent(context.WithoutCancel(ctx), c.AttemptID,
-				"cleanup.completed", "runner", map[string]any{"workspace": "removed"})
+		if err := os.RemoveAll(workspace); err != nil {
+			log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
+				slog.String("event", "runner_workspace_cleanup_failed"),
+				slog.String("error", err.Error()),
+			)
+			return
 		}
+		// Best effort; a failed append must not fail a finished attempt.
+		_ = e.Tasks.AppendAttemptEvent(context.WithoutCancel(ctx), c.AttemptID,
+			"cleanup.completed", "runner", map[string]any{"workspace": "removed"})
 	}()
 	if err := e.append(ctx, c, "workspace.ready", "runner", nil); err != nil {
 		return err

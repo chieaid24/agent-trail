@@ -288,7 +288,8 @@ func (s *Store) AppendAttemptEvent(ctx context.Context, attemptID, eventType, so
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
-	if payload == nil {
+	// nil and typed-nil payloads both marshal to "null"; store {} instead.
+	if string(raw) == "null" {
 		raw = []byte(`{}`)
 	}
 
