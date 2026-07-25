@@ -45,6 +45,18 @@ make hooks             # activate the pre-commit hook (once per clone)
 bash scripts/gate.sh   # the exact CI gate, locally
 ```
 
+## Worker configuration
+
+The worker is the runner host (docs/architecture/runner.md). Beyond
+`DATABASE_URL` (required) it reads, all in whole seconds:
+
+- `RUNNER_LEASE_SECONDS` (60): how long a claimed attempt stays owned
+  without a lease extension
+- `RUNNER_HEARTBEAT_SECONDS` (10): runner registry heartbeat and reap cadence
+- `RUNNER_LOST_AFTER_SECONDS` (30): heartbeat staleness that marks a runner
+  lost; must exceed the heartbeat interval
+- `WORKER_POLL_SECONDS` (2): idle claim-poll interval
+
 ## Pre-commit hook
 
 The committed hook in `.githooks/` runs `scripts/gate.sh` - the exact CI

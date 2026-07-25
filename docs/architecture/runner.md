@@ -77,27 +77,52 @@ Required guarantees:
 - A lost runner must not immediately cause duplicate execution.
 - Publishing must be idempotent.
 
-Example claim query:
+The implemented claim query (`internal/runner/store.go`) selects the active
+attempt of a claimable task, skipping live leases:
 
 ```sql
-SELECT id
-FROM task_attempts
-WHERE status = 'QUEUED'
-  AND (
-    lease_expires_at IS NULL
-    OR lease_expires_at < now()
-  )
-ORDER BY priority DESC, created_at
-FOR UPDATE SKIP LOCKED
+SELECT a.id, a.attempt_number, t.id, t.status, t.title, t.instructions
+FROM task_attempts a
+JOIN tasks t ON t.id = a.task_id
+WHERE a.status = 'active'
+  AND (a.lease_expires_at IS NULL OR a.lease_expires_at < now())
+  AND t.status IN ('queued', 'provisioning', 'planning', 'executing',
+                   'validating', 'publishing', 'awaiting_review')
+ORDER BY t.priority DESC, t.created_at
+FOR UPDATE OF a SKIP LOCKED
 LIMIT 1;
 ```
 
-Update the lease in the same transaction.
+The lease is written in the same transaction. A queued task is a fresh
+claim; any later status is recovery of an attempt whose owner lost its
+lease, and the new owner resumes from the recorded status. Delivery is
+at-least-once, so a resumed attempt may repeat agent events on the
+timeline; only-one-owner-at-a-time is the invariant the lease enforces.
 
-Suggested fields:
+Lease fields on `task_attempts`:
 
 ```text
-lease_owner
-lease_expires_at
-heartbeat_at
+lease_owner       -- runner holding the lease (NULL when unleased)
+lease_expires_at  -- lease deadline; expiry makes the attempt claimable
+heartbeat_at      -- last lease extension, for diagnostics
 ```
+
+`runner_id` records which runner ran the attempt and survives release.
+
+## Milestone 3 status
+
+The runner currently lives inside `cmd/worker` as a `process` runner: it
+registers itself, heartbeats, reaps lost runners (`status = 'lost'` after
+`RUNNER_LOST_AFTER_SECONDS` without a heartbeat, plus a `runner.lost`
+timeline event on every attempt the loss strands), and drives claimed
+attempts through the fake agent adapter. Runner statuses are `online`,
+`lost`, and `offline` (deliberate shutdown; a heartbeat revives `lost` but
+never `offline`).
+
+Because the runner and control plane share one process and one database,
+claiming goes straight through PostgreSQL (ADR-0003); the internal runner
+HTTP API in docs/architecture/api.md lands when runners move out of
+process (runner isolation milestone). Trusted validation and publishing
+are recorded as skipped on the timeline until milestones 6 and 7, and the
+fake flow auto-completes from awaiting_review - there is nothing published
+to review yet, so the human review gate becomes real with publishing.

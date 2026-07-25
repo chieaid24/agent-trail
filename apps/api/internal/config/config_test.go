@@ -3,12 +3,17 @@ package config
 import (
 	"log/slog"
 	"testing"
+	"time"
 )
 
 // clearEnv makes the test hermetic against ambient configuration.
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"API_ADDR", "DATABASE_URL", "LOG_LEVEL"} {
+	for _, key := range []string{
+		"API_ADDR", "DATABASE_URL", "LOG_LEVEL",
+		"RUNNER_LEASE_SECONDS", "RUNNER_HEARTBEAT_SECONDS",
+		"RUNNER_LOST_AFTER_SECONDS", "WORKER_POLL_SECONDS",
+	} {
 		t.Setenv(key, "")
 	}
 }
@@ -27,6 +32,39 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v, want info", cfg.LogLevel)
+	}
+	if cfg.RunnerLease != 60*time.Second || cfg.RunnerHeartbeat != 10*time.Second ||
+		cfg.RunnerLostAfter != 30*time.Second || cfg.WorkerPoll != 2*time.Second {
+		t.Errorf("runner durations = %v/%v/%v/%v, want 60s/10s/30s/2s",
+			cfg.RunnerLease, cfg.RunnerHeartbeat, cfg.RunnerLostAfter, cfg.WorkerPoll)
+	}
+}
+
+func TestLoadRunnerDurationOverridesAndValidation(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RUNNER_LEASE_SECONDS", "120")
+	t.Setenv("WORKER_POLL_SECONDS", "1")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RunnerLease != 2*time.Minute || cfg.WorkerPoll != time.Second {
+		t.Errorf("overrides = %v/%v, want 2m/1s", cfg.RunnerLease, cfg.WorkerPoll)
+	}
+
+	for _, bad := range []string{"0", "-5", "abc", "1.5"} {
+		clearEnv(t)
+		t.Setenv("RUNNER_LEASE_SECONDS", bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("RUNNER_LEASE_SECONDS=%q accepted, want error", bad)
+		}
+	}
+
+	clearEnv(t)
+	t.Setenv("RUNNER_HEARTBEAT_SECONDS", "30")
+	t.Setenv("RUNNER_LOST_AFTER_SECONDS", "30")
+	if _, err := Load(); err == nil {
+		t.Error("lost-after == heartbeat accepted, want error")
 	}
 }
 

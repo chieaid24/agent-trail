@@ -65,7 +65,7 @@ func Open(t *testing.T) *sql.DB {
 	if _, err := db.ExecContext(ctx, `
 		TRUNCATE tasks, task_attempts, activity_events, organizations,
 			github_installations, repositories,
-			github_webhook_deliveries`); err != nil {
+			github_webhook_deliveries, runners`); err != nil {
 		t.Fatal(err)
 	}
 	return db

@@ -1,19 +1,22 @@
 # Agent Provider Abstraction
 
-Define a provider-neutral interface:
+The provider-neutral interface, implemented in `internal/agent` (the fake
+adapter with it):
 
 ```go
-type AgentAdapter interface {
+package agent
+
+type Adapter interface {
     Name() string
     ValidateConfiguration(ctx context.Context) error
-    Start(ctx context.Context, req AgentRequest) (AgentSession, error)
+    Start(ctx context.Context, req Request) (Session, error)
 }
 
-type AgentSession interface {
-    Events() <-chan AgentEvent
+type Session interface {
+    Events() <-chan Event
     Send(ctx context.Context, message string) error
     Cancel(ctx context.Context) error
-    Wait(ctx context.Context) (AgentResult, error)
+    Wait(ctx context.Context) (Result, error)
 }
 ```
 

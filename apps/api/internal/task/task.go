@@ -96,6 +96,9 @@ type TransitionParams struct {
 // ErrNotFound is returned when the task id does not exist.
 var ErrNotFound = errors.New("task not found")
 
+// ErrAttemptNotFound is returned when the task attempt id does not exist.
+var ErrAttemptNotFound = errors.New("task attempt not found")
+
 // ErrActiveTaskExists rejects a second active task for one GitHub issue
 // (unique index tasks_one_active_per_issue_idx).
 var ErrActiveTaskExists = errors.New("issue already has an active task")
