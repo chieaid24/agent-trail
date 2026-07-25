@@ -31,7 +31,7 @@ func get(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecorder,
 }
 
 func TestHealthz(t *testing.T) {
-	h := New(testLogger(), nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil).Handler()
 	rec, body := get(t, h, "/healthz")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -42,7 +42,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestReadyzWithoutDatabase(t *testing.T) {
-	h := New(testLogger(), nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil).Handler()
 	rec, body := get(t, h, "/readyz")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -53,7 +53,7 @@ func TestReadyzWithoutDatabase(t *testing.T) {
 }
 
 func TestReadyzWithHealthyDatabase(t *testing.T) {
-	h := New(testLogger(), fakePinger{}, nil).Handler()
+	h := New(testLogger(), fakePinger{}, nil, nil, nil).Handler()
 	rec, body := get(t, h, "/readyz")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -64,7 +64,7 @@ func TestReadyzWithHealthyDatabase(t *testing.T) {
 }
 
 func TestReadyzWithUnreachableDatabase(t *testing.T) {
-	h := New(testLogger(), fakePinger{err: errors.New("connection refused")}, nil).Handler()
+	h := New(testLogger(), fakePinger{err: errors.New("connection refused")}, nil, nil, nil).Handler()
 	rec, body := get(t, h, "/readyz")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
@@ -75,7 +75,7 @@ func TestReadyzWithUnreachableDatabase(t *testing.T) {
 }
 
 func TestUnknownRouteIs404(t *testing.T) {
-	h := New(testLogger(), nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil).Handler()
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	if rec.Code != http.StatusNotFound {
