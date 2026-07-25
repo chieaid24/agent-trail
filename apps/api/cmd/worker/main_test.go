@@ -1,34 +1,23 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"log/slog"
+	"strings"
 	"testing"
-	"time"
 )
 
-func TestRunLoopStopsOnCancel(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		runLoop(ctx, logger, time.Millisecond)
-		close(done)
-	}()
-
-	// Let at least one heartbeat fire, then cancel.
-	time.Sleep(10 * time.Millisecond)
-	cancel()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("runLoop did not stop on cancel")
+func TestRunRequiresDatabaseURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("run() = %v, want DATABASE_URL error", err)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("worker_heartbeat")) {
-		t.Error("no heartbeat logged")
+}
+
+func TestRunRejectsBadConfig(t *testing.T) {
+	t.Setenv("RUNNER_LOST_AFTER_SECONDS", "5")
+	t.Setenv("RUNNER_HEARTBEAT_SECONDS", "10")
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), "RUNNER_LOST_AFTER_SECONDS") {
+		t.Fatalf("run() = %v, want lost-after validation error", err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds the settings shared by the api, worker, and migrate commands.
@@ -16,10 +17,22 @@ type Config struct {
 	// APIAddr is the listen address for the HTTP API, e.g. ":8080".
 	APIAddr string
 	// DatabaseURL is the PostgreSQL connection string. Optional for the api
-	// skeleton (readiness reports it unconfigured); required by migrate.
+	// skeleton (readiness reports it unconfigured); required by migrate and
+	// the worker.
 	DatabaseURL string
 	// LogLevel is the minimum level emitted by the structured logger.
 	LogLevel slog.Level
+	// RunnerLease is how long a claimed task attempt stays owned without an
+	// extension (RUNNER_LEASE_SECONDS).
+	RunnerLease time.Duration
+	// RunnerHeartbeat is the runner registry heartbeat interval
+	// (RUNNER_HEARTBEAT_SECONDS).
+	RunnerHeartbeat time.Duration
+	// RunnerLostAfter is how stale a heartbeat marks a runner lost
+	// (RUNNER_LOST_AFTER_SECONDS). Must exceed RunnerHeartbeat.
+	RunnerLostAfter time.Duration
+	// WorkerPoll is the idle claim-poll interval (WORKER_POLL_SECONDS).
+	WorkerPoll time.Duration
 }
 
 // Load reads configuration from the environment and validates it.
@@ -38,7 +51,39 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.LogLevel = level
+
+	for _, d := range []struct {
+		dst      *time.Duration
+		key      string
+		fallback int
+	}{
+		{&cfg.RunnerLease, "RUNNER_LEASE_SECONDS", 60},
+		{&cfg.RunnerHeartbeat, "RUNNER_HEARTBEAT_SECONDS", 10},
+		{&cfg.RunnerLostAfter, "RUNNER_LOST_AFTER_SECONDS", 30},
+		{&cfg.WorkerPoll, "WORKER_POLL_SECONDS", 2},
+	} {
+		secs, err := envSeconds(d.key, d.fallback)
+		if err != nil {
+			return Config{}, err
+		}
+		*d.dst = secs
+	}
+	if cfg.RunnerLostAfter <= cfg.RunnerHeartbeat {
+		return Config{}, fmt.Errorf(
+			"RUNNER_LOST_AFTER_SECONDS (%s) must exceed RUNNER_HEARTBEAT_SECONDS (%s)",
+			cfg.RunnerLostAfter, cfg.RunnerHeartbeat)
+	}
 	return cfg, nil
+}
+
+// envSeconds reads a positive whole-second duration from the environment.
+func envSeconds(key string, fallback int) (time.Duration, error) {
+	raw := envOr(key, strconv.Itoa(fallback))
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s %q: want a positive integer of seconds", key, raw)
+	}
+	return time.Duration(n) * time.Second, nil
 }
 
 // validateAddr accepts host:port with a numeric port (host may be empty).
