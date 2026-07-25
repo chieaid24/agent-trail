@@ -2,7 +2,7 @@
 
 Agent Trail is a control plane for coding agents. Comment `/agent-trail run` on a GitHub issue and it creates a durable task, runs a coding agent in an isolated workspace with scoped credentials, streams every action to a dashboard, independently validates the result, and opens a draft pull request with an evidence report. A human approves the merge.
 
-Status: early. The monorepo, CI gate, dev environment, and task domain (state machine, activity timeline, tasks API) exist; the GitHub integration is next in the milestone queue.
+Status: early. The monorepo, CI gate, dev environment, task domain (state machine, activity timeline, tasks API), and GitHub integration (webhook intake, repo sync, `/agent-trail run`) exist; the runner and fake agent adapter are next in the milestone queue.
 
 ## Quickstart
 

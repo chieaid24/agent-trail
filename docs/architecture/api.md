@@ -91,11 +91,25 @@ Support reconnection using `Last-Event-ID`.
 
 ### Webhook
 
+Implemented (docs/architecture/github-app.md).
+
 ```text
 POST /webhooks/github
 ```
 
 Authenticate using GitHub signature validation.
+
+### Metrics
+
+Implemented.
+
+```text
+GET /metrics
+```
+
+Prometheus text exposition of the counters listed in
+docs/operations/observability.md. No authentication; deploy behind the
+internal network boundary.
 
 ### Runner internal API
 

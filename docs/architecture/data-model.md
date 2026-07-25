@@ -2,6 +2,9 @@
 
 ### Organization
 
+Implemented (migration `00003_github_integration.sql`). One row per GitHub
+account (user or organization) backing an installation.
+
 ```text
 id
 name
@@ -43,6 +46,8 @@ Roles:
 
 ### GitHub installation
 
+Implemented (migration `00003_github_integration.sql`).
+
 ```text
 id
 organization_id
@@ -57,6 +62,9 @@ updated_at
 ```
 
 ### Repository
+
+Implemented (migration `00003_github_integration.sql`). Rows are disabled,
+never deleted, when the installation loses access: tasks reference them.
 
 ```text
 id
@@ -76,9 +84,11 @@ updated_at
 
 ### Task
 
-Implemented (migration `00002_task_domain.sql`). `organization_id` and
-`repository_id` are nullable UUIDs until the GitHub integration milestone
-creates their tables and adds the foreign keys. `status` holds the state
+Implemented (migration `00002_task_domain.sql`; migration
+`00003_github_integration.sql` adds the `organization_id` and
+`repository_id` foreign keys plus the one-active-task-per-issue partial
+unique index - both stay nullable, since API-created tasks have no
+repository). `status` holds the state
 machine state and `phase` its derived grouping; the pair is kept consistent
 by a CHECK constraint (docs/architecture/task-state-machine.md).
 
@@ -186,12 +196,15 @@ created_at
 ```
 
 Every state transition emits `task.<new-status>` (e.g. `task.queued`,
-`task.timed_out`), plus `task.created` when the task is inserted. Other
-families (workspace, agent, command, validation) arrive with their
-milestones. Example event types:
+`task.timed_out`), plus `task.created` when the task is inserted. The
+GitHub integration emits `github.comment.posted` and
+`github.check_run.created` for its side effects. Other families
+(workspace, agent, command, validation) arrive with their milestones.
+Example event types:
 
 ```text
 task.queued
+github.check_run.created
 workspace.provisioning
 workspace.ready
 agent.started

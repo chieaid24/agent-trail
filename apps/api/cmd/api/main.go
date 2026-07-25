@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
+	"github.com/chieaid24/agent-trail/apps/api/internal/github"
 	"github.com/chieaid24/agent-trail/apps/api/internal/httpapi"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
@@ -45,13 +46,36 @@ func run() error {
 
 	var pinger httpapi.DBPinger
 	var tasks httpapi.TaskService
+	var taskStore *task.Store
 	if db != nil {
 		pinger = db
-		tasks = task.NewStore(db)
+		taskStore = task.NewStore(db)
+		tasks = taskStore
 	}
+
+	metrics := observability.NewRegistry()
+	var webhook http.Handler
+	var processor *github.Processor
+	// The webhook needs both the GitHub credentials and the database.
+	if cfg.GitHubEnabled() && db != nil {
+		keyPEM, err := os.ReadFile(cfg.GitHubAppPrivateKeyPath)
+		if err != nil {
+			return err
+		}
+		client, err := github.NewClient(cfg.GitHubAppID, keyPEM,
+			cfg.GitHubAPIBaseURL, metrics)
+		if err != nil {
+			return err
+		}
+		ghStore := github.NewStore(db)
+		processor = github.NewProcessor(ghStore, taskStore, client, logger, metrics)
+		webhook = github.NewWebhook([]byte(cfg.GitHubWebhookSecret), ghStore,
+			processor, logger, metrics)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.APIAddr,
-		Handler:           httpapi.New(logger, pinger, tasks).Handler(),
+		Handler:           httpapi.New(logger, pinger, tasks, webhook, metrics.Handler()).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -80,6 +104,9 @@ func run() error {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	if processor != nil {
+		processor.Wait() // in-flight deliveries are bounded by processTimeout
 	}
 	return nil
 }

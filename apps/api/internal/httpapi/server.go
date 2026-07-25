@@ -20,17 +20,22 @@ type DBPinger interface {
 
 // Server holds the HTTP API dependencies.
 type Server struct {
-	logger *slog.Logger
-	db     DBPinger    // nil when DATABASE_URL is not configured
-	tasks  TaskService // nil when DATABASE_URL is not configured
+	logger  *slog.Logger
+	db      DBPinger     // nil when DATABASE_URL is not configured
+	tasks   TaskService  // nil when DATABASE_URL is not configured
+	webhook http.Handler // nil when the GitHub integration is not configured
+	metrics http.Handler // nil disables GET /metrics
 }
 
 var _ DBPinger = (*sql.DB)(nil)
 
-// New returns a Server. db and tasks may be nil; readiness then reports the
-// database as not configured and the task API answers 503.
-func New(logger *slog.Logger, db DBPinger, tasks TaskService) *Server {
-	return &Server{logger: logger, db: db, tasks: tasks}
+// New returns a Server. Nil dependencies degrade cleanly: readiness reports
+// the database as not configured, and the task API and webhook answer 503.
+func New(logger *slog.Logger, db DBPinger, tasks TaskService, webhook, metrics http.Handler) *Server {
+	return &Server{
+		logger: logger, db: db, tasks: tasks,
+		webhook: webhook, metrics: metrics,
+	}
 }
 
 // Handler returns the routed HTTP handler with observability middleware.
@@ -43,7 +48,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}", s.handleGetTask)
 	mux.HandleFunc("POST /api/v1/tasks/{taskId}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/events", s.handleTaskEvents)
+	mux.HandleFunc("POST /webhooks/github", s.handleWebhook)
+	if s.metrics != nil {
+		mux.Handle("GET /metrics", s.metrics)
+	}
 	return observability.Middleware(s.logger)(mux)
+}
+
+// handleWebhook forwards to the GitHub webhook handler, or reports the
+// integration unconfigured.
+func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.webhook == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "github integration is not configured",
+		})
+		return
+	}
+	s.webhook.ServeHTTP(w, r)
 }
 
 // handleHealthz reports process liveness only.
