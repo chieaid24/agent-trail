@@ -89,6 +89,9 @@ type TransitionParams struct {
 // ErrNotFound is returned when the task id does not exist.
 var ErrNotFound = errors.New("task not found")
 
+// ErrAttemptNotFound is returned when the task attempt id does not exist.
+var ErrAttemptNotFound = errors.New("task attempt not found")
+
 // InvalidTransitionError rejects an edge the state machine does not allow.
 type InvalidTransitionError struct {
 	From, To Status

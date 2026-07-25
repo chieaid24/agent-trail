@@ -262,6 +262,61 @@ func (s *Store) Events(ctx context.Context, id string, limit int) ([]Event, erro
 	return events, nil
 }
 
+// AppendAttemptEvent appends one non-transition activity event (agent
+// output, workspace lifecycle, ...) to an attempt's timeline. It takes the
+// task row lock so the sequence number cannot race a transition.
+func (s *Store) AppendAttemptEvent(ctx context.Context, attemptID, eventType, source string, payload any) error {
+	if !IsUUID(attemptID) {
+		return ErrAttemptNotFound
+	}
+	if !validSource(source) {
+		return fmt.Errorf("unknown event source %q", source)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	if payload == nil {
+		raw = []byte(`{}`)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT task_id FROM task_attempts WHERE id = $1`, attemptID).
+		Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrAttemptNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("load attempt: %w", err)
+	}
+	if _, err := lockTask(ctx, tx, taskID); err != nil {
+		return err
+	}
+	if err := insertEvent(ctx, tx, attemptID, eventType, source, raw, ""); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// validSource reports whether s is a known activity-event source.
+func validSource(s string) bool {
+	switch s {
+	case "api", "system", "runner", "agent":
+		return true
+	}
+	return false
+}
+
 // lockTask loads a task FOR UPDATE, serializing its transitions.
 func lockTask(ctx context.Context, tx *sql.Tx, id string) (Task, error) {
 	row := tx.QueryRowContext(ctx,
@@ -285,9 +340,7 @@ func applyTransition(ctx context.Context, tx *sql.Tx, cur Task, p TransitionPara
 	if source == "" {
 		source = "system"
 	}
-	switch source {
-	case "api", "system", "runner", "agent":
-	default:
+	if !validSource(source) {
 		return Task{}, fmt.Errorf("unknown event source %q", source)
 	}
 

@@ -63,7 +63,7 @@ func Open(t *testing.T) *sql.DB {
 	}
 	// TRUNCATE bypasses the append-only row trigger by design.
 	if _, err := db.ExecContext(ctx,
-		`TRUNCATE tasks, task_attempts, activity_events`); err != nil {
+		`TRUNCATE tasks, task_attempts, activity_events, runners`); err != nil {
 		t.Fatal(err)
 	}
 	return db
