@@ -63,6 +63,13 @@ type CreateParams struct {
 	BaseBranch        string // defaults to "main"
 	MaxRuntimeSeconds *int
 	MaxCostUSD        *float64
+	// GitHub-sourced tasks (source_type github_issue) carry their origin;
+	// API-created tasks leave these zero.
+	SourceType        string // defaults to "api"
+	SourceIssueNumber *int64
+	SourceCommentID   *int64
+	OrganizationID    *string
+	RepositoryID      *string
 }
 
 // ListParams filter and bound List.
@@ -88,6 +95,10 @@ type TransitionParams struct {
 
 // ErrNotFound is returned when the task id does not exist.
 var ErrNotFound = errors.New("task not found")
+
+// ErrActiveTaskExists rejects a second active task for one GitHub issue
+// (unique index tasks_one_active_per_issue_idx).
+var ErrActiveTaskExists = errors.New("issue already has an active task")
 
 // InvalidTransitionError rejects an edge the state machine does not allow.
 type InvalidTransitionError struct {
