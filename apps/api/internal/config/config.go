@@ -33,16 +33,33 @@ type Config struct {
 	RunnerLostAfter time.Duration
 	// WorkerPoll is the idle claim-poll interval (WORKER_POLL_SECONDS).
 	WorkerPoll time.Duration
+	// GitHub App integration; all three set together, or none (the webhook
+	// endpoint then answers 503). GitHubAPIBaseURL overrides the API root
+	// in tests only.
+	GitHubWebhookSecret     string
+	GitHubAppID             string
+	GitHubAppPrivateKeyPath string
+	GitHubAPIBaseURL        string
 }
+
+// GitHubEnabled reports whether the GitHub App integration is configured.
+func (c Config) GitHubEnabled() bool { return c.GitHubWebhookSecret != "" }
 
 // Load reads configuration from the environment and validates it.
 func Load() (Config, error) {
 	cfg := Config{
-		APIAddr:     envOr("API_ADDR", ":8080"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
+		APIAddr:                 envOr("API_ADDR", ":8080"),
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		GitHubWebhookSecret:     os.Getenv("GITHUB_WEBHOOK_SECRET"),
+		GitHubAppID:             os.Getenv("GITHUB_APP_ID"),
+		GitHubAppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
+		GitHubAPIBaseURL:        os.Getenv("GITHUB_API_BASE_URL"),
 	}
 
 	if err := validateAddr(cfg.APIAddr); err != nil {
+		return Config{}, err
+	}
+	if err := validateGitHub(cfg); err != nil {
 		return Config{}, err
 	}
 
@@ -84,6 +101,23 @@ func envSeconds(key string, fallback int) (time.Duration, error) {
 		return 0, fmt.Errorf("%s %q: want a positive integer of seconds", key, raw)
 	}
 	return time.Duration(n) * time.Second, nil
+}
+
+// validateGitHub rejects a partial GitHub configuration: a webhook that can
+// never act, or credentials without a webhook, is a deployment mistake.
+func validateGitHub(cfg Config) error {
+	set := 0
+	for _, v := range []string{cfg.GitHubWebhookSecret, cfg.GitHubAppID,
+		cfg.GitHubAppPrivateKeyPath} {
+		if v != "" {
+			set++
+		}
+	}
+	if set != 0 && set != 3 {
+		return fmt.Errorf("GITHUB_WEBHOOK_SECRET, GITHUB_APP_ID, and " +
+			"GITHUB_APP_PRIVATE_KEY_PATH must be set together")
+	}
+	return nil
 }
 
 // validateAddr accepts host:port with a numeric port (host may be empty).

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Store is the PostgreSQL-backed task domain store. Every state change goes
@@ -43,6 +45,9 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Task, error) {
 	if p.BaseBranch == "" {
 		p.BaseBranch = "main"
 	}
+	if p.SourceType == "" {
+		p.SourceType = "api"
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -52,12 +57,19 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Task, error) {
 
 	row := tx.QueryRowContext(ctx, `
 		INSERT INTO tasks (title, instructions, priority, base_branch,
-			max_runtime_seconds, max_cost_usd)
-		VALUES ($1, $2, $3, $4, $5, $6)
+			max_runtime_seconds, max_cost_usd, source_type,
+			source_issue_number, source_comment_id, organization_id,
+			repository_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING `+taskColumns,
 		p.Title, p.Instructions, p.Priority, p.BaseBranch,
-		p.MaxRuntimeSeconds, p.MaxCostUSD)
+		p.MaxRuntimeSeconds, p.MaxCostUSD, p.SourceType,
+		p.SourceIssueNumber, p.SourceCommentID, p.OrganizationID,
+		p.RepositoryID)
 	created, err := scanTask(row)
+	if isUniqueViolation(err, "tasks_one_active_per_issue_idx") {
+		return Task{}, ErrActiveTaskExists
+	}
 	if err != nil {
 		return Task{}, fmt.Errorf("insert task: %w", err)
 	}
@@ -308,6 +320,42 @@ func (s *Store) AppendAttemptEvent(ctx context.Context, attemptID, eventType, so
 	return nil
 }
 
+// AppendEvent appends one non-transition event (e.g. a GitHub side effect)
+// to the task's active attempt.
+func (s *Store) AppendEvent(ctx context.Context, taskID, eventType, source string, payload map[string]string) error {
+	if !IsUUID(taskID) {
+		return ErrNotFound
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := lockTask(ctx, tx, taskID); err != nil {
+		return err
+	}
+	var attemptID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id FROM task_attempts
+		WHERE task_id = $1 AND status = 'active'`, taskID).Scan(&attemptID)
+	if err != nil {
+		return fmt.Errorf("load active attempt: %w", err)
+	}
+	if err := insertEvent(ctx, tx, attemptID, eventType, source, body, ""); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
 // validSource reports whether s is a known activity-event source.
 func validSource(s string) bool {
 	switch s {
@@ -315,6 +363,35 @@ func validSource(s string) bool {
 		return true
 	}
 	return false
+}
+
+// ActiveTaskForIssue returns the non-terminal github_issue task for the
+// repository/issue pair, if one exists.
+func (s *Store) ActiveTaskForIssue(ctx context.Context, repositoryID string, issueNumber int64) (Task, bool, error) {
+	if !IsUUID(repositoryID) {
+		return Task{}, false, nil
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT `+taskColumns+` FROM tasks
+		WHERE repository_id = $1 AND source_issue_number = $2
+			AND source_type = 'github_issue' AND phase <> 'terminal'`,
+		repositoryID, issueNumber)
+	t, err := scanTask(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, fmt.Errorf("active task for issue: %w", err)
+	}
+	return t, true, nil
+}
+
+// isUniqueViolation reports whether err is a unique violation on the named
+// constraint or index.
+func isUniqueViolation(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) &&
+		pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
 // lockTask loads a task FOR UPDATE, serializing its transitions.

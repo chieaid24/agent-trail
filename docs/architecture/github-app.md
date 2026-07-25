@@ -58,6 +58,11 @@ CREATE TABLE github_webhook_deliveries (
 );
 ```
 
+Implementation note (migration `00003_github_integration.sql`): only
+signature-valid deliveries are recorded, so a forged request can never
+occupy a delivery id; invalid signatures are rejected and counted in
+metrics instead.
+
 ### Task command
 
 MVP:
