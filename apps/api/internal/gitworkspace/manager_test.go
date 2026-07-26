@@ -190,6 +190,90 @@ func TestConcurrentWorkspacesIsolated(t *testing.T) {
 	}
 }
 
+func TestPruneKeepsActiveWorktree(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	m := newTestManager(t)
+	origin, base := buildOrigin(t)
+	repo := RepoRef{ID: "repo-1", CloneURL: origin}
+
+	ws, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "a1", BaseSHA: base, BranchLabel: "x",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	if err := m.Prune(ctx, repo); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if _, err := os.Stat(ws.Path); err != nil {
+		t.Fatalf("Prune removed an active worktree: %v", err)
+	}
+	list := runGit(t, filepath.Join(m.reposDir, repo.ID, "repo.git"), "worktree", "list")
+	if !strings.Contains(list, ws.Path) {
+		t.Fatalf("active worktree missing from list after Prune:\n%s", list)
+	}
+}
+
+func TestRemoveKeepsSiblingWorktree(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	m := newTestManager(t)
+	origin, base := buildOrigin(t)
+	repo := RepoRef{ID: "repo-1", CloneURL: origin}
+
+	keep, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "keep", BaseSHA: base, BranchLabel: "keep",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree keep: %v", err)
+	}
+	drop, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "drop", BaseSHA: base, BranchLabel: "drop",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree drop: %v", err)
+	}
+
+	// Removing one attempt (which runs worktree prune) must not touch a live
+	// sibling checkout.
+	if err := m.Remove(ctx, drop); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(drop.Path); !os.IsNotExist(err) {
+		t.Fatalf("removed worktree still present: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(keep.Path, "README.md")); err != nil {
+		t.Fatalf("Remove damaged the sibling worktree: %v", err)
+	}
+	list := runGit(t, filepath.Join(m.reposDir, repo.ID, "repo.git"), "worktree", "list")
+	if !strings.Contains(list, keep.Path) {
+		t.Fatalf("sibling missing from worktree list after a sibling Remove:\n%s", list)
+	}
+}
+
+func TestNoShellInterpolationInCloneURL(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	m := newTestManager(t)
+
+	// A clone URL laced with shell metacharacters. Under a shell this would
+	// create the sentinel; with argument arrays git gets it as one literal
+	// operand, fails to clone, and no command runs.
+	sentinel := filepath.Join(t.TempDir(), "pwned")
+	repo := RepoRef{
+		ID:       "repo-1",
+		CloneURL: "/no/such/repo$(touch " + sentinel + ");`touch " + sentinel + "`",
+	}
+	if _, err := m.EnsureMirror(ctx, repo); err == nil {
+		t.Fatal("EnsureMirror accepted a bogus clone URL")
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatal("shell metacharacters in the clone URL were executed")
+	}
+}
+
 func TestCreateWorktreeRejectsUnknownBase(t *testing.T) {
 	requireGit(t)
 	m := newTestManager(t)

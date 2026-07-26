@@ -19,7 +19,7 @@ func TestSanitizeBranch(t *testing.T) {
 		{"trims edges", "--hello--", "agent-trail/hello", nil},
 		{"strips traversal", "../../etc/passwd", "agent-trail/etc-passwd", nil},
 		{"strips ref metacharacters", "feat~1^2:x?*[", "agent-trail/feat-1-2-x", nil},
-		{"drops unicode", "café – menu", "agent-trail/caf-menu", nil},
+		{"drops unicode", "caf\u00e9 \u2013 menu", "agent-trail/caf-menu", nil},
 		{"empty after strip", "///", "", ErrEmptyBranch},
 		{"only separators", "  --  ", "", ErrEmptyBranch},
 	}
