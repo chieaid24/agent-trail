@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ type Config struct {
 	RunnerLostAfter time.Duration
 	// WorkerPoll is the idle claim-poll interval (WORKER_POLL_SECONDS).
 	WorkerPoll time.Duration
+	// WorkspaceRoot is the base directory for the git mirror cache and task
+	// worktrees (WORKSPACE_ROOT); must be an absolute path.
+	WorkspaceRoot string
 	// GitHub App integration; all three set together, or none (the webhook
 	// endpoint then answers 503). GitHubAPIBaseURL overrides the API root
 	// in tests only.
@@ -54,10 +58,14 @@ func Load() (Config, error) {
 		GitHubAppID:             os.Getenv("GITHUB_APP_ID"),
 		GitHubAppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
 		GitHubAPIBaseURL:        os.Getenv("GITHUB_API_BASE_URL"),
+		WorkspaceRoot:           envOr("WORKSPACE_ROOT", "/var/lib/agent-trail"),
 	}
 
 	if err := validateAddr(cfg.APIAddr); err != nil {
 		return Config{}, err
+	}
+	if !filepath.IsAbs(cfg.WorkspaceRoot) {
+		return Config{}, fmt.Errorf("WORKSPACE_ROOT %q must be an absolute path", cfg.WorkspaceRoot)
 	}
 	if err := validateGitHub(cfg); err != nil {
 		return Config{}, err

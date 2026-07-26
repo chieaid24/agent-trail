@@ -13,6 +13,7 @@ func clearEnv(t *testing.T) {
 		"API_ADDR", "DATABASE_URL", "LOG_LEVEL",
 		"RUNNER_LEASE_SECONDS", "RUNNER_HEARTBEAT_SECONDS",
 		"RUNNER_LOST_AFTER_SECONDS", "WORKER_POLL_SECONDS",
+		"WORKSPACE_ROOT",
 	} {
 		t.Setenv(key, "")
 	}
@@ -37,6 +38,17 @@ func TestLoadDefaults(t *testing.T) {
 		cfg.RunnerLostAfter != 30*time.Second || cfg.WorkerPoll != 2*time.Second {
 		t.Errorf("runner durations = %v/%v/%v/%v, want 60s/10s/30s/2s",
 			cfg.RunnerLease, cfg.RunnerHeartbeat, cfg.RunnerLostAfter, cfg.WorkerPoll)
+	}
+	if cfg.WorkspaceRoot != "/var/lib/agent-trail" {
+		t.Errorf("WorkspaceRoot = %q, want /var/lib/agent-trail", cfg.WorkspaceRoot)
+	}
+}
+
+func TestLoadRejectsRelativeWorkspaceRoot(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("WORKSPACE_ROOT", "relative/path")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted a relative WORKSPACE_ROOT")
 	}
 }
 
