@@ -11,17 +11,17 @@ Create ADRs for:
 5. SSE versus WebSockets
 6. Standard-library GitHub client versus an SDK
 7. Git mirror cache and worktrees
-7. Agent adapter boundary
-8. Trusted validation
-9. Log storage
-10. GitHub App permissions
-11. Runner authentication
-12. Secret lifecycle
-13. Network policy
-14. Task leases
-15. Evidence schema
-16. Data retention
-17. Conflict detection
+8. Agent adapter boundary
+9. Trusted validation
+10. Log storage
+11. GitHub App permissions
+12. Runner authentication
+13. Secret lifecycle
+14. Network policy
+15. Task leases
+16. Evidence schema
+17. Data retention
+18. Conflict detection
 
 Each ADR should include:
 
