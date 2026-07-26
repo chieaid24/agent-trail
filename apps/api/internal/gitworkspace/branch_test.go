@@ -109,7 +109,7 @@ func TestValidSHA(t *testing.T) {
 	}{
 		{"0123456789abcdef0123456789abcdef01234567", true},
 		{"0123456789ABCDEF0123456789abcdef01234567", false}, // uppercase
-		{"0123456", false},                                  // short
+		{"0123456", false}, // short
 		{"0123456789abcdef0123456789abcdef0123456g", false}, // non-hex
 	}
 	for _, tc := range cases {
