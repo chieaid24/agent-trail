@@ -24,6 +24,11 @@ The runner must:
 18. Destroy credentials.
 19. Clean up the workspace.
 
+The git mechanics behind steps 2, 4, 5, 6, 13, 14, 15, and 19 (mirror cache,
+worktree, base-SHA verification, diff statistics, commit trailers, push guard,
+cleanup) live in `apps/api/internal/gitworkspace`; see
+[git-workspaces.md](git-workspaces.md) and [ADR-0007](../adr/0007-git-mirror-cache-and-worktrees.md).
+
 
 ## Runner Task Contract
 
