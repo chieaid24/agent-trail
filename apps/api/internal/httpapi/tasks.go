@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 // TaskService is the slice of the task domain the HTTP API consumes;
@@ -22,6 +24,18 @@ type TaskService interface {
 	List(ctx context.Context, p task.ListParams) ([]task.Task, error)
 	Cancel(ctx context.Context, id, reason string) (task.Task, error)
 	Events(ctx context.Context, id string, limit int) ([]task.Event, error)
+}
+
+// ValidationService serves trusted validation results; implemented by
+// *validation.Store, faked in tests.
+type ValidationService interface {
+	ListForTask(ctx context.Context, taskID string) ([]validation.StoredResult, error)
+}
+
+// EvidenceService serves evidence reports; implemented by *evidence.Store,
+// faked in tests.
+type EvidenceService interface {
+	GetForTask(ctx context.Context, taskID string) (evidence.Stored, error)
 }
 
 const maxBodyBytes = 1 << 20 // 1 MiB request cap
@@ -195,6 +209,44 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+func (s *Server) handleTaskValidations(w http.ResponseWriter, r *http.Request) {
+	if s.validations == nil {
+		s.writeTasksUnavailable(w)
+		return
+	}
+	id, ok := pathTaskID(w, r)
+	if !ok {
+		return
+	}
+	results, err := s.validations.ListForTask(r.Context(), id)
+	if err != nil {
+		s.writeTaskError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"validations": results})
+}
+
+func (s *Server) handleTaskEvidence(w http.ResponseWriter, r *http.Request) {
+	if s.evidence == nil {
+		s.writeTasksUnavailable(w)
+		return
+	}
+	id, ok := pathTaskID(w, r)
+	if !ok {
+		return
+	}
+	st, err := s.evidence.GetForTask(r.Context(), id)
+	if errors.Is(err, evidence.ErrNoReport) {
+		writeError(w, http.StatusNotFound, "no evidence report for task")
+		return
+	}
+	if err != nil {
+		s.writeTaskError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 // pathTaskID validates the {taskId} path segment as a UUID.

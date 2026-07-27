@@ -15,10 +15,12 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
+	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/github"
 	"github.com/chieaid24/agent-trail/apps/api/internal/httpapi"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 func main() {
@@ -46,11 +48,15 @@ func run() error {
 
 	var pinger httpapi.DBPinger
 	var tasks httpapi.TaskService
+	var validations httpapi.ValidationService
+	var evidenceReports httpapi.EvidenceService
 	var taskStore *task.Store
 	if db != nil {
 		pinger = db
 		taskStore = task.NewStore(db)
 		tasks = taskStore
+		validations = validation.NewStore(db)
+		evidenceReports = evidence.NewStore(db)
 	}
 
 	metrics := observability.NewRegistry()
@@ -74,8 +80,9 @@ func run() error {
 	}
 
 	srv := &http.Server{
-		Addr:              cfg.APIAddr,
-		Handler:           httpapi.New(logger, pinger, tasks, webhook, metrics.Handler()).Handler(),
+		Addr: cfg.APIAddr,
+		Handler: httpapi.New(logger, pinger, tasks, validations,
+			evidenceReports, webhook, metrics.Handler()).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
