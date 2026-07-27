@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Status classifies one trusted check outcome. Failed means the command ran
@@ -110,7 +111,7 @@ func (r *Runner) runCheck(ctx context.Context, dir string, c Check) Result {
 			// The command never ran (missing binary, permission, cancel):
 			// an infrastructure failure, distinct from a check failure.
 			res.Status = StatusError
-			res.Summary = truncate(err.Error(), maxSummaryLen)
+			res.Summary = truncate(sanitize(err.Error()), maxSummaryLen)
 		}
 	}
 
@@ -127,20 +128,32 @@ func (r *Runner) runCheck(ctx context.Context, dir string, c Check) Result {
 
 // summarize returns the last non-empty output line, or fallback.
 func summarize(out []byte, fallback string) string {
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimSpace(sanitize(string(out))), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		if line := strings.TrimSpace(lines[i]); line != "" {
 			return truncate(line, maxSummaryLen)
 		}
 	}
-	return truncate(fallback, maxSummaryLen)
+	return truncate(sanitize(fallback), maxSummaryLen)
+}
+
+// sanitize makes untrusted process output storable: Postgres TEXT rejects
+// NUL bytes and invalid UTF-8.
+func sanitize(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	return strings.ToValidUTF8(s, string(utf8.RuneError))
 }
 
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	cut := s[:n]
+	// Never split a rune: back off any partial encoding at the cut.
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "..."
 }
 
 // boundedWriter keeps the first limit bytes and discards the rest, so a

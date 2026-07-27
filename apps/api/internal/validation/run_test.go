@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func runOne(t *testing.T, c Check) Result {
@@ -95,5 +96,26 @@ func TestBoundedWriterTruncates(t *testing.T) {
 	}
 	if buf.String() != "abca" {
 		t.Fatalf("buffer = %q, want first 4 bytes", buf.String())
+	}
+}
+
+// TestRunSanitizesUntrustedOutput: check output is untrusted bytes; the
+// stored summary must be NUL-free valid UTF-8 or the insert would fail.
+func TestRunSanitizesUntrustedOutput(t *testing.T) {
+	res := runOne(t, Check{Name: "binary", Category: "custom",
+		Command: []string{"printf", `tests\0passed\370\n`}})
+	if strings.ContainsRune(res.Summary, 0) || !utf8.ValidString(res.Summary) {
+		t.Fatalf("summary = %q, want NUL-free valid UTF-8", res.Summary)
+	}
+	if !strings.Contains(res.Summary, "tests") {
+		t.Fatalf("summary = %q, want content preserved", res.Summary)
+	}
+}
+
+func TestTruncateNeverSplitsRunes(t *testing.T) {
+	s := "a" + strings.Repeat("é", maxSummaryLen)
+	got := truncate(s, maxSummaryLen)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncate produced invalid UTF-8: %q", got)
 	}
 }

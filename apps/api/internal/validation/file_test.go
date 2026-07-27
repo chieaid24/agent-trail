@@ -127,3 +127,23 @@ func TestLoad(t *testing.T) {
 		t.Fatal("Load accepted an oversized file")
 	}
 }
+
+// TestLoadRejectsNonRegularFiles: the validation file is agent-editable
+// input - a symlink (wherever it points) is an invalid file, never a
+// readable one.
+func TestLoadRejectsNonRegularFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".agent-trail"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "target.yaml")
+	if err := os.WriteFile(target, []byte(docExample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, FileName)); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := Load(dir); !found || err == nil {
+		t.Fatalf("Load(symlink) = found %v, err %v; want found with error", found, err)
+	}
+}

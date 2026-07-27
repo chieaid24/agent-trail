@@ -9,8 +9,8 @@ package validation
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -97,15 +97,40 @@ func Parse(data []byte) (File, error) {
 
 // Load reads and parses the validation file under workspaceDir. The second
 // return is false when the repository has no validation file; a present but
-// invalid file is an error.
+// invalid file is an error. The file is agent-editable input: resolution is
+// confined to the workspace, only a regular file is accepted (no symlink
+// targets), and reads are bounded by MaxFileBytes.
 func Load(workspaceDir string) (File, bool, error) {
-	data, err := os.ReadFile(filepath.Join(workspaceDir, FileName))
+	root, err := os.OpenRoot(workspaceDir)
+	if err != nil {
+		return File{}, false, fmt.Errorf("open workspace: %w", err)
+	}
+	defer root.Close()
+
+	fi, err := root.Lstat(FileName)
 	if errors.Is(err, os.ErrNotExist) {
 		return File{}, false, nil
 	}
 	if err != nil {
-		return File{}, false, fmt.Errorf("read validation file: %w", err)
+		return File{}, false, fmt.Errorf("stat validation file: %w", err)
 	}
+	if !fi.Mode().IsRegular() {
+		return File{}, true, errors.New("validation file must be a regular file")
+	}
+	if fi.Size() > MaxFileBytes {
+		return File{}, true, fmt.Errorf("validation file exceeds %d bytes", MaxFileBytes)
+	}
+
+	vf, err := root.Open(FileName)
+	if err != nil {
+		return File{}, true, fmt.Errorf("read validation file: %w", err)
+	}
+	defer vf.Close()
+	data, err := io.ReadAll(io.LimitReader(vf, MaxFileBytes+1))
+	if err != nil {
+		return File{}, true, fmt.Errorf("read validation file: %w", err)
+	}
+
 	f, err := Parse(data)
 	if err != nil {
 		return File{}, true, err
@@ -146,8 +171,8 @@ func (f File) validate() error {
 				c.Name, len(c.Command), MaxCommandArgs)
 		}
 		if c.TimeoutSeconds < 0 || c.TimeoutSeconds > MaxTimeoutSeconds {
-			return fmt.Errorf("check %q: timeout_seconds must be between 1 and %d",
-				c.Name, MaxTimeoutSeconds)
+			return fmt.Errorf("check %q: timeout_seconds must be between 0 and %d (0 applies the %ds default)",
+				c.Name, MaxTimeoutSeconds, DefaultTimeoutSeconds)
 		}
 		total += c.EffectiveTimeoutSeconds()
 	}
