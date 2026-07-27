@@ -29,9 +29,9 @@ PUT  /repositories/{repoId}/settings
 
 ### Tasks
 
-Implemented: list, create, get, cancel, events. The rest of the surface
-lands with its milestone (retry with the runner, commands/validations/
-evidence/artifacts with validation and evidence).
+Implemented: list, create, get, cancel, events, validations, evidence. The
+rest of the surface lands with its milestone (retry with the runner,
+commands with the real agent adapter, artifacts with GitHub publishing).
 
 Security limitation: the implemented task endpoints are currently
 unauthenticated - anyone who can reach the API can create and cancel tasks.
@@ -63,6 +63,12 @@ Implemented semantics:
 - `POST /tasks/{taskId}/cancel` takes an optional `{"reason": "..."}`;
   cancelling an already-cancelled task is an idempotent 200, other terminal
   states answer 409.
+- `GET /tasks/{taskId}/validations` returns every stored validation result
+  across the task's attempts, ordered by attempt then execution order, each
+  carrying its measured `exit_code`, `status`, and `trusted_execution`.
+- `GET /tasks/{taskId}/evidence` returns the latest attempt's evidence
+  report (JSON document plus rendered Markdown summary); 404 with
+  `no evidence report for task` until one exists.
 - Errors are `{"error": "message"}`: 400 malformed input, 404 unknown task,
   409 illegal transition or stale version, 503 when no database is
   configured.
