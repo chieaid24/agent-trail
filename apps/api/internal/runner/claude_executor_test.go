@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"log/slog"
 	"os"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
+	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 // stubClaudeCLI writes an executable /bin/sh stub standing in for the Claude
@@ -29,10 +32,12 @@ func stubClaudeCLI(t *testing.T, body string) string {
 	return path
 }
 
-func claudeExecutor(s *Store, ts *task.Store, cliPath string) *Executor {
+func claudeExecutor(db *sql.DB, s *Store, ts *task.Store, cliPath string) *Executor {
 	return &Executor{
 		Tasks:         ts,
 		Store:         s,
+		Validations:   validation.NewStore(db),
+		Evidence:      evidence.NewStore(db),
 		Adapter:       agent.NewClaudeCode(agent.ClaudeCodeOptions{CLIPath: cliPath}),
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		LeaseDuration: time.Minute,
@@ -52,7 +57,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"E
 // criterion: the real Claude Code adapter (backed by a stub CLI) completes a
 // fixture task end to end, with its normalized events on the timeline.
 func TestExecuteCompletesClaudeTaskEndToEnd(t *testing.T) {
-	_, s, ts := testStores(t)
+	db, s, ts := testStores(t)
 	ctx := context.Background()
 	r := mustRegister(t, s)
 	tk := mustCreateTask(t, ts)
@@ -61,7 +66,7 @@ func TestExecuteCompletesClaudeTaskEndToEnd(t *testing.T) {
 	if err != nil || c == nil {
 		t.Fatalf("claim = %+v, %v", c, err)
 	}
-	if err := claudeExecutor(s, ts, stubClaudeCLI(t, claudeStub)).Execute(ctx, r.ID, c); err != nil {
+	if err := claudeExecutor(db, s, ts, stubClaudeCLI(t, claudeStub)).Execute(ctx, r.ID, c); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,7 +97,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"no changes needed"
 // TestExecuteCompletesClaudeTaskWithoutPlan proves the executor does not
 // strand a task in planning when the provider emits no plan event.
 func TestExecuteCompletesClaudeTaskWithoutPlan(t *testing.T) {
-	_, s, ts := testStores(t)
+	db, s, ts := testStores(t)
 	ctx := context.Background()
 	r := mustRegister(t, s)
 	tk := mustCreateTask(t, ts)
@@ -101,7 +106,7 @@ func TestExecuteCompletesClaudeTaskWithoutPlan(t *testing.T) {
 	if err != nil || c == nil {
 		t.Fatalf("claim = %+v, %v", c, err)
 	}
-	if err := claudeExecutor(s, ts, stubClaudeCLI(t, planlessClaudeStub)).Execute(ctx, r.ID, c); err != nil {
+	if err := claudeExecutor(db, s, ts, stubClaudeCLI(t, planlessClaudeStub)).Execute(ctx, r.ID, c); err != nil {
 		t.Fatal(err)
 	}
 

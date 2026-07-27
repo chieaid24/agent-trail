@@ -20,20 +20,25 @@ type DBPinger interface {
 
 // Server holds the HTTP API dependencies.
 type Server struct {
-	logger  *slog.Logger
-	db      DBPinger     // nil when DATABASE_URL is not configured
-	tasks   TaskService  // nil when DATABASE_URL is not configured
-	webhook http.Handler // nil when the GitHub integration is not configured
-	metrics http.Handler // nil disables GET /metrics
+	logger      *slog.Logger
+	db          DBPinger          // nil when DATABASE_URL is not configured
+	tasks       TaskService       // nil when DATABASE_URL is not configured
+	validations ValidationService // nil when DATABASE_URL is not configured
+	evidence    EvidenceService   // nil when DATABASE_URL is not configured
+	webhook     http.Handler      // nil when the GitHub integration is not configured
+	metrics     http.Handler      // nil disables GET /metrics
 }
 
 var _ DBPinger = (*sql.DB)(nil)
 
 // New returns a Server. Nil dependencies degrade cleanly: readiness reports
 // the database as not configured, and the task API and webhook answer 503.
-func New(logger *slog.Logger, db DBPinger, tasks TaskService, webhook, metrics http.Handler) *Server {
+func New(logger *slog.Logger, db DBPinger, tasks TaskService,
+	validations ValidationService, ev EvidenceService,
+	webhook, metrics http.Handler) *Server {
 	return &Server{
 		logger: logger, db: db, tasks: tasks,
+		validations: validations, evidence: ev,
 		webhook: webhook, metrics: metrics,
 	}
 }
@@ -48,6 +53,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}", s.handleGetTask)
 	mux.HandleFunc("POST /api/v1/tasks/{taskId}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/events", s.handleTaskEvents)
+	mux.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
+	mux.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
 	mux.HandleFunc("POST /webhooks/github", s.handleWebhook)
 	if s.metrics != nil {
 		mux.Handle("GET /metrics", s.metrics)
