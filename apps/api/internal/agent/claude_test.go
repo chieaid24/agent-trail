@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -164,6 +165,36 @@ func TestClaudeCodeTimeout(t *testing.T) {
 	}
 }
 
+// TestClaudeCodeTimeoutKillsToolSubprocesses proves the whole process group
+// dies on timeout: a tool subprocess inheriting stdout must not outlive the
+// CLI and hold the session open.
+func TestClaudeCodeTimeoutKillsToolSubprocesses(t *testing.T) {
+	requireSh(t)
+	stub := `sleep 30 &
+exec sleep 30
+`
+	sess, err := NewClaudeCode(ClaudeCodeOptions{
+		CLIPath: stubCLI(t, stub),
+		Timeout: 150 * time.Millisecond,
+	}).Start(context.Background(), Request{WorkspaceDir: t.TempDir(), Instructions: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	events := drain(t, sess)
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("session ended after %v; orphaned subprocess held it open", d)
+	}
+	last := events[len(events)-1]
+	if last.Type != EventSessionFailed || reasonOf(t, last) != "timeout" {
+		t.Fatalf("last event = %s (%s), want session_failed timeout", last.Type, last.Payload)
+	}
+	if _, err := sess.Wait(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Wait err = %v, want DeadlineExceeded", err)
+	}
+}
+
 // TestClaudeCodeCancel proves Cancel stops the process mid-session.
 func TestClaudeCodeCancel(t *testing.T) {
 	requireSh(t)
@@ -239,6 +270,45 @@ func TestClaudeCodeValidateConfiguration(t *testing.T) {
 	if err := NewClaudeCode(ClaudeCodeOptions{CLIPath: cli, PinnedVersion: "9.9.9"}).
 		ValidateConfiguration(context.Background()); err == nil {
 		t.Fatal("mismatched pin validated ok")
+	}
+	// A pin is a whole version token, not a substring: "2.1" must not accept
+	// "2.1.3".
+	if err := NewClaudeCode(ClaudeCodeOptions{CLIPath: cli, PinnedVersion: "2.1"}).
+		ValidateConfiguration(context.Background()); err == nil {
+		t.Fatal("prefix pin validated ok")
+	}
+}
+
+// TestClaudeCodeRedactsCredentials proves every forwarded credential value is
+// stripped from failure detail before it reaches an event.
+func TestClaudeCodeRedactsCredentials(t *testing.T) {
+	requireSh(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key-123")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token-456")
+	stub := `echo "auth failed key=$ANTHROPIC_API_KEY token=$CLAUDE_CODE_OAUTH_TOKEN" >&2
+exit 1
+`
+	sess, err := NewClaudeCode(ClaudeCodeOptions{CLIPath: stubCLI(t, stub)}).
+		Start(context.Background(), Request{WorkspaceDir: t.TempDir(), Instructions: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drain(t, sess)
+	last := events[len(events)-1]
+	if last.Type != EventSessionFailed {
+		t.Fatalf("last event = %s, want %s", last.Type, EventSessionFailed)
+	}
+	payload := string(last.Payload)
+	for _, secret := range []string{"sk-test-key-123", "oauth-token-456"} {
+		if strings.Contains(payload, secret) {
+			t.Fatalf("failure detail leaked credential %q: %s", secret, payload)
+		}
+	}
+	if !strings.Contains(payload, "***") {
+		t.Fatalf("failure detail carries no redaction marker: %s", payload)
+	}
+	if _, err := sess.Wait(context.Background()); err == nil {
+		t.Fatal("Wait err = nil after CLI failure")
 	}
 }
 

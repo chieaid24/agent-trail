@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -84,11 +85,24 @@ func (c *ClaudeCode) ValidateConfiguration(ctx context.Context) error {
 		return fmt.Errorf("claude-code: %q --version failed: %w", path, err)
 	}
 	version := strings.TrimSpace(string(out))
-	if c.opts.PinnedVersion != "" && !strings.Contains(version, c.opts.PinnedVersion) {
+	if c.opts.PinnedVersion != "" && !pinMatches(version, c.opts.PinnedVersion) {
 		return fmt.Errorf("claude-code: CLI version %q does not match pinned %q",
 			version, c.opts.PinnedVersion)
 	}
 	return nil
+}
+
+// pinMatches reports whether pinned equals a whole token of the version
+// output, so pin "2.1.3" does not accept "2.1.30".
+func pinMatches(version, pinned string) bool {
+	for _, tok := range strings.FieldsFunc(version, func(r rune) bool {
+		return r == ' ' || r == '(' || r == ')'
+	}) {
+		if tok == pinned {
+			return true
+		}
+	}
+	return false
 }
 
 // Start implements Adapter. It launches the CLI, streams stdout in a
@@ -130,6 +144,15 @@ func (c *ClaudeCode) Start(ctx context.Context, req Request) (Session, error) {
 	cmd := exec.CommandContext(runCtx, c.opts.CLIPath, args...)
 	cmd.Dir = req.WorkspaceDir
 	cmd.Env = claudeEnv()
+	// The CLI spawns tool subprocesses that inherit stdout; killing only the
+	// CLI would leave them running and holding the pipe open, so the session
+	// would never end. Kill the whole process group instead, and force-close
+	// the pipes shortly after cancellation as a last resort.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -158,9 +181,13 @@ func (c *ClaudeCode) Start(ctx context.Context, req Request) (Session, error) {
 	return s, nil
 }
 
+// credentialEnv are the secret-bearing variables forwarded to the CLI; their
+// values are redacted from any failure detail before it is emitted or logged.
+var credentialEnv = []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"}
+
 // claudeEnv isolates the CLI from host configuration and interactive prompts
-// while passing through the credentials and PATH it needs. The API key is
-// forwarded from the process environment and never stored or logged here.
+// while passing through the credentials and PATH it needs. Credentials are
+// forwarded from the process environment and never stored here.
 func claudeEnv() []string {
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
@@ -171,7 +198,7 @@ func claudeEnv() []string {
 		"DISABLE_TELEMETRY=1",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 	}
-	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN"} {
+	for _, k := range append([]string{"ANTHROPIC_BASE_URL"}, credentialEnv...) {
 		if v := os.Getenv(k); v != "" {
 			env = append(env, k+"="+v)
 		}
@@ -191,12 +218,13 @@ type claudeSession struct {
 	done   chan struct{}
 	logger *slog.Logger
 
-	mu      sync.Mutex
-	files   map[string]struct{} // workspace paths written, for Result.FilesChanged
-	summary string
-	failed  bool
-	result  Result
-	err     error
+	mu        sync.Mutex
+	files     map[string]struct{} // workspace paths written, for Result.FilesChanged
+	sessionID string
+	summary   string
+	failed    bool
+	result    Result
+	err       error
 }
 
 func (s *claudeSession) Events() <-chan Event { return s.events }
@@ -303,6 +331,9 @@ func (s *claudeSession) normalize(line []byte, toolNames map[string]string, sawR
 		// Only the init record opens a session; other system records are
 		// provider housekeeping and carry no timeline meaning.
 		if l.Subtype == "init" {
+			s.mu.Lock()
+			s.sessionID = l.SessionID
+			s.mu.Unlock()
 			s.emit(EventSessionStarted, map[string]any{
 				"adapter": ClaudeProvider, "model": l.Model, "session_id": l.SessionID,
 			})
@@ -311,6 +342,8 @@ func (s *claudeSession) normalize(line []byte, toolNames map[string]string, sawR
 		s.normalizeContent(l.Message, toolNames)
 	case "user":
 		s.normalizeContent(l.Message, toolNames)
+	case "rate_limit_event":
+		// Provider housekeeping, no timeline meaning.
 	case "result":
 		*sawResult = true
 		s.emit(EventCostUpdate, map[string]any{
@@ -428,6 +461,7 @@ func (s *claudeSession) finish(ctxErr error, sawResult bool, scanErr, waitErr er
 		files = append(files, f)
 	}
 	sort.Strings(files)
+	sessionID := s.sessionID
 	summary := s.summary
 	alreadyFailed := s.failed
 	s.mu.Unlock()
@@ -454,7 +488,8 @@ func (s *claudeSession) finish(ctxErr error, sawResult bool, scanErr, waitErr er
 		s.err = ctxErr
 		s.mu.Unlock()
 		s.logger.LogAttrs(context.Background(), slog.LevelWarn, "claude session stopped",
-			slog.String("event", "agent_session_stopped"), slog.String("reason", reason))
+			slog.String("event", "agent_session_stopped"), slog.String("reason", reason),
+			slog.String("session_id", sessionID))
 		return
 	}
 	if alreadyFailed {
@@ -484,12 +519,15 @@ func (s *claudeSession) finish(ctxErr error, sawResult bool, scanErr, waitErr er
 // be stripped from failure detail before it reaches a log or an event.
 var credentialInURL = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
-// redact removes URL userinfo and the API key value from CLI output, and caps
-// its length, before it is emitted or logged.
+// redact removes URL userinfo and every forwarded credential value from CLI
+// output, and caps its length, before it is emitted or logged. Best-effort:
+// it can only strip values it knows.
 func (s *claudeSession) redact(msg string) string {
 	msg = credentialInURL.ReplaceAllString(msg, "$1***@")
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		msg = strings.ReplaceAll(msg, key, "***")
+	for _, k := range credentialEnv {
+		if v := os.Getenv(k); v != "" {
+			msg = strings.ReplaceAll(msg, v, "***")
+		}
 	}
 	if len(msg) > 4096 {
 		msg = msg[:4096] + "..."
