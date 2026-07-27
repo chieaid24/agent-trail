@@ -270,6 +270,16 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		slog.Int("files_changed", len(result.FilesChanged)),
 	)
 
+	// A provider may finish without ever emitting a plan (the plan event is
+	// what advances planning -> executing). Don't strand the task in planning:
+	// session end is the end of execution whether or not a plan was captured.
+	if status == task.StatusPlanning {
+		next, err := e.transition(ctx, c, task.StatusExecuting, "runner", "")
+		if err != nil {
+			return err
+		}
+		status = next
+	}
 	if status == task.StatusExecuting {
 		if _, err := e.transition(ctx, c, task.StatusValidating, "runner", ""); err != nil {
 			return err

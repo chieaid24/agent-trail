@@ -44,6 +44,24 @@ type Config struct {
 	GitHubAppID             string
 	GitHubAppPrivateKeyPath string
 	GitHubAPIBaseURL        string
+	// AgentProvider selects the agent adapter: "fake" (default) or
+	// "claude-code" (AGENT_PROVIDER). The remaining Agent* settings apply only
+	// to the Claude Code CLI adapter (docs/architecture/agent-providers.md).
+	AgentProvider string
+	// AgentCLIPath is the Claude Code executable, resolved from PATH when bare
+	// (AGENT_CLI_PATH, default "claude").
+	AgentCLIPath string
+	// AgentModel is the provider model; empty uses the CLI default (AGENT_MODEL).
+	AgentModel string
+	// AgentPermissionMode is the Claude Code permission mode
+	// (AGENT_PERMISSION_MODE, default "acceptEdits").
+	AgentPermissionMode string
+	// AgentCLIVersion, when set, pins the CLI version: it must appear in
+	// `claude --version` or the worker refuses to start (AGENT_CLI_VERSION).
+	AgentCLIVersion string
+	// AgentTimeout is the hard per-attempt agent runtime cap
+	// (AGENT_TIMEOUT_SECONDS).
+	AgentTimeout time.Duration
 }
 
 // GitHubEnabled reports whether the GitHub App integration is configured.
@@ -59,6 +77,11 @@ func Load() (Config, error) {
 		GitHubAppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
 		GitHubAPIBaseURL:        os.Getenv("GITHUB_API_BASE_URL"),
 		WorkspaceRoot:           envOr("WORKSPACE_ROOT", "/var/lib/agent-trail"),
+		AgentProvider:           envOr("AGENT_PROVIDER", "fake"),
+		AgentCLIPath:            envOr("AGENT_CLI_PATH", "claude"),
+		AgentModel:              os.Getenv("AGENT_MODEL"),
+		AgentPermissionMode:     envOr("AGENT_PERMISSION_MODE", "acceptEdits"),
+		AgentCLIVersion:         os.Getenv("AGENT_CLI_VERSION"),
 	}
 
 	if err := validateAddr(cfg.APIAddr); err != nil {
@@ -69,6 +92,19 @@ func Load() (Config, error) {
 	}
 	if err := validateGitHub(cfg); err != nil {
 		return Config{}, err
+	}
+	switch cfg.AgentProvider {
+	case "fake", "claude-code":
+	default:
+		return Config{}, fmt.Errorf("AGENT_PROVIDER %q: want fake or claude-code",
+			cfg.AgentProvider)
+	}
+	switch cfg.AgentPermissionMode {
+	case "default", "acceptEdits", "plan", "bypassPermissions":
+	default:
+		return Config{}, fmt.Errorf(
+			"AGENT_PERMISSION_MODE %q: want default, acceptEdits, plan, or bypassPermissions",
+			cfg.AgentPermissionMode)
 	}
 
 	level, err := parseLogLevel(envOr("LOG_LEVEL", "info"))
@@ -86,6 +122,7 @@ func Load() (Config, error) {
 		{&cfg.RunnerHeartbeat, "RUNNER_HEARTBEAT_SECONDS", 10},
 		{&cfg.RunnerLostAfter, "RUNNER_LOST_AFTER_SECONDS", 30},
 		{&cfg.WorkerPoll, "WORKER_POLL_SECONDS", 2},
+		{&cfg.AgentTimeout, "AGENT_TIMEOUT_SECONDS", 2700},
 	} {
 		secs, err := envSeconds(d.key, d.fallback)
 		if err != nil {

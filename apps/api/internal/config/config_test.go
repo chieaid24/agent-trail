@@ -14,6 +14,8 @@ func clearEnv(t *testing.T) {
 		"RUNNER_LEASE_SECONDS", "RUNNER_HEARTBEAT_SECONDS",
 		"RUNNER_LOST_AFTER_SECONDS", "WORKER_POLL_SECONDS",
 		"WORKSPACE_ROOT",
+		"AGENT_PROVIDER", "AGENT_CLI_PATH", "AGENT_MODEL",
+		"AGENT_PERMISSION_MODE", "AGENT_CLI_VERSION", "AGENT_TIMEOUT_SECONDS",
 	} {
 		t.Setenv(key, "")
 	}
@@ -41,6 +43,46 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.WorkspaceRoot != "/var/lib/agent-trail" {
 		t.Errorf("WorkspaceRoot = %q, want /var/lib/agent-trail", cfg.WorkspaceRoot)
+	}
+	if cfg.AgentProvider != "fake" || cfg.AgentCLIPath != "claude" ||
+		cfg.AgentPermissionMode != "acceptEdits" {
+		t.Errorf("agent defaults = %q/%q/%q, want fake/claude/acceptEdits",
+			cfg.AgentProvider, cfg.AgentCLIPath, cfg.AgentPermissionMode)
+	}
+	if cfg.AgentModel != "" || cfg.AgentCLIVersion != "" {
+		t.Errorf("agent model/version = %q/%q, want empty", cfg.AgentModel, cfg.AgentCLIVersion)
+	}
+	if cfg.AgentTimeout != 2700*time.Second {
+		t.Errorf("AgentTimeout = %v, want 2700s", cfg.AgentTimeout)
+	}
+}
+
+func TestLoadAgentProviderOverrideAndValidation(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("AGENT_PROVIDER", "claude-code")
+	t.Setenv("AGENT_CLI_PATH", "/usr/local/bin/claude")
+	t.Setenv("AGENT_MODEL", "claude-sonnet-5")
+	t.Setenv("AGENT_TIMEOUT_SECONDS", "600")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AgentProvider != "claude-code" || cfg.AgentCLIPath != "/usr/local/bin/claude" ||
+		cfg.AgentModel != "claude-sonnet-5" || cfg.AgentTimeout != 600*time.Second {
+		t.Errorf("agent overrides = %q/%q/%q/%v", cfg.AgentProvider,
+			cfg.AgentCLIPath, cfg.AgentModel, cfg.AgentTimeout)
+	}
+
+	clearEnv(t)
+	t.Setenv("AGENT_PROVIDER", "gpt")
+	if _, err := Load(); err == nil {
+		t.Error("AGENT_PROVIDER=gpt accepted, want error")
+	}
+
+	clearEnv(t)
+	t.Setenv("AGENT_PERMISSION_MODE", "yolo")
+	if _, err := Load(); err == nil {
+		t.Error("AGENT_PERMISSION_MODE=yolo accepted, want error")
 	}
 }
 

@@ -61,6 +61,6 @@ Requirements:
 - Distinguish test failures from infrastructure failures.
 - Never convert a failure into success based on agent text.
 
-Enforced limits (ADR-0008): 20 checks, 64 arguments per command, 1 MiB
+Enforced limits (ADR-0009): 20 checks, 64 arguments per command, 1 MiB
 file size, 300s default and 1800s maximum per-check timeout under a 3600s
 total budget.

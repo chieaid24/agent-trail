@@ -1,4 +1,4 @@
-# ADR-0009: Evidence schema
+# ADR-0010: Evidence schema
 
 - Status: accepted
 - Date: 2026-07-27

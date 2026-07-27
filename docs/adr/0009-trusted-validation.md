@@ -1,4 +1,4 @@
-# ADR-0008: Trusted validation
+# ADR-0009: Trusted validation
 
 - Status: accepted
 - Date: 2026-07-27
