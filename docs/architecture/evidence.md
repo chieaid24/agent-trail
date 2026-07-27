@@ -13,6 +13,10 @@ The report should answer:
 - What permissions were granted?
 - What human actions occurred?
 
+Schema v1 (ADR-0009) implements the task, execution, plan, changes,
+validation, risks, and unverified fields below; permissions, policy, and
+human-intervention fields arrive with their subsystems as measured facts.
+
 Example JSON:
 
 ```json

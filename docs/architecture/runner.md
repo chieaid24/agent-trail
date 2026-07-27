@@ -127,7 +127,9 @@ never `offline`).
 Because the runner and control plane share one process and one database,
 claiming goes straight through PostgreSQL (ADR-0003); the internal runner
 HTTP API in docs/architecture/api.md lands when runners move out of
-process (runner isolation milestone). Trusted validation and publishing
-are recorded as skipped on the timeline until milestones 6 and 7, and the
-fake flow auto-completes from awaiting_review - there is nothing published
-to review yet, so the human review gate becomes real with publishing.
+process (runner isolation milestone). Trusted validation runs in the
+workspace after editing ends (docs/architecture/validation.md, ADR-0008);
+publishing is recorded as skipped on the timeline until milestone 7, and
+the fake flow auto-completes from awaiting_review - there is nothing
+published to review yet, so the human review gate becomes real with
+publishing.

@@ -15,9 +15,10 @@ the life of the task.
 ## Decision
 
 Evidence is a versioned JSON document (`schema_version: 1`) generated per
-attempt from stored data only: the task row, the attempt's persisted trusted
-validation results, and the agent's event stream (plan, file changes,
-claimed commands). Claims are carried as validation entries with
+attempt from stored data: the task row, the attempt's persisted trusted
+validation results, its stored `started_at` (duration is measured against
+the generation-time clock), and the agent's event stream (plan, file
+changes, claimed commands). Claims are carried as validation entries with
 `trusted_execution = false`; fields nothing measured are omitted, never
 invented, and anything unverified is said outright in an `unverified` list.
 The document and a rendered Markdown summary are stored together in
@@ -45,8 +46,8 @@ Trail".
 
 ## Consequences
 
-- Reports are reproducible from the database alone; losing the workspace
-  loses no evidence.
+- Reports draw on the database alone (plus the clock behind
+  `duration_seconds`); losing the workspace loses no evidence.
 - A replayed generation (an owner recovering past its lease) is a no-op;
   the first report stands.
 - The spec's remaining fields (permissions, human interventions, runner

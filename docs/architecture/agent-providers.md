@@ -52,6 +52,8 @@ The fake adapter should:
 
 - Emit a plan
 - Edit a known fixture file
+- Write a fixture validation file, so the fake flow exercises trusted
+  validation end to end
 - Emit command events
 - Return a final summary
 

@@ -206,8 +206,10 @@ created_at
 Every state transition emits `task.<new-status>` (e.g. `task.queued`,
 `task.timed_out`), plus `task.created` when the task is inserted. The
 GitHub integration emits `github.comment.posted` and
-`github.check_run.created` for its side effects. Other families
-(workspace, agent, command, validation) arrive with their milestones.
+`github.check_run.created` for its side effects. The validation family is
+implemented: `validation.started`, `validation.check.completed`,
+`validation.completed`, and `evidence.generated`. Other families
+(workspace, agent, command) arrive with their milestones.
 Example event types:
 
 ```text
@@ -257,6 +259,10 @@ created_at
 
 ### Validation result
 
+Implemented (migration `00005_validation_and_evidence.sql`). One row per
+executed check per attempt; `trusted_execution` separates platform-run
+checks from agent-reported ones.
+
 ```text
 id
 task_attempt_id
@@ -302,6 +308,10 @@ created_at
 ```
 
 ### Evidence report
+
+Implemented (migration `00005_validation_and_evidence.sql`). One report
+per attempt (`task_attempt_id` unique); JSON document plus rendered
+Markdown summary.
 
 ```text
 id
