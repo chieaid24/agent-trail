@@ -57,6 +57,10 @@ The worker is the runner host (docs/architecture/runner.md). Beyond
   lost; must exceed the heartbeat interval
 - `WORKER_POLL_SECONDS` (2): idle claim-poll interval
 
+The worker also reads the agent adapter selection (`AGENT_PROVIDER` and the
+other `AGENT_*` variables) - see docs/architecture/agent-providers.md and
+`.env.example` for the list and defaults.
+
 ## Pre-commit hook
 
 The committed hook in `.githooks/` runs `scripts/gate.sh` - the exact CI
