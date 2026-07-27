@@ -78,6 +78,12 @@ func TestLoadAgentProviderOverrideAndValidation(t *testing.T) {
 	if _, err := Load(); err == nil {
 		t.Error("AGENT_PROVIDER=gpt accepted, want error")
 	}
+
+	clearEnv(t)
+	t.Setenv("AGENT_PERMISSION_MODE", "yolo")
+	if _, err := Load(); err == nil {
+		t.Error("AGENT_PERMISSION_MODE=yolo accepted, want error")
+	}
 }
 
 func TestLoadRejectsRelativeWorkspaceRoot(t *testing.T) {

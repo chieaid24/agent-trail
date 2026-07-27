@@ -99,6 +99,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("AGENT_PROVIDER %q: want fake or claude-code",
 			cfg.AgentProvider)
 	}
+	switch cfg.AgentPermissionMode {
+	case "default", "acceptEdits", "plan", "bypassPermissions":
+	default:
+		return Config{}, fmt.Errorf(
+			"AGENT_PERMISSION_MODE %q: want default, acceptEdits, plan, or bypassPermissions",
+			cfg.AgentPermissionMode)
+	}
 
 	level, err := parseLogLevel(envOr("LOG_LEVEL", "info"))
 	if err != nil {
