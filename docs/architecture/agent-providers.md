@@ -40,13 +40,11 @@ The web client should consume Agent Trail events, not raw provider formats.
 
 ### First provider
 
-Choose one after verifying current automation support:
+The first real provider is the Claude Code CLI (ADR-0008), documented
+below. Codex CLI/SDK and API-based agents land later behind the same
+interface.
 
-- Claude Code CLI
-- Codex CLI or SDK
-- API-based coding agent
-
-A fake adapter must be implemented first.
+A fake adapter is implemented first.
 
 The fake adapter should:
 
@@ -69,8 +67,8 @@ task is future work.
 | `AGENT_PROVIDER` | `fake` | `fake` or `claude-code` |
 | `AGENT_CLI_PATH` | `claude` | Claude Code executable, resolved from PATH when bare |
 | `AGENT_MODEL` | (CLI default) | provider model |
-| `AGENT_PERMISSION_MODE` | `acceptEdits` | Claude Code permission mode |
-| `AGENT_CLI_VERSION` | (unset) | required substring of `claude --version`; unset skips the check |
+| `AGENT_PERMISSION_MODE` | `acceptEdits` | one of `default`, `acceptEdits`, `plan`, `bypassPermissions` |
+| `AGENT_CLI_VERSION` | (unset) | required whole version token of `claude --version`; unset skips the check |
 | `AGENT_TIMEOUT_SECONDS` | `2700` | hard per-attempt runtime cap |
 
 The worker calls `ValidateConfiguration` once at startup and refuses to start
@@ -88,11 +86,13 @@ claude --print <instructions> --output-format stream-json --verbose \
 ```
 
 The CLI is exec'd directly with an argument array, never through a shell, so
-nothing in the instructions is interpreted by one. Its environment is reduced
-to PATH, HOME, and the Anthropic credentials; telemetry and the auto-updater
-are disabled. The `ANTHROPIC_API_KEY` passes through from the worker's
-environment and is redacted out of any failure detail before it reaches a log
-or an event.
+nothing in the instructions is interpreted by one. Print mode takes no
+follow-up input: `Session.Send` returns an error for this provider. Its
+environment is reduced to PATH, HOME, and the Anthropic settings
+(`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`);
+telemetry and the auto-updater are disabled. Credentials pass through from
+the worker's environment, and their values are redacted out of any failure
+detail before it reaches a log or an event.
 
 ### Stream normalization
 
@@ -111,23 +111,46 @@ nothing Claude-specific leaves the `agent` package.
 | user `tool_result` | `tool_output` (if content), then `tool_completed` |
 | `result` | `cost_update`, then `session_completed` or `session_failed` |
 
+Known housekeeping records (non-`init` `system` records, `rate_limit_event`)
+are ignored; a record type the normalizer does not know becomes a `warning`
+event rather than being dropped silently.
+
 `Result.Summary` is the final `result` text; `Result.FilesChanged` is the set
 of paths from file-writing tools. A non-success `result` subtype (for example
-`error_max_turns`) becomes `session_failed`.
+`error_max_turns`) becomes `session_failed`. `TodoWrite` fires on every todo
+update, so one session usually carries several `plan` events; the latest one
+is the current plan.
+
+A session may end without ever emitting a `plan` (the event that advances a
+task from planning to executing); the executor advances such a task to
+executing at session end rather than stranding it in planning.
 
 ### Timeout and cancellation
 
 `AGENT_TIMEOUT_SECONDS` and the caller's context both back the subprocess
-through `exec.CommandContext`: whichever fires first kills the CLI process. A
-timeout ends the session as `session_failed` with reason `timeout` and a
-`DeadlineExceeded` error; a `Cancel` ends it with reason `cancelled`. Either
-way the process is stopped, not left running.
+through `exec.CommandContext`: whichever fires first kills the CLI's whole
+process group, so tool subprocesses the CLI spawned die with it instead of
+surviving to hold the output pipe open. A timeout ends the session as
+`session_failed` with reason `timeout` and a `DeadlineExceeded` error; a
+`Cancel` ends it with reason `cancelled`. Either way the processes are
+stopped, not left running.
 
 ### Guarding against CLI changes
 
 The CLI is an external dependency that can change under us
 (docs/security/risks.md). Two guards apply: `AGENT_CLI_VERSION` pins the
-version at startup, and contract tests feed recorded stream-json through the
+version at startup (a whole version token, so `2.1.3` does not accept
+`2.1.30`), and contract tests feed recorded stream-json through the
 normalizer and assert the resulting neutral events, so a changed output shape
 fails a test rather than corrupting the timeline. The tests drive the adapter
 against a stub CLI, so the whole path runs with no model cost.
+
+### Security limitations
+
+The CLI runs unsandboxed on the worker host with the worker's `HOME`, so
+host Claude configuration and credentials are reachable from the agent
+process until runner isolation lands. The permission mode is validated
+against an allowlist, but `bypassPermissions` removes the CLI's own
+confirmation gate and belongs only on an isolated runner. Redaction is
+best-effort: it strips URL userinfo and the credential values the worker
+knows, nothing else.

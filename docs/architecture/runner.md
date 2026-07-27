@@ -114,15 +114,17 @@ heartbeat_at      -- last lease extension, for diagnostics
 
 `runner_id` records which runner ran the attempt and survives release.
 
-## Milestone 3 status
+## Status
 
 The runner currently lives inside `cmd/worker` as a `process` runner: it
 registers itself, heartbeats, reaps lost runners (`status = 'lost'` after
 `RUNNER_LOST_AFTER_SECONDS` without a heartbeat, plus a `runner.lost`
 timeline event on every attempt the loss strands), and drives claimed
-attempts through the fake agent adapter. Runner statuses are `online`,
-`lost`, and `offline` (deliberate shutdown; a heartbeat revives `lost` but
-never `offline`).
+attempts through the configured agent adapter - fake by default, or the
+Claude Code CLI (docs/architecture/agent-providers.md). A session that ends
+without emitting a plan still advances out of planning; the plan event is
+optional. Runner statuses are `online`, `lost`, and `offline` (deliberate
+shutdown; a heartbeat revives `lost` but never `offline`).
 
 Because the runner and control plane share one process and one database,
 claiming goes straight through PostgreSQL (ADR-0003); the internal runner
