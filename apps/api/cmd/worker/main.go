@@ -1,13 +1,15 @@
 // Command worker is the runner host: it registers a process runner, claims
-// task attempts with expiring leases, executes them with the fake agent
-// adapter (real adapters land with milestone 5), heartbeats the registry,
-// and reaps lost runners. Spec: docs/architecture/runner.md.
+// task attempts with expiring leases, executes them with the configured agent
+// adapter (fake by default, or the Claude Code CLI), heartbeats the registry,
+// and reaps lost runners. Spec: docs/architecture/runner.md and
+// docs/architecture/agent-providers.md.
 package main
 
 import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -55,6 +57,27 @@ func run() error {
 	if err != nil {
 		hostname = "unknown"
 	}
+	adapter, err := agent.New(agent.Options{
+		Provider:       cfg.AgentProvider,
+		CLIPath:        cfg.AgentCLIPath,
+		Model:          cfg.AgentModel,
+		PermissionMode: cfg.AgentPermissionMode,
+		PinnedVersion:  cfg.AgentCLIVersion,
+		Timeout:        cfg.AgentTimeout,
+		Logger:         logger,
+	})
+	if err != nil {
+		return err
+	}
+	// Fail fast on a misconfigured provider (missing or drifted CLI) before
+	// claiming any work, so it surfaces once at startup, not on every attempt.
+	validateCtx, validateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := adapter.ValidateConfiguration(validateCtx); err != nil {
+		validateCancel()
+		return fmt.Errorf("agent adapter %q: %w", adapter.Name(), err)
+	}
+	validateCancel()
+
 	store := runner.NewStore(db)
 	tasks := task.NewStore(db)
 	host := &runner.Host{
@@ -62,7 +85,7 @@ func run() error {
 		Executor: &runner.Executor{
 			Tasks:         tasks,
 			Store:         store,
-			Adapter:       agent.NewFake(),
+			Adapter:       adapter,
 			Logger:        logger,
 			LeaseDuration: cfg.RunnerLease,
 		},
@@ -80,6 +103,7 @@ func run() error {
 
 	logger.LogAttrs(ctx, slog.LevelInfo, "worker started",
 		slog.String("event", "worker_started"),
+		slog.String("agent_provider", adapter.Name()),
 	)
 	err = host.Run(ctx)
 	logger.LogAttrs(context.Background(), slog.LevelInfo, "worker shutting down",
