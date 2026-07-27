@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 func drain(t *testing.T, s Session) []Event {
@@ -46,7 +48,7 @@ func TestFakeSessionHappyPath(t *testing.T) {
 
 	events := drain(t, sess)
 	want := []EventType{
-		EventSessionStarted, EventPlan, EventFileWritten,
+		EventSessionStarted, EventPlan, EventFileWritten, EventFileWritten,
 		EventToolRequested, EventToolStarted, EventToolOutput,
 		EventToolCompleted, EventAssistantMessage, EventSessionCompleted,
 	}
@@ -75,7 +77,8 @@ func TestFakeSessionHappyPath(t *testing.T) {
 	if result.Summary == "" {
 		t.Fatal("empty summary")
 	}
-	if len(result.FilesChanged) != 1 || result.FilesChanged[0] != FixtureFile {
+	if len(result.FilesChanged) != 2 || result.FilesChanged[0] != FixtureFile ||
+		result.FilesChanged[1] != validation.FileName {
 		t.Fatalf("FilesChanged = %v", result.FilesChanged)
 	}
 
@@ -85,6 +88,12 @@ func TestFakeSessionHappyPath(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "Add refresh-token rotation.") {
 		t.Fatalf("fixture missing instructions:\n%s", content)
+	}
+
+	// The written validation file must itself parse under the platform's
+	// own limits, or every fake run would end in a config error.
+	if _, found, err := validation.Load(dir); err != nil || !found {
+		t.Fatalf("validation.Load = found %v, err %v", found, err)
 	}
 }
 

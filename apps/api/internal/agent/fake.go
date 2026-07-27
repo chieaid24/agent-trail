@@ -9,10 +9,25 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 // FixtureFile is the known file the fake adapter edits in the workspace.
 const FixtureFile = "AGENT_NOTES.md"
+
+// fixtureValidationFile is the validation file the fake adapter writes so
+// the fake flow exercises trusted validation end to end. In a real flow
+// the file ships with the repository checkout; the fake workspace has no
+// checkout, so the "repository content" comes from the adapter.
+const fixtureValidationFile = `version: 1
+
+validation:
+  - name: smoke
+    category: custom
+    command: ["true"]
+    timeout_seconds: 60
+`
 
 // fakeCommand is the command the fake adapter pretends to run. It is never
 // executed; the emitted exit code and output are simulated by design.
@@ -156,6 +171,21 @@ func (s *fakeSession) run(ctx context.Context, req Request) {
 		return
 	}
 
+	vfile := filepath.Join(req.WorkspaceDir, validation.FileName)
+	if err := os.MkdirAll(filepath.Dir(vfile), 0o755); err != nil {
+		fail("write validation file: " + err.Error())
+		return
+	}
+	if err := os.WriteFile(vfile, []byte(fixtureValidationFile), 0o644); err != nil {
+		fail("write validation file: " + err.Error())
+		return
+	}
+	s.emit(EventFileWritten, map[string]any{"path": validation.FileName})
+	if s.stopped(ctx) {
+		fail("cancelled")
+		return
+	}
+
 	// Simulated command: requested -> started -> output -> completed. The
 	// exit code is scripted, not measured (the fake runs nothing).
 	command := map[string]any{"command": fakeCommand[0], "args": fakeCommand[1:]}
@@ -176,6 +206,9 @@ func (s *fakeSession) run(ctx context.Context, req Request) {
 	s.emit(EventSessionCompleted, map[string]any{"summary": summary})
 
 	s.mu.Lock()
-	s.result = Result{Summary: summary, FilesChanged: []string{FixtureFile}}
+	s.result = Result{
+		Summary:      summary,
+		FilesChanged: []string{FixtureFile, validation.FileName},
+	}
 	s.mu.Unlock()
 }

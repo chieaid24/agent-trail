@@ -2,14 +2,19 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
+	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 // agentEventTypes maps normalized adapter events to activity-event types
@@ -31,14 +36,16 @@ var agentEventTypes = map[agent.EventType]string{
 	agent.EventSessionFailed:    "agent.failed",
 }
 
-// Executor drives one claimed attempt through the fake flow: workspace,
-// agent session, stubbed validation and publishing, completion. It owns the
-// lease for the duration and releases it on every exit path.
+// Executor drives one claimed attempt through the flow: workspace, agent
+// session, trusted validation, evidence, stubbed publishing, completion.
+// It owns the lease for the duration and releases it on every exit path.
 type Executor struct {
-	Tasks   *task.Store
-	Store   *Store
-	Adapter agent.Adapter
-	Logger  *slog.Logger
+	Tasks       *task.Store
+	Store       *Store
+	Validations *validation.Store
+	Evidence    *evidence.Store
+	Adapter     agent.Adapter
+	Logger      *slog.Logger
 	// LeaseDuration is the claim lease; the executor extends it at a third
 	// of this interval while it works.
 	LeaseDuration time.Duration
@@ -119,25 +126,28 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 
 	// The agent must run unless a previous owner already got the task past
 	// executing (its workspace died with it; later stages don't need one).
+	// Trusted validation and evidence run inside the agent stages, while
+	// the workspace still exists, so a completed pass leaves publishing.
 	if status == task.StatusProvisioning || status == task.StatusPlanning ||
 		status == task.StatusExecuting {
 		if err := e.runAgentStages(ctx, log, c, status); err != nil {
 			return err
 		}
-		status = task.StatusValidating
+		status = task.StatusPublishing
 	}
 
 	if status == task.StatusValidating {
-		// Trusted validation lands with milestone 6; record the skip
-		// honestly instead of inventing a result.
-		skip := map[string]any{
-			"status": "skipped",
-			"reason": "trusted validation lands with milestone 6",
-		}
-		if err := e.append(ctx, c, "validation.started", "runner", skip); err != nil {
+		// Recovery only: the previous owner died mid-validating and its
+		// workspace died with it, so the remaining checks cannot run.
+		// Record the infrastructure failure honestly - never a pass - and
+		// build evidence from whatever it managed to store.
+		if err := e.append(ctx, c, "validation.completed", "runner", map[string]any{
+			"status": string(validation.StatusError),
+			"reason": workspaceLostNote,
+		}); err != nil {
 			return err
 		}
-		if err := e.append(ctx, c, "validation.completed", "runner", skip); err != nil {
+		if err := e.generateEvidence(ctx, c, workspaceLostNote); err != nil {
 			return err
 		}
 		next, err := e.transition(ctx, c, task.StatusPublishing, "runner", "")
@@ -177,7 +187,8 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 }
 
 // runAgentStages provisions a workspace, runs the agent session, streams
-// its events into the timeline, and leaves the task in validating.
+// its events into the timeline, then runs trusted validation and evidence
+// while the workspace still exists, leaving the task in publishing.
 func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Claim, status task.Status) error {
 	if err := e.append(ctx, c, "workspace.provisioning", "runner", nil); err != nil {
 		return err
@@ -264,7 +275,214 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 			return err
 		}
 	}
+
+	// The workspace dies with this function (deferred cleanup above), so
+	// everything that needs it on disk happens before returning.
+	note, err := e.runTrustedValidation(ctx, c, workspace)
+	if err != nil {
+		return err
+	}
+	if err := e.generateEvidence(ctx, c, note); err != nil {
+		return err
+	}
+	if _, err := e.transition(ctx, c, task.StatusPublishing, "runner", ""); err != nil {
+		return err
+	}
 	return nil
+}
+
+// workspaceLostNote explains an unrunnable recovery-path validation.
+const workspaceLostNote = "the workspace was lost before trusted validation completed"
+
+// runTrustedValidation loads the repository validation file and executes
+// its checks in the workspace, storing each result before announcing it.
+// The returned note is non-empty when the checks could not run (no file,
+// invalid file) and says why; a failing check is a result, never an error.
+func (e *Executor) runTrustedValidation(ctx context.Context, c *Claim, workspace string) (string, error) {
+	if err := e.append(ctx, c, "validation.started", "runner", map[string]any{
+		"trusted_execution": true,
+	}); err != nil {
+		return "", err
+	}
+
+	file, found, err := validation.Load(workspace)
+	if !found && err == nil {
+		note := "no validation file at " + validation.FileName
+		if err := e.append(ctx, c, "validation.completed", "runner", map[string]any{
+			"status": "skipped", "reason": note,
+		}); err != nil {
+			return "", err
+		}
+		return note, nil
+	}
+	if err != nil {
+		// An unreadable or invalid file is an infrastructure-class
+		// outcome: the checks never ran, which is not a check failure
+		// and must never read as a pass.
+		note := "invalid validation file: " + err.Error()
+		if appendErr := e.append(ctx, c, "validation.completed", "runner", map[string]any{
+			"status": string(validation.StatusError), "reason": note,
+		}); appendErr != nil {
+			return "", appendErr
+		}
+		return note, nil
+	}
+
+	runner := &validation.Runner{Logger: e.Logger}
+	var insertErr, eventErr error
+	results := runner.Run(ctx, workspace, file, func(r validation.Result) {
+		if insertErr != nil || eventErr != nil {
+			return
+		}
+		// Persist before announcing: the stored exit code is the record
+		// of what happened, independent of anything the agent claimed.
+		if insertErr = e.Validations.Insert(ctx, c.AttemptID, r); insertErr != nil {
+			return
+		}
+		payload := map[string]any{
+			"name":              r.Name,
+			"category":          r.Category,
+			"status":            string(r.Status),
+			"duration_ms":       r.DurationMS,
+			"trusted_execution": true,
+			"summary":           r.Summary,
+		}
+		if r.ExitCode != nil {
+			payload["exit_code"] = *r.ExitCode
+		}
+		eventErr = e.append(ctx, c, "validation.check.completed", "runner", payload)
+	})
+	if insertErr != nil {
+		return "", insertErr
+	}
+	if eventErr != nil {
+		return "", eventErr
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	counts := map[validation.Status]int{}
+	for _, r := range results {
+		counts[r.Status]++
+	}
+	overall := string(validation.StatusPassed)
+	if len(results) != counts[validation.StatusPassed] {
+		overall = string(validation.StatusFailed)
+	}
+	if err := e.append(ctx, c, "validation.completed", "runner", map[string]any{
+		"status":            overall,
+		"trusted_execution": true,
+		"checks":            len(results),
+		"passed":            counts[validation.StatusPassed],
+		"failed":            counts[validation.StatusFailed],
+		"timed_out":         counts[validation.StatusTimedOut],
+		"errors":            counts[validation.StatusError],
+	}); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+// generateEvidence assembles and stores the attempt's evidence report from
+// what was actually recorded: stored trusted results, the agent's event
+// stream (plan, file changes, claimed commands), and the task row.
+func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNote string) error {
+	t, err := e.Tasks.Get(ctx, c.TaskID)
+	if err != nil {
+		return fmt.Errorf("evidence: %w", err)
+	}
+	trusted, err := e.Validations.ListForAttempt(ctx, c.AttemptID)
+	if err != nil {
+		return fmt.Errorf("evidence: %w", err)
+	}
+	events, err := e.Tasks.Events(ctx, c.TaskID, 1000)
+	if err != nil {
+		return fmt.Errorf("evidence: %w", err)
+	}
+
+	var plan, files []string
+	seenFiles := map[string]bool{}
+	var claimed []evidence.CheckResult
+	for _, ev := range events {
+		if ev.TaskAttemptID != c.AttemptID || ev.Source != "agent" {
+			continue
+		}
+		switch ev.EventType {
+		case "plan.created":
+			var p struct {
+				Plan string `json:"plan"`
+			}
+			if json.Unmarshal(ev.Payload, &p) == nil && p.Plan != "" {
+				plan = planSteps(p.Plan)
+			}
+		case "file.changed":
+			var p struct {
+				Path string `json:"path"`
+			}
+			if json.Unmarshal(ev.Payload, &p) == nil && p.Path != "" && !seenFiles[p.Path] {
+				seenFiles[p.Path] = true
+				files = append(files, p.Path)
+			}
+		case "command.completed":
+			// Commands the agent says it ran are recorded as claims: they
+			// never gain trusted_execution and never alter a stored result.
+			var p struct {
+				Command  string `json:"command"`
+				ExitCode *int   `json:"exit_code"`
+			}
+			if json.Unmarshal(ev.Payload, &p) == nil && p.Command != "" {
+				status := string(validation.StatusFailed)
+				if p.ExitCode != nil && *p.ExitCode == 0 {
+					status = string(validation.StatusPassed)
+				}
+				claimed = append(claimed, evidence.CheckResult{
+					Name:             p.Command,
+					Category:         "custom",
+					Status:           status,
+					TrustedExecution: false,
+					ExitCode:         p.ExitCode,
+				})
+			}
+		}
+	}
+
+	var duration *int64
+	if t.StartedAt != nil {
+		d := int64(time.Since(*t.StartedAt).Seconds())
+		duration = &d
+	}
+	report := evidence.Generate(evidence.Params{
+		Task:            t,
+		AgentProvider:   e.Adapter.Name(),
+		DurationSeconds: duration,
+		Plan:            plan,
+		FilesChanged:    files,
+		Trusted:         trusted,
+		AgentReported:   claimed,
+		ValidationNote:  validationNote,
+	})
+	if err := e.Evidence.Insert(ctx, c.AttemptID, report, evidence.Markdown(report)); err != nil {
+		return fmt.Errorf("evidence: %w", err)
+	}
+	return e.append(ctx, c, "evidence.generated", "runner", map[string]any{
+		"schema_version": report.SchemaVersion,
+		"trusted_checks": len(trusted),
+	})
+}
+
+var planStepRe = regexp.MustCompile(`^\s*\d+[.)]\s*`)
+
+// planSteps splits plan text into steps, dropping list numbering.
+func planSteps(text string) []string {
+	var steps []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(planStepRe.ReplaceAllString(line, ""))
+		if line != "" {
+			steps = append(steps, line)
+		}
+	}
+	return steps
 }
 
 // transition applies one runner-driven task transition. The idempotency key

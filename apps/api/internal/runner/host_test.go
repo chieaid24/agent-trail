@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
@@ -20,14 +19,8 @@ func TestHostWorksQueueUntilStopped(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	host := &Host{
-		Store: s,
-		Executor: &Executor{
-			Tasks:         ts,
-			Store:         s,
-			Adapter:       agent.NewFake(),
-			Logger:        logger,
-			LeaseDuration: time.Minute,
-		},
+		Store:         s,
+		Executor:      testExecutor(db, s, ts),
 		Logger:        logger,
 		RunnerType:    "process",
 		HostnameOrPod: "host-test",

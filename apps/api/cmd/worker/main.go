@@ -18,9 +18,11 @@ import (
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
+	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/runner"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 func main() {
@@ -62,6 +64,8 @@ func run() error {
 		Executor: &runner.Executor{
 			Tasks:         tasks,
 			Store:         store,
+			Validations:   validation.NewStore(db),
+			Evidence:      evidence.NewStore(db),
 			Adapter:       agent.NewFake(),
 			Logger:        logger,
 			LeaseDuration: cfg.RunnerLease,
