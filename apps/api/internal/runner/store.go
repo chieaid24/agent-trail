@@ -254,6 +254,25 @@ func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.D
 	return &c, nil
 }
 
+// AttemptStartedAt returns the attempt's stored started_at, nil when the
+// attempt has not started (or does not exist).
+func (s *Store) AttemptStartedAt(ctx context.Context, attemptID string) (*time.Time, error) {
+	var startedAt sql.NullTime
+	err := s.db.QueryRowContext(ctx,
+		`SELECT started_at FROM task_attempts WHERE id = $1`,
+		attemptID).Scan(&startedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("attempt started_at: %w", err)
+	}
+	if !startedAt.Valid {
+		return nil, nil
+	}
+	return &startedAt.Time, nil
+}
+
 // ExtendLease pushes the expiry of a lease the runner still holds. A lease
 // that already expired is not resurrected -- another runner may have claimed
 // the attempt -- so the caller must stop working on ErrLeaseLost.

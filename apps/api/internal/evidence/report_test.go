@@ -126,3 +126,20 @@ func TestMarkdownWithoutTrustedChecks(t *testing.T) {
 		t.Fatalf("markdown does not surface the note:\n%s", md)
 	}
 }
+
+// TestGenerateAppendsCallerCaveats: measured caveats (a truncated event
+// read) land in the unverified list.
+func TestGenerateAppendsCallerCaveats(t *testing.T) {
+	p := testParams()
+	p.Unverified = []string{"event stream truncated at 1000 events"}
+	r := Generate(p)
+	found := false
+	for _, u := range r.Unverified {
+		if strings.Contains(u, "truncated") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unverified = %v, want caller caveat", r.Unverified)
+	}
+}

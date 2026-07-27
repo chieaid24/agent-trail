@@ -278,7 +278,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 
 	// The workspace dies with this function (deferred cleanup above), so
 	// everything that needs it on disk happens before returning.
-	note, err := e.runTrustedValidation(ctx, c, workspace)
+	note, err := e.runTrustedValidation(ctx, log, c, workspace)
 	if err != nil {
 		return err
 	}
@@ -294,11 +294,14 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 // workspaceLostNote explains an unrunnable recovery-path validation.
 const workspaceLostNote = "the workspace was lost before trusted validation completed"
 
+// evidenceEventLimit bounds the event-stream read behind one report.
+const evidenceEventLimit = 1000
+
 // runTrustedValidation loads the repository validation file and executes
 // its checks in the workspace, storing each result before announcing it.
 // The returned note is non-empty when the checks could not run (no file,
 // invalid file) and says why; a failing check is a result, never an error.
-func (e *Executor) runTrustedValidation(ctx context.Context, c *Claim, workspace string) (string, error) {
+func (e *Executor) runTrustedValidation(ctx context.Context, log *slog.Logger, c *Claim, workspace string) (string, error) {
 	if err := e.append(ctx, c, "validation.started", "runner", map[string]any{
 		"trusted_execution": true,
 	}); err != nil {
@@ -328,7 +331,7 @@ func (e *Executor) runTrustedValidation(ctx context.Context, c *Claim, workspace
 		return note, nil
 	}
 
-	runner := &validation.Runner{Logger: e.Logger}
+	runner := &validation.Runner{Logger: log}
 	var insertErr, eventErr error
 	results := runner.Run(ctx, workspace, file, func(r validation.Result) {
 		if insertErr != nil || eventErr != nil {
@@ -366,9 +369,15 @@ func (e *Executor) runTrustedValidation(ctx context.Context, c *Claim, workspace
 	for _, r := range results {
 		counts[r.Status]++
 	}
+	// The aggregate keeps the check/infrastructure distinction: failed
+	// means a check measurably failed; error means checks could not all
+	// run (timeout or infrastructure) while none failed.
 	overall := string(validation.StatusPassed)
-	if len(results) != counts[validation.StatusPassed] {
+	switch {
+	case counts[validation.StatusFailed] > 0:
 		overall = string(validation.StatusFailed)
+	case len(results) != counts[validation.StatusPassed]:
+		overall = string(validation.StatusError)
 	}
 	if err := e.append(ctx, c, "validation.completed", "runner", map[string]any{
 		"status":            overall,
@@ -396,9 +405,15 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 	if err != nil {
 		return fmt.Errorf("evidence: %w", err)
 	}
-	events, err := e.Tasks.Events(ctx, c.TaskID, 1000)
+	events, err := e.Tasks.Events(ctx, c.TaskID, evidenceEventLimit)
 	if err != nil {
 		return fmt.Errorf("evidence: %w", err)
+	}
+	var unverified []string
+	if len(events) == evidenceEventLimit {
+		unverified = append(unverified, fmt.Sprintf(
+			"event stream truncated at %d events; plan, file, and command claims may be incomplete",
+			evidenceEventLimit))
 	}
 
 	var plan, files []string
@@ -432,9 +447,14 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 				ExitCode *int   `json:"exit_code"`
 			}
 			if json.Unmarshal(ev.Payload, &p) == nil && p.Command != "" {
-				status := string(validation.StatusFailed)
-				if p.ExitCode != nil && *p.ExitCode == 0 {
-					status = string(validation.StatusPassed)
+				// A claim without an exit code stays unknown: inventing
+				// a pass or a failure would both be unmeasured.
+				status := "unknown"
+				if p.ExitCode != nil {
+					status = string(validation.StatusFailed)
+					if *p.ExitCode == 0 {
+						status = string(validation.StatusPassed)
+					}
 				}
 				claimed = append(claimed, evidence.CheckResult{
 					Name:             p.Command,
@@ -447,20 +467,31 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 		}
 	}
 
+	// Duration is the attempt's wall clock from its stored started_at;
+	// the task's own start would fold earlier attempts into this one.
 	var duration *int64
-	if t.StartedAt != nil {
-		d := int64(time.Since(*t.StartedAt).Seconds())
+	if startedAt, err := e.Store.AttemptStartedAt(ctx, c.AttemptID); err != nil {
+		return fmt.Errorf("evidence: %w", err)
+	} else if startedAt != nil {
+		d := int64(time.Since(*startedAt).Seconds())
 		duration = &d
+	}
+	// Prefer the provider recorded on the task row; the live adapter name
+	// is the fallback so the report never guesses.
+	provider := e.Adapter.Name()
+	if t.AgentProvider != nil {
+		provider = *t.AgentProvider
 	}
 	report := evidence.Generate(evidence.Params{
 		Task:            t,
-		AgentProvider:   e.Adapter.Name(),
+		AgentProvider:   provider,
 		DurationSeconds: duration,
 		Plan:            plan,
 		FilesChanged:    files,
 		Trusted:         trusted,
 		AgentReported:   claimed,
 		ValidationNote:  validationNote,
+		Unverified:      unverified,
 	})
 	if err := e.Evidence.Insert(ctx, c.AttemptID, report, evidence.Markdown(report)); err != nil {
 		return fmt.Errorf("evidence: %w", err)

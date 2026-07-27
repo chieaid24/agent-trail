@@ -78,6 +78,9 @@ type Params struct {
 	// ValidationNote is non-empty when trusted validation did not run
 	// (no file, invalid file, workspace lost) and says why.
 	ValidationNote string
+	// Unverified are extra caveats the caller measured (for example a
+	// truncated event read); they land in the report's unverified list.
+	Unverified []string
 }
 
 // Generate assembles the evidence report from measured inputs.
@@ -132,5 +135,6 @@ func Generate(p Params) Report {
 			"%d agent-reported check(s) were not independently executed",
 			len(p.AgentReported)))
 	}
+	r.Unverified = append(r.Unverified, p.Unverified...)
 	return r
 }
