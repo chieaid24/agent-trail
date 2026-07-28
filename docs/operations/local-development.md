@@ -38,7 +38,7 @@ make migrate           # apply database migrations (goose)
 make seed              # demo tasks (skips when tasks already exist)
 make test              # unit tests, both apps
 make integration-test  # adds the suites that need a real database
-make e2e               # browser suite - lands with milestone 8
+make e2e               # browser suite against its own disposable stack
 make demo              # scripted issue-to-PR demo - lands with milestone 7
 make clean             # stop infra, drop volumes, remove build artifacts
 make hooks             # activate the pre-commit hook (once per clone)
@@ -69,6 +69,26 @@ gate - before every commit. Activate it once per clone:
 ```bash
 make hooks             # git config core.hooksPath .githooks
 ```
+
+## Browser e2e suite
+
+`make e2e` runs the Playwright suite in `apps/web/e2e/`. Its global setup
+boots a stack of its own - a dedicated postgres (compose project
+`agent-trail-e2e`), migrations, seed data, and freshly built api and worker
+binaries running the fake adapter - so it never touches the `make dev`
+infrastructure, and tears everything down afterwards. The suite exercises
+the dashboard against genuinely executed tasks, including an api restart
+under an open SSE stream.
+
+Parallel checkouts override the namespace and ports:
+
+```bash
+E2E_PROJECT=agent-trail-e2e-lane E2E_POSTGRES_PORT=5468 \
+E2E_API_PORT=8108 E2E_WEB_PORT=3068 make e2e
+```
+
+Audit screenshots land in `apps/web/e2e/screenshots/`; the curated set for
+the dashboard milestone is committed under `docs/screenshots/m8-dashboard/`.
 
 ## Demo repository
 

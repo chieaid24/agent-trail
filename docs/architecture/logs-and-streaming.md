@@ -4,6 +4,15 @@
 
 Every task attempt receives a monotonic sequence number.
 
+### Current implementation
+
+The dashboard's terminal log view is derived from `command.*` activity
+events (`command.started`, `command.output` chunks, `command.completed`),
+delivered over the SSE stream (docs/architecture/api.md: Streaming) and
+rebuilt client-side into a virtualized transcript. The dedicated log store
+below is not built yet; until it exists, command output lives in event
+payloads and is bounded by the activity-event path.
+
 ### Storage
 
 Do not store unlimited log output in PostgreSQL.
