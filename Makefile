@@ -40,9 +40,9 @@ integration-test:
 e2e:
 	@echo "e2e: not implemented yet; lands with the dashboard (milestone 8)" >&2; exit 1
 
-## demo: scripted issue-to-PR demo (lands with publishing, milestone 7)
+## demo: scripted issue-to-PR demo against a simulated GitHub (needs infra)
 demo:
-	@echo "demo: not implemented yet; lands with publishing (milestone 7)" >&2; exit 1
+	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/demo
 
 ## clean: stop infra, drop volumes, remove build artifacts
 clean:
