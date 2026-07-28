@@ -76,3 +76,9 @@ Limitation: the per-repository fetch lock that serializes clone and fetch is
 process-local. A single runner process per host is safe; sharing one on-disk
 cache across processes on a host would need a cross-process file lock, deferred
 until a deployment needs it.
+
+Limitation: the credentialed clone URL persists the installation token in the
+mirror's on-disk `.git/config` between operations. It is never logged and is
+redacted from errors, and `EnsureMirror` resets a stale one on the next refresh,
+but the token is present at rest on the runner's disk for the life of the cache
+entry. Treat host-disk access as token-equivalent.
