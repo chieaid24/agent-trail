@@ -254,6 +254,45 @@ func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.D
 	return &c, nil
 }
 
+// RecordAttemptBase stores the base commit the attempt's workspace was cut
+// from. Idempotent: the first recorded value wins.
+func (s *Store) RecordAttemptBase(ctx context.Context, attemptID, baseSHA string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET base_commit_sha = COALESCE(base_commit_sha, $2)
+		WHERE id = $1`, attemptID, baseSHA)
+	if err != nil {
+		return fmt.Errorf("record attempt base: %w", err)
+	}
+	return nil
+}
+
+// RecordFinalCommit stores the attempt's published commit SHA. Idempotent:
+// the first recorded value wins.
+func (s *Store) RecordFinalCommit(ctx context.Context, attemptID, sha string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET final_commit_sha = COALESCE(final_commit_sha, $2)
+		WHERE id = $1`, attemptID, sha)
+	if err != nil {
+		return fmt.Errorf("record final commit: %w", err)
+	}
+	return nil
+}
+
+// RecordPullRequest stores the attempt's pull request number. Idempotent:
+// the first recorded value wins.
+func (s *Store) RecordPullRequest(ctx context.Context, attemptID string, number int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET pull_request_number = COALESCE(pull_request_number, $2)
+		WHERE id = $1`, attemptID, number)
+	if err != nil {
+		return fmt.Errorf("record pull request: %w", err)
+	}
+	return nil
+}
+
 // AttemptStartedAt returns the attempt's stored started_at, nil when the
 // attempt has not started (or does not exist).
 func (s *Store) AttemptStartedAt(ctx context.Context, attemptID string) (*time.Time, error) {

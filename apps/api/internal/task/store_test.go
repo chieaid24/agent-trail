@@ -450,3 +450,47 @@ func ids(tasks []Task) []string {
 	}
 	return out
 }
+
+func TestEnsureGitContextFirstWriterWins(t *testing.T) {
+	ts := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+	tk, err := ts.Create(ctx, CreateParams{Title: "git context", Instructions: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sha1 := "1111111111111111111111111111111111111111"
+	base, branch, err := ts.EnsureGitContext(ctx, tk.ID, sha1, "agent-trail/first")
+	if err != nil || base != sha1 || branch != "agent-trail/first" {
+		t.Fatalf("EnsureGitContext = %q, %q, %v", base, branch, err)
+	}
+
+	// A recovered owner re-resolving keeps the original values.
+	sha2 := "2222222222222222222222222222222222222222"
+	base, branch, err = ts.EnsureGitContext(ctx, tk.ID, sha2, "agent-trail/second")
+	if err != nil || base != sha1 || branch != "agent-trail/first" {
+		t.Fatalf("second EnsureGitContext = %q, %q, %v", base, branch, err)
+	}
+
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BaseCommitSHA == nil || *got.BaseCommitSHA != sha1 ||
+		got.WorkingBranch == nil || *got.WorkingBranch != "agent-trail/first" {
+		t.Fatalf("stored context = %+v", got)
+	}
+	if got.Version <= tk.Version {
+		t.Fatalf("version = %d, want > %d", got.Version, tk.Version)
+	}
+}
+
+func TestEnsureGitContextUnknownTask(t *testing.T) {
+	ts := NewStore(dbtest.Open(t))
+	_, _, err := ts.EnsureGitContext(context.Background(),
+		"00000000-0000-0000-0000-000000000000",
+		"1111111111111111111111111111111111111111", "agent-trail/x")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}

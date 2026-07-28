@@ -121,6 +121,31 @@ func (s *Store) Get(ctx context.Context, id string) (Task, error) {
 	return t, nil
 }
 
+// EnsureGitContext records the resolved base commit and working branch on
+// the task. First writer wins: a recovered attempt re-resolving the context
+// keeps the original values, so the branch and base stay stable across
+// owners. It returns the effective stored values.
+func (s *Store) EnsureGitContext(ctx context.Context, id, baseCommitSHA, workingBranch string) (base, branch string, err error) {
+	if !IsUUID(id) {
+		return "", "", ErrNotFound
+	}
+	err = s.db.QueryRowContext(ctx, `
+		UPDATE tasks
+		SET base_commit_sha = COALESCE(base_commit_sha, $2),
+			working_branch = COALESCE(working_branch, $3),
+			version = version + 1, updated_at = now()
+		WHERE id = $1
+		RETURNING base_commit_sha, working_branch`,
+		id, baseCommitSHA, workingBranch).Scan(&base, &branch)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("ensure git context: %w", err)
+	}
+	return base, branch, nil
+}
+
 // List returns tasks newest-first, optionally filtered by status.
 func (s *Store) List(ctx context.Context, p ListParams) ([]Task, error) {
 	limit := p.Limit

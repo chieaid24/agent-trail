@@ -89,6 +89,27 @@ func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace
 	}, nil
 }
 
+// Lookup rebuilds the workspace for an attempt whose worktree still exists
+// on this host (a recovered owner reattaching), or ok=false when it is gone.
+// The caller supplies the branch and base recorded on the task; Lookup only
+// verifies the directory is a live worktree.
+func (m *Manager) Lookup(attemptID string, repo RepoRef, branch, baseSHA string) (Workspace, bool) {
+	if !validComponent(attemptID) {
+		return Workspace{}, false
+	}
+	path := filepath.Join(m.workDir, attemptID)
+	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+		return Workspace{}, false
+	}
+	return Workspace{
+		AttemptID: attemptID,
+		Repo:      repo,
+		Path:      path,
+		Branch:    branch,
+		BaseSHA:   baseSHA,
+	}, true
+}
+
 // verifyBaseSHA confirms sha names an existing commit in the mirror and
 // resolves to exactly that object (never a prefix or a different ref).
 func (m *Manager) verifyBaseSHA(ctx context.Context, mirror, sha string) error {
