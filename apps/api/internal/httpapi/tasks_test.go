@@ -51,6 +51,25 @@ func (f *fakeTasks) Events(_ context.Context, id string, limit int) ([]task.Even
 	return f.events, f.err
 }
 
+// EventsAfter filters the canned events by the (attempt, sequence) cursor,
+// mirroring the store's ordering contract.
+func (f *fakeTasks) EventsAfter(_ context.Context, id string, afterAttempt int, afterSequence int64, limit int) ([]task.Event, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	after := []task.Event{}
+	for _, e := range f.events {
+		if e.AttemptNumber > afterAttempt ||
+			(e.AttemptNumber == afterAttempt && e.SequenceNumber > afterSequence) {
+			after = append(after, e)
+		}
+	}
+	if limit > 0 && len(after) > limit {
+		after = after[:limit]
+	}
+	return after, nil
+}
+
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var req *http.Request

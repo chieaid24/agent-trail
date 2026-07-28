@@ -450,3 +450,55 @@ func ids(tasks []Task) []string {
 	}
 	return out
 }
+
+func TestEventsAfterReturnsSuffixAcrossAttempts(t *testing.T) {
+	s := NewStore(testDB(t))
+	tk := mustCreate(t, s)
+	for _, to := range []Status{StatusProvisioning, StatusPlanning,
+		StatusExecuting, StatusValidating, StatusPublishing,
+		StatusAwaitingReview, StatusRevisionRequested} {
+		mustTransition(t, s, tk.ID, to)
+	}
+	mustTransition(t, s, tk.ID, StatusQueued) // starts attempt 2
+
+	ctx := context.Background()
+	all, err := s.Events(ctx, tk.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) < 3 || all[len(all)-1].AttemptNumber != 2 {
+		t.Fatalf("timeline shape unexpected: %d events, last attempt %d",
+			len(all), all[len(all)-1].AttemptNumber)
+	}
+
+	// A cursor at any position must yield exactly the remaining suffix.
+	for i, e := range all {
+		after, err := s.EventsAfter(ctx, tk.ID, e.AttemptNumber, e.SequenceNumber, 0)
+		if err != nil {
+			t.Fatalf("cursor %d: %v", i, err)
+		}
+		if len(after) != len(all)-i-1 {
+			t.Fatalf("cursor %d:%d returned %d events, want %d",
+				e.AttemptNumber, e.SequenceNumber, len(after), len(all)-i-1)
+		}
+		for j, got := range after {
+			if got.ID != all[i+1+j].ID {
+				t.Fatalf("cursor %d: event %d = %s, want %s",
+					i, j, got.ID, all[i+1+j].ID)
+			}
+		}
+	}
+
+	// Zero cursor replays the whole timeline.
+	fromStart, err := s.EventsAfter(ctx, tk.ID, 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fromStart) != len(all) {
+		t.Errorf("zero cursor = %d events, want %d", len(fromStart), len(all))
+	}
+
+	if _, err := s.EventsAfter(ctx, "3b241101-e2bb-4255-8caf-4136c566a962", 0, 0, 0); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown task error = %v, want ErrNotFound", err)
+	}
+}

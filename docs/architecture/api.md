@@ -75,25 +75,27 @@ Implemented semantics:
 
 ### Streaming
 
+Implemented.
+
 ```text
 GET /tasks/{taskId}/stream
 ```
 
-Use server-sent events.
+Server-sent events. Each frame's `data` is one activity event, the same JSON
+object `GET /tasks/{taskId}/events` returns; the SSE `id` field is the resume
+cursor `<attempt_number>:<sequence_number>` (sequence numbers restart per
+attempt, so the cursor carries both).
 
-Event envelope:
+Reconnection: `EventSource` echoes the last cursor as `Last-Event-ID`
+automatically and the server replays only events after it. A first connection
+that wants to resume (for example after a page reload) may pass
+`?last_event_id=<cursor>`; the header wins when both are present. A malformed
+cursor is a 400.
 
-```json
-{
-  "id": "event-uuid",
-  "sequence": 143,
-  "type": "command.output",
-  "timestamp": "2026-07-24T18:00:00Z",
-  "data": {}
-}
-```
-
-Support reconnection using `Last-Event-ID`.
+The server heartbeats with SSE comment lines while the task runs. Once the
+task is terminal and the timeline is fully delivered it emits a `done` event
+(`data: {"status": "<final status>"}`) and closes the stream; clients close
+on `done` instead of reconnecting.
 
 ### Webhook
 

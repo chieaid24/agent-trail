@@ -24,6 +24,7 @@ type TaskService interface {
 	List(ctx context.Context, p task.ListParams) ([]task.Task, error)
 	Cancel(ctx context.Context, id, reason string) (task.Task, error)
 	Events(ctx context.Context, id string, limit int) ([]task.Event, error)
+	EventsAfter(ctx context.Context, id string, afterAttempt int, afterSequence int64, limit int) ([]task.Event, error)
 }
 
 // ValidationService serves trusted validation results; implemented by
