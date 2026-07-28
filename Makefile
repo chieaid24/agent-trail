@@ -36,9 +36,10 @@ test:
 integration-test:
 	cd apps/api && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test ./...
 
-## e2e: browser end-to-end suite (lands with the dashboard, milestone 8)
+## e2e: browser end-to-end suite against a dedicated disposable stack
+## (compose project agent-trail-e2e; ports overridable via E2E_* envs)
 e2e:
-	@echo "e2e: not implemented yet; lands with the dashboard (milestone 8)" >&2; exit 1
+	cd apps/web && npx playwright test
 
 ## demo: scripted issue-to-PR demo (lands with publishing, milestone 7)
 demo:

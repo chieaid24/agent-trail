@@ -78,7 +78,7 @@ function Summary({ tasks }: { tasks: Task[] }) {
     s.medianRuntimeMs !== null &&
       `median run ${formatDuration(s.medianRuntimeMs)}`,
   ].filter(Boolean);
-  return <p className="text-sm text-muted">{parts.join(" · ")}</p>;
+  return <p className="text-sm text-muted">{parts.join(", ")}</p>;
 }
 
 function Groups({ tasks }: { tasks: Task[] }) {

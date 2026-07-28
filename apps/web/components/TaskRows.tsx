@@ -26,7 +26,8 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
                   <span>issue #{t.source_issue_number}</span>
                 )}
                 {t.agent_provider && (
-                  <span>
+                  // Shed below 1280 so the title keeps its width at 1024.
+                  <span className="hidden xl:inline">
                     {t.agent_provider}
                     {t.agent_model ? ` / ${t.agent_model}` : ""}
                   </span>

@@ -154,6 +154,10 @@ export function describeEvent(e: ActivityEvent): TimelineRow {
     }
     case "evidence.generated":
       return { label: "evidence report generated" };
+    case "workspace.provisioning":
+      return { label: "workspace provisioning" };
+    case "workspace.ready":
+      return { label: "workspace ready" };
     case "publishing.skipped":
       return { label: "publishing skipped", detail: str(p, "reason") };
     case "cleanup.completed":
