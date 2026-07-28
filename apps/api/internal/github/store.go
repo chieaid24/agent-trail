@@ -33,7 +33,15 @@ type StoredRepository struct {
 	Name               string
 	FullName           string
 	DefaultBranch      string
+	CloneURL           string
 	IsEnabled          bool
+}
+
+// RepositoryContext is everything publishing needs about a task's
+// repository: the stored row plus its installation for API credentials.
+type RepositoryContext struct {
+	StoredRepository
+	InstallationID int64
 }
 
 // InstallationParams describe an installation upsert; the organization is
@@ -273,11 +281,11 @@ func (s *Store) RepositoryByGitHubID(ctx context.Context, githubRepositoryID int
 	var r StoredRepository
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, organization_id, github_repository_id, owner, name,
-			full_name, default_branch, is_enabled
+			full_name, default_branch, clone_url, is_enabled
 		FROM repositories WHERE github_repository_id = $1`,
 		githubRepositoryID).Scan(&r.ID, &r.OrganizationID,
 		&r.GitHubRepositoryID, &r.Owner, &r.Name, &r.FullName,
-		&r.DefaultBranch, &r.IsEnabled)
+		&r.DefaultBranch, &r.CloneURL, &r.IsEnabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StoredRepository{}, ErrRepositoryNotFound
 	}
@@ -285,6 +293,55 @@ func (s *Store) RepositoryByGitHubID(ctx context.Context, githubRepositoryID int
 		return StoredRepository{}, fmt.Errorf("repository by github id: %w", err)
 	}
 	return r, nil
+}
+
+// ErrNoInstallation marks a repository whose organization has no live GitHub
+// App installation, so no credential can be minted for it.
+var ErrNoInstallation = errors.New("repository has no installation")
+
+// RepositoryContextByID returns the publishing context for the repository
+// with that internal id (the tasks.repository_id value). A suspended or
+// missing installation returns ErrNoInstallation: publishing must not mint
+// tokens for it.
+func (s *Store) RepositoryContextByID(ctx context.Context, repositoryID string) (RepositoryContext, error) {
+	var r RepositoryContext
+	err := s.db.QueryRowContext(ctx, `
+		SELECT r.id, r.organization_id, r.github_repository_id, r.owner,
+			r.name, r.full_name, r.default_branch, r.clone_url, r.is_enabled,
+			i.github_installation_id
+		FROM repositories r
+		LEFT JOIN github_installations i
+			ON i.organization_id = r.organization_id
+			AND i.suspended_at IS NULL
+		WHERE r.id = $1`, repositoryID).Scan(&r.ID, &r.OrganizationID,
+		&r.GitHubRepositoryID, &r.Owner, &r.Name, &r.FullName,
+		&r.DefaultBranch, &r.CloneURL, &r.IsEnabled, &nullableInt64{&r.InstallationID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return RepositoryContext{}, ErrRepositoryNotFound
+	}
+	if err != nil {
+		return RepositoryContext{}, fmt.Errorf("repository context: %w", err)
+	}
+	if r.InstallationID == 0 {
+		return RepositoryContext{}, ErrNoInstallation
+	}
+	return r, nil
+}
+
+// nullableInt64 scans a NULLable bigint into an int64, mapping NULL to 0.
+type nullableInt64 struct{ v *int64 }
+
+func (n *nullableInt64) Scan(src any) error {
+	if src == nil {
+		*n.v = 0
+		return nil
+	}
+	i, ok := src.(int64)
+	if !ok {
+		return fmt.Errorf("nullable int64: unexpected type %T", src)
+	}
+	*n.v = i
+	return nil
 }
 
 func defaultIfEmpty(s, fallback string) string {
