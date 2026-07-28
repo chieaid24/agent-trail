@@ -60,9 +60,11 @@ type Claim struct {
 
 // claimableStatuses are the task statuses whose active attempt a runner may
 // own: queued (fresh) plus every status the runner itself drives, so an
-// expired lease anywhere mid-flight is recoverable.
+// expired lease anywhere mid-flight is recoverable. awaiting_review is
+// excluded: a published task rests there for a human on the draft PR, and
+// re-claiming it would spin runners on finished work.
 const claimableStatuses = `('queued', 'provisioning', 'planning',
-	'executing', 'validating', 'publishing', 'awaiting_review')`
+	'executing', 'validating', 'publishing')`
 
 // Store is the PostgreSQL-backed runner registry and lease arbiter.
 type Store struct {

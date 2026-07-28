@@ -387,3 +387,36 @@ func TestHeadAndLookup(t *testing.T) {
 		t.Fatalf("Head after commit = %q, %v; want %q", head, err, sha)
 	}
 }
+
+// TestEnsureMirrorSkipsCheckedOutAgentBranches guards the refetch path: once
+// a working branch is pushed to origin, a later mirror fetch must not try to
+// update it (git refuses to fetch into a branch checked out in a worktree).
+func TestEnsureMirrorSkipsCheckedOutAgentBranches(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	m := newTestManager(t)
+	origin, base := buildOrigin(t)
+	repo := RepoRef{ID: "repo-refetch", CloneURL: origin}
+
+	w, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-refetch", BaseSHA: base, BranchLabel: "refetch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.Path, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Commit(ctx, w, CommitParams{Message: "change", TaskID: "t1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Push(ctx, w, PushParams{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The branch now exists on origin and is checked out locally; a refetch
+	// must succeed and leave the local branch alone.
+	if _, err := m.EnsureMirror(ctx, repo); err != nil {
+		t.Fatalf("EnsureMirror after push: %v", err)
+	}
+}

@@ -122,7 +122,18 @@ func (m *Manager) EnsureMirror(ctx context.Context, repo RepoRef) (string, error
 	defer lock.Unlock()
 
 	if _, err := os.Stat(filepath.Join(mirror, "HEAD")); err == nil {
-		if _, err := m.git.run(ctx, mirror, "fetch", "--prune", "origin"); err != nil {
+		// Refresh the stored remote URL first: it may embed a short-lived
+		// credential recorded by an earlier clone, and a fetch or a later
+		// push through an expired one fails.
+		if _, err := m.git.run(ctx, mirror, "remote", "set-url", "origin", "--", repo.CloneURL); err != nil {
+			return "", fmt.Errorf("gitworkspace: refresh remote url: %w", err)
+		}
+		// The agent-trail/* namespace is excluded: those branches are born
+		// locally (worktree add) and pushed out, so the local refs are the
+		// source of truth - and fetching one back would be refused anyway
+		// while its worktree has it checked out.
+		if _, err := m.git.run(ctx, mirror, "fetch", "--prune", "origin",
+			"+refs/*:refs/*", "^refs/heads/"+BranchPrefix+"*"); err != nil {
 			return "", fmt.Errorf("gitworkspace: fetch mirror: %w", err)
 		}
 		return mirror, nil

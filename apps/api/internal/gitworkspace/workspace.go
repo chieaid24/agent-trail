@@ -89,6 +89,34 @@ func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace
 	}, nil
 }
 
+// CleanupStale clears whatever a dead owner left for this attempt: the
+// worktree directory, the working branch, and stale administrative entries.
+// Every step is best-effort except the final prune; a fresh CreateWorktree
+// for the same attempt must succeed afterwards.
+func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, branch string) error {
+	if !validComponent(repo.ID) {
+		return fmt.Errorf("gitworkspace: repository id %q is not a safe path component", repo.ID)
+	}
+	if !validComponent(attemptID) {
+		return fmt.Errorf("gitworkspace: attempt id %q is not a safe path component", attemptID)
+	}
+	mirror := filepath.Join(m.reposDir, repo.ID, "repo.git")
+	path := filepath.Join(m.workDir, attemptID)
+
+	lock := m.lockFor(repo.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	_, _ = m.git.run(ctx, mirror, "worktree", "remove", "--force", path)
+	if validBranch(branch) {
+		_, _ = m.git.run(ctx, mirror, "branch", "-D", branch)
+	}
+	if _, err := m.git.run(ctx, mirror, "worktree", "prune"); err != nil {
+		return fmt.Errorf("gitworkspace: prune worktrees: %w", err)
+	}
+	return nil
+}
+
 // Lookup rebuilds the workspace for an attempt whose worktree still exists
 // on this host (a recovered owner reattaching), or ok=false when it is gone.
 // The caller supplies the branch and base recorded on the task; Lookup only

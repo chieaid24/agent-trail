@@ -13,6 +13,7 @@ import (
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
+	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
@@ -37,7 +38,7 @@ var agentEventTypes = map[agent.EventType]string{
 }
 
 // Executor drives one claimed attempt through the flow: workspace, agent
-// session, trusted validation, evidence, stubbed publishing, completion.
+// session, trusted validation, evidence, GitHub publishing, review.
 // It owns the lease for the duration and releases it on every exit path.
 type Executor struct {
 	Tasks       *task.Store
@@ -46,10 +47,21 @@ type Executor struct {
 	Evidence    *evidence.Store
 	Adapter     agent.Adapter
 	Logger      *slog.Logger
+	// Workspaces, GitHub, and Repos are the publishing dependencies: all
+	// three set enables git worktree workspaces and GitHub publishing for
+	// repository-backed tasks (docs/architecture/publishing.md). Any nil
+	// keeps the fake local flow: temp-dir workspace, publishing skipped.
+	Workspaces *gitworkspace.Manager
+	GitHub     PublishGitHub
+	Repos      RepositoryResolver
 	// LeaseDuration is the claim lease; the executor extends it at a third
 	// of this interval while it works.
 	LeaseDuration time.Duration
 }
+
+// ErrAttemptFailed wraps every failTask error: the task reached a terminal
+// failed state, so the attempt is settled rather than retryable.
+var ErrAttemptFailed = errors.New("attempt failed")
 
 // Execute drives claim c to a terminal task state. A cancelled ctx or a
 // lost lease stops work and leaves the attempt for recovery: the task stays
@@ -110,9 +122,11 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	return err
 }
 
-// drive advances the task from its claimed status to completed. Interrupted
-// attempts re-enter here at a later status and only run the missing stages;
-// duplicated agent events across owners are accepted (at-least-once).
+// drive advances the task from its claimed status to its resting state:
+// completed for the fake local flow, awaiting_review for a published task.
+// Interrupted attempts re-enter here at a later status and only run the
+// missing stages; duplicated agent events across owners are accepted
+// (at-least-once).
 func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error {
 	status := c.TaskStatus
 
@@ -124,20 +138,30 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 		status = next
 	}
 
+	t, err := e.Tasks.Get(ctx, c.TaskID)
+	if err != nil {
+		return err
+	}
+	pub, err := e.publishTarget(ctx, c, t)
+	if err != nil {
+		return err
+	}
+
 	// The agent must run unless a previous owner already got the task past
-	// executing (its workspace died with it; later stages don't need one).
-	// Trusted validation and evidence run inside the agent stages, while
-	// the workspace still exists, so a completed pass leaves publishing.
+	// executing. Trusted validation, evidence, and (for repository-backed
+	// tasks) publishing run inside the agent stages, while the workspace
+	// still exists.
 	if status == task.StatusProvisioning || status == task.StatusPlanning ||
 		status == task.StatusExecuting {
-		if err := e.runAgentStages(ctx, log, c, status); err != nil {
+		next, err := e.runAgentStages(ctx, log, c, t, pub, status)
+		if err != nil {
 			return err
 		}
-		status = task.StatusPublishing
+		status = next
 	}
 
 	if status == task.StatusValidating {
-		// Recovery only: the previous owner died mid-validating and its
+		// Recovery only: the previous owner died mid-validating. A temp-dir
 		// workspace died with it, so the remaining checks cannot run.
 		// Record the infrastructure failure honestly - never a pass - and
 		// build evidence from whatever it managed to store.
@@ -158,24 +182,35 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 	}
 
 	if status == task.StatusPublishing {
-		if err := e.append(ctx, c, "publishing.skipped", "runner", map[string]any{
-			"reason": "GitHub publishing lands with milestone 7",
-		}); err != nil {
-			return err
+		if pub == nil {
+			if err := e.append(ctx, c, "publishing.skipped", "runner", map[string]any{
+				"reason": "task has no repository or publishing is not configured",
+			}); err != nil {
+				return err
+			}
+			next, err := e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
+			if err != nil {
+				return err
+			}
+			status = next
+		} else {
+			// Recovery only: the previous owner died mid-publishing. Its
+			// worktree survives on the same host; otherwise the pushed
+			// branch (if any) carries the work.
+			next, err := e.publishRecovered(ctx, c, t, pub)
+			if err != nil {
+				return err
+			}
+			status = next
 		}
-		next, err := e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
-		if err != nil {
-			return err
-		}
-		status = next
 	}
 
-	if status == task.StatusAwaitingReview {
+	if status == task.StatusAwaitingReview && pub == nil {
 		// Nothing was published, so there is nothing for a human to review:
-		// the fake flow closes its own loop. The review gate becomes real
-		// with milestone 7 publishing.
+		// the fake flow closes its own loop. Published tasks stay in
+		// awaiting_review for the human on the draft PR.
 		if _, err := e.transition(ctx, c, task.StatusCompleted, "system",
-			"fake attempt auto-completed; review gates arrive with publishing"); err != nil {
+			"fake attempt auto-completed; nothing was published to review"); err != nil {
 			return err
 		}
 	}
@@ -187,18 +222,50 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 }
 
 // runAgentStages provisions a workspace, runs the agent session, streams
-// its events into the timeline, then runs trusted validation and evidence
-// while the workspace still exists, leaving the task in publishing.
-func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Claim, status task.Status) error {
+// its events into the timeline, then runs trusted validation, evidence,
+// and (for publishable tasks) publishing while the workspace still exists.
+// It returns the status the task rests at: publishing for the fake local
+// flow, awaiting_review after a successful publish.
+func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, status task.Status) (st task.Status, retErr error) {
 	if err := e.append(ctx, c, "workspace.provisioning", "runner", nil); err != nil {
-		return err
+		return "", err
 	}
-	workspace, err := os.MkdirTemp("", "agent-trail-attempt-")
-	if err != nil {
-		return e.failTask(ctx, c, "workspace_failed", err.Error())
+	var ws gitworkspace.Workspace
+	var workspace string
+	if pub != nil {
+		created, err := e.provisionWorkspace(ctx, c, t, pub)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "", e.failTask(ctx, c, "workspace_failed", err.Error())
+		}
+		ws = created
+		workspace = ws.Path
+	} else {
+		dir, err := os.MkdirTemp("", "agent-trail-attempt-")
+		if err != nil {
+			return "", e.failTask(ctx, c, "workspace_failed", err.Error())
+		}
+		workspace = dir
 	}
 	defer func() {
-		if err := os.RemoveAll(workspace); err != nil {
+		cleanupCtx := context.WithoutCancel(ctx)
+		if pub != nil {
+			// A settled attempt (published, or terminally failed) releases
+			// its worktree; a transient error keeps it so the recovering
+			// owner can reattach (Lookup) instead of losing the work.
+			if retErr != nil && !errors.Is(retErr, ErrAttemptFailed) {
+				return
+			}
+			if err := e.Workspaces.Remove(cleanupCtx, ws); err != nil {
+				log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
+					slog.String("event", "runner_workspace_cleanup_failed"),
+					slog.String("error", err.Error()),
+				)
+				return
+			}
+		} else if err := os.RemoveAll(workspace); err != nil {
 			log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
 				slog.String("event", "runner_workspace_cleanup_failed"),
 				slog.String("error", err.Error()),
@@ -206,16 +273,16 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 			return
 		}
 		// Best effort; a failed append must not fail a finished attempt.
-		_ = e.Tasks.AppendAttemptEvent(context.WithoutCancel(ctx), c.AttemptID,
+		_ = e.Tasks.AppendAttemptEvent(cleanupCtx, c.AttemptID,
 			"cleanup.completed", "runner", map[string]any{"workspace": "removed"})
 	}()
 	if err := e.append(ctx, c, "workspace.ready", "runner", nil); err != nil {
-		return err
+		return "", err
 	}
 
 	if status == task.StatusProvisioning {
 		if _, err := e.transition(ctx, c, task.StatusPlanning, "runner", ""); err != nil {
-			return err
+			return "", err
 		}
 		status = task.StatusPlanning
 	}
@@ -225,7 +292,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		Instructions: c.Instructions,
 	})
 	if err != nil {
-		return e.failTask(ctx, c, "agent_start_failed", err.Error())
+		return "", e.failTask(ctx, c, "agent_start_failed", err.Error())
 	}
 
 	// On an error mid-stream the session must still be drained: the event
@@ -244,13 +311,13 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 			eventType = "agent." + string(ev.Type)
 		}
 		if err := e.append(ctx, c, eventType, "agent", ev.Payload); err != nil {
-			return abort(err)
+			return "", abort(err)
 		}
 		// The plan marks the end of planning.
 		if ev.Type == agent.EventPlan && status == task.StatusPlanning {
 			next, err := e.transition(ctx, c, task.StatusExecuting, "runner", "")
 			if err != nil {
-				return abort(err)
+				return "", abort(err)
 			}
 			status = next
 		}
@@ -260,9 +327,9 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	if err != nil {
 		if ctx.Err() != nil {
 			// Shutdown or lease loss: leave the task mid-flight for recovery.
-			return ctx.Err()
+			return "", ctx.Err()
 		}
-		return e.failTask(ctx, c, "agent_failed", err.Error())
+		return "", e.failTask(ctx, c, "agent_failed", err.Error())
 	}
 	log.LogAttrs(ctx, slog.LevelInfo, "agent session completed",
 		slog.String("event", "runner_agent_completed"),
@@ -276,29 +343,34 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	if status == task.StatusPlanning {
 		next, err := e.transition(ctx, c, task.StatusExecuting, "runner", "")
 		if err != nil {
-			return err
+			return "", err
 		}
 		status = next
 	}
 	if status == task.StatusExecuting {
 		if _, err := e.transition(ctx, c, task.StatusValidating, "runner", ""); err != nil {
-			return err
+			return "", err
 		}
 	}
 
 	// The workspace dies with this function (deferred cleanup above), so
-	// everything that needs it on disk happens before returning.
+	// everything that needs it on disk - validation, evidence, commit, and
+	// push - happens before returning.
 	note, err := e.runTrustedValidation(ctx, log, c, workspace)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := e.generateEvidence(ctx, c, note); err != nil {
-		return err
+		return "", err
 	}
-	if _, err := e.transition(ctx, c, task.StatusPublishing, "runner", ""); err != nil {
-		return err
+	next, err := e.transition(ctx, c, task.StatusPublishing, "runner", "")
+	if err != nil {
+		return "", err
 	}
-	return nil
+	if pub == nil {
+		return next, nil
+	}
+	return e.publishFromWorkspace(ctx, c, t, pub, ws, result.Summary)
 }
 
 // workspaceLostNote explains an unrunnable recovery-path validation.
@@ -564,5 +636,5 @@ func (e *Executor) failTask(ctx context.Context, c *Claim, code, message string)
 	if err != nil {
 		return fmt.Errorf("fail task (%s): %w", code, err)
 	}
-	return fmt.Errorf("attempt failed: %s: %s", code, message)
+	return fmt.Errorf("%w: %s: %s", ErrAttemptFailed, code, message)
 }

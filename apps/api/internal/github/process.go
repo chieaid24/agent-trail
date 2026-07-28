@@ -15,8 +15,9 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// checkRunName is the check run created for each GitHub-sourced task.
-const checkRunName = "Agent Trail Task"
+// CheckRunName is the check run created for each GitHub-sourced task and
+// resolved at publish time (docs/architecture/github-app.md).
+const CheckRunName = "Agent Trail Task"
 
 // processTimeout bounds the asynchronous handling of one delivery.
 const processTimeout = 30 * time.Second
@@ -386,7 +387,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 	ack := fmt.Sprintf(
 		"Agent Trail queued task `%s` for this issue (requested by @%s). "+
 			"The `%s` check tracks progress.",
-		created.ID, ev.Comment.User.Login, checkRunName)
+		created.ID, ev.Comment.User.Login, CheckRunName)
 	if err := reply(ack); err != nil {
 		p.logger.LogAttrs(ctx, slog.LevelWarn, "ack comment failed",
 			slog.String("event", "github_ack_comment_failed"),
@@ -438,7 +439,7 @@ func (p *Processor) createCheckRun(ctx context.Context, d Delivery, instID int64
 		var checkRunID int64
 		checkRunID, err = p.api.CreateCheckRun(ctx, instID, repo.Owner,
 			repo.Name, CheckRunParams{
-				Name:       checkRunName,
+				Name:       CheckRunName,
 				HeadSHA:    headSHA,
 				ExternalID: created.ID,
 				Status:     "queued",
