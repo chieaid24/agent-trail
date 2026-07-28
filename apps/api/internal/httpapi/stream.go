@@ -121,8 +121,11 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
 		}
 		if t.Status.Terminal() && !wrote {
 			// Drained a finished task: tell the client to stop reconnecting.
-			_, _ = fmt.Fprintf(w, "event: done\ndata: {\"status\":%q}\n\n", t.Status)
-			_ = rc.Flush()
+			done, err := json.Marshal(map[string]task.Status{"status": t.Status})
+			if err == nil {
+				_, _ = fmt.Fprintf(w, "event: done\ndata: %s\n\n", done)
+				_ = rc.Flush()
+			}
 			return
 		}
 

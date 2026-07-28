@@ -56,11 +56,11 @@ export async function listTasks(options?: {
 }
 
 export function getTask(taskId: string): Promise<Task> {
-  return request<Task>(`/tasks/${taskId}`);
+  return request<Task>(`/tasks/${encodeURIComponent(taskId)}`);
 }
 
 export function cancelTask(taskId: string, reason?: string): Promise<Task> {
-  return request<Task>(`/tasks/${taskId}/cancel`, {
+  return request<Task>(`/tasks/${encodeURIComponent(taskId)}/cancel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(reason ? { reason } : {}),
@@ -69,7 +69,7 @@ export function cancelTask(taskId: string, reason?: string): Promise<Task> {
 
 export async function listEvents(taskId: string): Promise<ActivityEvent[]> {
   const body = await request<{ events: ActivityEvent[] }>(
-    `/tasks/${taskId}/events?limit=1000`,
+    `/tasks/${encodeURIComponent(taskId)}/events?limit=1000`,
   );
   return body.events;
 }
@@ -78,7 +78,7 @@ export async function listValidations(
   taskId: string,
 ): Promise<ValidationResult[]> {
   const body = await request<{ validations: ValidationResult[] }>(
-    `/tasks/${taskId}/validations`,
+    `/tasks/${encodeURIComponent(taskId)}/validations`,
   );
   return body.validations;
 }
@@ -89,7 +89,9 @@ export async function getEvidence(
   taskId: string,
 ): Promise<StoredEvidence | null> {
   try {
-    return await request<StoredEvidence>(`/tasks/${taskId}/evidence`);
+    return await request<StoredEvidence>(
+      `/tasks/${encodeURIComponent(taskId)}/evidence`,
+    );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
@@ -105,5 +107,5 @@ export function streamUrl(taskId: string, lastEventId?: string): string {
   const suffix = lastEventId
     ? `?last_event_id=${encodeURIComponent(lastEventId)}`
     : "";
-  return `${API_PREFIX}/tasks/${taskId}/stream${suffix}`;
+  return `${API_PREFIX}/tasks/${encodeURIComponent(taskId)}/stream${suffix}`;
 }

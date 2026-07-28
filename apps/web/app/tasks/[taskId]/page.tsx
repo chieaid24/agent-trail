@@ -315,7 +315,6 @@ const STREAM_LABELS: Record<StreamState, { text: string; className: string }> =
     live: { text: "live", className: "text-accent" },
     reconnecting: { text: "reconnecting", className: "text-warning" },
     done: { text: "stream ended", className: "text-muted" },
-    error: { text: "stream unavailable", className: "text-danger" },
   };
 
 function StreamChip({ state }: { state: StreamState }) {

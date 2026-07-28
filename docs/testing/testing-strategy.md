@@ -42,7 +42,15 @@ Test:
 
 ### End-to-end tests
 
-Use a dedicated GitHub test repository.
+Implemented: the browser suite (`make e2e`, `apps/web/e2e/`). Playwright
+boots a disposable stack (dedicated postgres, migrations, seed, api and
+worker binaries with the fake adapter) and drives the dashboard against
+genuinely executed tasks: grouping, live SSE updates, the log transcript,
+trusted-vs-claimed validation rendering, evidence, inline cancellation, and
+stream reconnection across a real api restart.
+
+The GitHub-side flow below still needs a dedicated test repository and
+lands with publishing.
 
 Scenarios:
 

@@ -66,10 +66,12 @@ export default function Home() {
 }
 
 // One quiet sentence of computed facts; deliberately not metric cards.
+// At the fetch cap the figures describe a truncated window and say so.
 function Summary({ tasks }: { tasks: Task[] }) {
   const s = overviewStats(tasks);
+  const atCap = tasks.length >= 200;
   const parts = [
-    `${s.total} task${s.total === 1 ? "" : "s"}`,
+    atCap ? "newest 200 tasks" : `${s.total} task${s.total === 1 ? "" : "s"}`,
     s.running > 0 && `${s.running} running`,
     s.review > 0 && `${s.review} awaiting review`,
     s.failed > 0 && `${s.failed} failed`,
