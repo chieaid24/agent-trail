@@ -58,6 +58,13 @@ Statuses are stored lowercase (`created`, `queued`, ... `awaiting_review`,
 (provisioning through publishing), `review` (awaiting_review,
 revision_requested), `terminal`.
 
+There is no dedicated no-change state: a publishable attempt whose agent
+session changed nothing ends PUBLISHING -> FAILED with failure code
+`no_change` and the explanation preserved on the task and timeline
+(docs/architecture/publishing.md). AWAITING_REVIEW is a resting state:
+runners do not claim it, and the next transition belongs to the human
+review flow.
+
 Requirements (all enforced by `Store.Transition`, with DB constraints as
 backstop):
 

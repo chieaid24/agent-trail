@@ -187,3 +187,169 @@ func TestParsePrivateKeyRejectsGarbage(t *testing.T) {
 		t.Fatal("garbage key accepted")
 	}
 }
+
+// tokenOr404 answers the token mint; everything else falls through to h.
+func tokenOr404(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/app/installations/") {
+			fmt.Fprintf(w, `{"token":"tok","expires_at":%q}`,
+				time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+			return
+		}
+		h(w, r)
+	}
+}
+
+func TestCreateCheckRunSendsParams(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/check-runs" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, `{"id": 99}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	id, err := c.CreateCheckRun(context.Background(), 7, "o", "r", CheckRunParams{
+		Name: "Agent Trail Task", HeadSHA: "abc", ExternalID: "attempt-1",
+		Status: "completed", Conclusion: "success",
+		Title: "Verified", Summary: "table",
+	})
+	if err != nil || id != 99 {
+		t.Fatalf("CreateCheckRun = %d, %v", id, err)
+	}
+	if got["external_id"] != "attempt-1" || got["conclusion"] != "success" {
+		t.Fatalf("body = %v", got)
+	}
+	out, ok := got["output"].(map[string]any)
+	if !ok || out["summary"] != "table" {
+		t.Fatalf("output = %v", got["output"])
+	}
+}
+
+func TestUpdateCheckRunPatchesByID(t *testing.T) {
+	var patched atomic.Int64
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/check-runs/99" {
+			http.NotFound(w, r)
+			return
+		}
+		patched.Add(1)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	err := c.UpdateCheckRun(context.Background(), 7, "o", "r", 99,
+		CheckRunParams{Status: "completed", Conclusion: "neutral"})
+	if err != nil || patched.Load() != 1 {
+		t.Fatalf("UpdateCheckRun err=%v patched=%d", err, patched.Load())
+	}
+}
+
+func TestListCheckRunsFiltersByName(t *testing.T) {
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/commits/abc/check-runs" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("check_name") != "Agent Trail Task" {
+			t.Errorf("check_name = %q", r.URL.Query().Get("check_name"))
+		}
+		fmt.Fprint(w, `{"check_runs":[{"id":5,"external_id":"attempt-1","status":"queued"}]}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	runs, err := c.ListCheckRuns(context.Background(), 7, "o", "r", "abc", "Agent Trail Task")
+	if err != nil || len(runs) != 1 || runs[0].ExternalID != "attempt-1" {
+		t.Fatalf("ListCheckRuns = %+v, %v", runs, err)
+	}
+}
+
+func TestFindPullRequestByHead(t *testing.T) {
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/pulls" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("head") != "o:agent-trail/x" ||
+			r.URL.Query().Get("state") != "all" {
+			t.Errorf("query = %v", r.URL.Query())
+		}
+		fmt.Fprint(w, `[{"number":3,"state":"open","draft":true,"html_url":"u"}]`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	pr, err := c.FindPullRequestByHead(context.Background(), 7, "o", "r", "o", "agent-trail/x")
+	if err != nil || pr == nil || pr.Number != 3 || !pr.Draft {
+		t.Fatalf("FindPullRequestByHead = %+v, %v", pr, err)
+	}
+}
+
+func TestFindPullRequestByHeadReturnsNilWhenAbsent(t *testing.T) {
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `[]`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	pr, err := c.FindPullRequestByHead(context.Background(), 7, "o", "r", "o", "agent-trail/x")
+	if err != nil || pr != nil {
+		t.Fatalf("FindPullRequestByHead = %+v, %v", pr, err)
+	}
+}
+
+func TestCreateDraftPullRequestForcesDraft(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/repos/o/r/pulls" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, `{"number":8,"state":"open","draft":true,"html_url":"u"}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	pr, err := c.CreateDraftPullRequest(context.Background(), 7, "o", "r",
+		PullRequestParams{Title: "t", Head: "agent-trail/x", Base: "main", Body: "b"})
+	if err != nil || pr.Number != 8 {
+		t.Fatalf("CreateDraftPullRequest = %+v, %v", pr, err)
+	}
+	if got["draft"] != true || got["head"] != "agent-trail/x" {
+		t.Fatalf("body = %v", got)
+	}
+}
+
+func TestUpdatePullRequestBodyPatchesNumber(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r/pulls/8" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	if err := c.UpdatePullRequestBody(context.Background(), 7, "o", "r", 8, "new"); err != nil {
+		t.Fatal(err)
+	}
+	if got["body"] != "new" {
+		t.Fatalf("body = %v", got)
+	}
+}

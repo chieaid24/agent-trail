@@ -345,3 +345,48 @@ func TestMarkLostFlagsOnlyStaleOnlineRunners(t *testing.T) {
 		t.Fatalf("leased attempts = %v, want [%s]", ids, c.AttemptID)
 	}
 }
+
+func TestRecordAttemptPublishFieldsFirstWriteWins(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	tk := mustCreateTask(t, ts)
+	r := mustRegister(t, s)
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+
+	base := "1111111111111111111111111111111111111111"
+	final := "2222222222222222222222222222222222222222"
+	if err := s.RecordAttemptBase(ctx, c.AttemptID, base); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordFinalCommit(ctx, c.AttemptID, final); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPullRequest(ctx, c.AttemptID, 8); err != nil {
+		t.Fatal(err)
+	}
+	// Replays keep the first values.
+	if err := s.RecordFinalCommit(ctx, c.AttemptID,
+		"3333333333333333333333333333333333333333"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPullRequest(ctx, c.AttemptID, 9); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotBase, gotFinal string
+	var gotPR int64
+	err = db.QueryRow(`
+		SELECT base_commit_sha, final_commit_sha, pull_request_number
+		FROM task_attempts WHERE id = $1`, c.AttemptID).
+		Scan(&gotBase, &gotFinal, &gotPR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBase != base || gotFinal != final || gotPR != 8 {
+		t.Fatalf("stored = %s, %s, %d", gotBase, gotFinal, gotPR)
+	}
+	_ = tk
+}

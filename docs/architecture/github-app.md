@@ -107,3 +107,10 @@ Conclusions:
 - timed_out
 - action_required
 - neutral
+
+Task creation puts a `queued` check (external id: task id) on the base
+branch head. Publishing resolves a `completed` check on the pushed head
+commit, keyed by external id = attempt id so replays update rather than
+duplicate; conclusion mirrors trusted validation (failed check ->
+`failure`; checks that could not all run, or a no-change outcome ->
+`neutral`; otherwise `success`).

@@ -15,8 +15,9 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// checkRunName is the check run created for each GitHub-sourced task.
-const checkRunName = "Agent Trail Task"
+// CheckRunName is the check run created for each GitHub-sourced task and
+// resolved at publish time (docs/architecture/github-app.md).
+const CheckRunName = "Agent Trail Task"
 
 // processTimeout bounds the asynchronous handling of one delivery.
 const processTimeout = 30 * time.Second
@@ -44,7 +45,7 @@ type API interface {
 	CollaboratorPermission(ctx context.Context, installationID int64, owner, repo, username string) (string, error)
 	BranchHeadSHA(ctx context.Context, installationID int64, owner, repo, branch string) (string, error)
 	CreateIssueComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int64, body string) error
-	CreateCheckRun(ctx context.Context, installationID int64, owner, repo, name, headSHA, status string) (int64, error)
+	CreateCheckRun(ctx context.Context, installationID int64, owner, repo string, p CheckRunParams) (int64, error)
 }
 
 // Processor handles accepted deliveries asynchronously: installation and
@@ -386,7 +387,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 	ack := fmt.Sprintf(
 		"Agent Trail queued task `%s` for this issue (requested by @%s). "+
 			"The `%s` check tracks progress.",
-		created.ID, ev.Comment.User.Login, checkRunName)
+		created.ID, ev.Comment.User.Login, CheckRunName)
 	if err := reply(ack); err != nil {
 		p.logger.LogAttrs(ctx, slog.LevelWarn, "ack comment failed",
 			slog.String("event", "github_ack_comment_failed"),
@@ -437,7 +438,12 @@ func (p *Processor) createCheckRun(ctx context.Context, d Delivery, instID int64
 	if err == nil {
 		var checkRunID int64
 		checkRunID, err = p.api.CreateCheckRun(ctx, instID, repo.Owner,
-			repo.Name, checkRunName, headSHA, "queued")
+			repo.Name, CheckRunParams{
+				Name:       CheckRunName,
+				HeadSHA:    headSHA,
+				ExternalID: created.ID,
+				Status:     "queued",
+			})
 		if err == nil {
 			p.appendTaskEvent(ctx, created.ID, "github.check_run.created",
 				map[string]string{
