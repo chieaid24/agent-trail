@@ -372,6 +372,11 @@ func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, p
 			rc.Name, *t.SourceIssueNumber, comment); err != nil {
 			return e.publishFailure(ctx, c, "post no-change comment", err)
 		}
+		if err := e.append(ctx, c, "github.comment.posted", "runner", map[string]any{
+			"kind": "no_change",
+		}); err != nil {
+			return err
+		}
 	}
 	return e.failTask(ctx, c, "no_change", explanation)
 }

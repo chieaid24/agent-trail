@@ -493,6 +493,11 @@ func TestPublishNoChangeCreatesNoPR(t *testing.T) {
 		t.Fatalf("comments = %v", f.fake.comments)
 	}
 
+	// The no-change comment is a GitHub side effect, so it is on the timeline.
+	assertSubsequence(t, timelineTypes(t, f.tasks, f.task.ID), []string{
+		"publishing.no_change", "github.comment.posted",
+	})
+
 	// Nothing was pushed: the origin still has only main.
 	refs := gitRun(t, f.origin, "for-each-ref", "--format=%(refname)", "refs/heads")
 	if refs != "refs/heads/main" {
