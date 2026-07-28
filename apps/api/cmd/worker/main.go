@@ -21,6 +21,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
+	"github.com/chieaid24/agent-trail/apps/api/internal/github"
+	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/runner"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
@@ -82,6 +84,31 @@ func run() error {
 
 	store := runner.NewStore(db)
 	tasks := task.NewStore(db)
+	metrics := observability.NewRegistry()
+
+	// GitHub publishing needs the App credentials and a workspace root;
+	// without them the worker runs the fake local flow only.
+	var workspaces *gitworkspace.Manager
+	var publishAPI runner.PublishGitHub
+	var repos runner.RepositoryResolver
+	if cfg.GitHubEnabled() {
+		keyPEM, err := os.ReadFile(cfg.GitHubAppPrivateKeyPath)
+		if err != nil {
+			return err
+		}
+		client, err := github.NewClient(cfg.GitHubAppID, keyPEM,
+			cfg.GitHubAPIBaseURL, metrics)
+		if err != nil {
+			return err
+		}
+		workspaces, err = gitworkspace.New(cfg.WorkspaceRoot, logger, metrics)
+		if err != nil {
+			return err
+		}
+		publishAPI = client
+		repos = github.NewStore(db)
+	}
+
 	host := &runner.Host{
 		Store: store,
 		Executor: &runner.Executor{
@@ -91,6 +118,9 @@ func run() error {
 			Evidence:      evidence.NewStore(db),
 			Adapter:       adapter,
 			Logger:        logger,
+			Workspaces:    workspaces,
+			GitHub:        publishAPI,
+			Repos:         repos,
 			LeaseDuration: cfg.RunnerLease,
 		},
 		Logger:        logger,

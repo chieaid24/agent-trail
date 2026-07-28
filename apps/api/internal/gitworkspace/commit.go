@@ -87,6 +87,17 @@ func (m *Manager) Commit(ctx context.Context, w Workspace, p CommitParams) (stri
 	return sha, nil
 }
 
+// Head returns the worktree's current HEAD commit SHA. Publishing uses it to
+// tell a recovered already-committed worktree (HEAD moved past BaseSHA) from
+// a true no-change outcome (HEAD still at BaseSHA, tree clean).
+func (m *Manager) Head(ctx context.Context, w Workspace) (string, error) {
+	sha, err := m.git.run(ctx, w.Path, "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("gitworkspace: read head: %w", err)
+	}
+	return sha, nil
+}
+
 // DiffStats compares the worktree's HEAD to its base commit and returns the
 // change counts. A binary file counts toward FilesChanged with zero line
 // deltas, matching git's numstat output.

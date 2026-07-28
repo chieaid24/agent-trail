@@ -80,6 +80,8 @@ Example JSON:
 
 Closes #42
 
+Task `9f3c1e20-8a4b-4c2d-9e11-2b7f5a0c1d34`.
+
 ## Summary
 
 Added single-use refresh-token rotation and replay detection.
@@ -93,12 +95,14 @@ Added single-use refresh-token rotation and replay detection.
 
 ## Verified by Agent Trail
 
-| Check | Result | Duration |
-|---|---:|---:|
-| Formatting | Passed | 4s |
-| Unit tests | Passed, 183 tests | 18s |
-| Integration tests | Passed, 14 tests | 31s |
-| Build | Passed | 22s |
+Checks the platform executed in the workspace after editing ended.
+
+| Check | Category | Result | Exit code | Duration |
+|---|---|---|---:|---:|
+| formatting | format | passed | 0 | 4200ms |
+| unit-tests | test | passed | 0 | 18342ms |
+| integration-tests | test | passed | 0 | 31004ms |
+| build | build | passed | 0 | 22001ms |
 
 ## Risks
 
@@ -112,9 +116,16 @@ Added single-use refresh-token rotation and replay detection.
 
 - Base commit: `abc123`
 - Final commit: `def456`
-- Agent provider: Claude Code
-- Human interventions: 1
-- Full evidence: [Open in Agent Trail](...)
+- Agent provider: fake
+- Agent model: claude-sonnet-5
+- Duration: 75s
+- Changes: 9 files
 ```
+
+The exact shape is rendered by `apps/api/internal/evidence/prbody.go`. Trusted
+results and agent claims never share a table: when the agent reports checks the
+platform did not independently run, a separate `## Agent-reported (not
+independently verified)` table follows the verified one, and the unexecuted
+claims are also counted under `## Unverified`.
 
 Do not expose raw prompts, private repository content, or secrets.

@@ -252,8 +252,45 @@ func (c *Client) CreateIssueComment(ctx context.Context, installationID int64, o
 		map[string]any{"body": body}, nil)
 }
 
+// CheckRunParams describe a check run create or update. Zero-valued fields
+// are omitted from the request; Title and Summary form the output block and
+// must be set together.
+type CheckRunParams struct {
+	Name       string // required on create
+	HeadSHA    string // required on create
+	ExternalID string // caller-owned idempotency identifier
+	Status     string // queued, in_progress, completed
+	Conclusion string // required by GitHub when status is completed
+	Title      string
+	Summary    string
+}
+
+// CheckRun is the slice of the GitHub check-run object publishing reads.
+type CheckRun struct {
+	ID         int64  `json:"id"`
+	ExternalID string `json:"external_id"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+func (p CheckRunParams) body() map[string]any {
+	body := map[string]any{}
+	for k, v := range map[string]string{
+		"name": p.Name, "head_sha": p.HeadSHA, "external_id": p.ExternalID,
+		"status": p.Status, "conclusion": p.Conclusion,
+	} {
+		if v != "" {
+			body[k] = v
+		}
+	}
+	if p.Title != "" || p.Summary != "" {
+		body["output"] = map[string]any{"title": p.Title, "summary": p.Summary}
+	}
+	return body
+}
+
 // CreateCheckRun creates a check run on the commit and returns its id.
-func (c *Client) CreateCheckRun(ctx context.Context, installationID int64, owner, repo, name, headSHA, status string) (int64, error) {
+func (c *Client) CreateCheckRun(ctx context.Context, installationID int64, owner, repo string, p CheckRunParams) (int64, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
 		return 0, err
@@ -263,13 +300,108 @@ func (c *Client) CreateCheckRun(ctx context.Context, installationID int64, owner
 	}
 	path := fmt.Sprintf("/repos/%s/%s/check-runs",
 		url.PathEscape(owner), url.PathEscape(repo))
-	err = c.do(ctx, http.MethodPost, path, "Bearer "+token, map[string]any{
-		"name": name, "head_sha": headSHA, "status": status,
-	}, &resp)
-	if err != nil {
+	if err := c.do(ctx, http.MethodPost, path, "Bearer "+token, p.body(), &resp); err != nil {
 		return 0, err
 	}
 	return resp.ID, nil
+}
+
+// UpdateCheckRun patches an existing check run.
+func (c *Client) UpdateCheckRun(ctx context.Context, installationID int64, owner, repo string, checkRunID int64, p CheckRunParams) error {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/check-runs/%d",
+		url.PathEscape(owner), url.PathEscape(repo), checkRunID)
+	return c.do(ctx, http.MethodPatch, path, "Bearer "+token, p.body(), nil)
+}
+
+// ListCheckRuns returns the check runs with checkName on the commit.
+func (c *Client) ListCheckRuns(ctx context.Context, installationID int64, owner, repo, ref, checkName string) ([]CheckRun, error) {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		CheckRuns []CheckRun `json:"check_runs"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?check_name=%s&per_page=100",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(ref),
+		url.QueryEscape(checkName))
+	if err := c.do(ctx, http.MethodGet, path, "Bearer "+token, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.CheckRuns, nil
+}
+
+// PullRequest is the slice of the GitHub pull-request object publishing reads.
+type PullRequest struct {
+	Number  int64  `json:"number"`
+	State   string `json:"state"`
+	Draft   bool   `json:"draft"`
+	HTMLURL string `json:"html_url"`
+}
+
+// PullRequestParams describe a draft pull request to open.
+type PullRequestParams struct {
+	Title string
+	Head  string // working branch name
+	Base  string
+	Body  string
+}
+
+// FindPullRequestByHead returns the pull request whose head is
+// headOwner:branch, or nil when none exists. Any state counts: a branch is
+// used by at most one task, so an existing PR in any state is this task's.
+func (c *Client) FindPullRequestByHead(ctx context.Context, installationID int64, owner, repo, headOwner, branch string) (*PullRequest, error) {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	var resp []PullRequest
+	path := fmt.Sprintf("/repos/%s/%s/pulls?state=all&head=%s&per_page=1",
+		url.PathEscape(owner), url.PathEscape(repo),
+		url.QueryEscape(headOwner+":"+branch))
+	if err := c.do(ctx, http.MethodGet, path, "Bearer "+token, nil, &resp); err != nil {
+		return nil, err
+	}
+	if len(resp) == 0 {
+		return nil, nil
+	}
+	return &resp[0], nil
+}
+
+// CreateDraftPullRequest opens a draft pull request and returns it.
+func (c *Client) CreateDraftPullRequest(ctx context.Context, installationID int64, owner, repo string, p PullRequestParams) (PullRequest, error) {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return PullRequest{}, err
+	}
+	var resp PullRequest
+	path := fmt.Sprintf("/repos/%s/%s/pulls",
+		url.PathEscape(owner), url.PathEscape(repo))
+	err = c.do(ctx, http.MethodPost, path, "Bearer "+token, map[string]any{
+		"title": p.Title, "head": p.Head, "base": p.Base, "body": p.Body,
+		"draft": true,
+	}, &resp)
+	if err != nil {
+		return PullRequest{}, err
+	}
+	return resp, nil
+}
+
+// UpdatePullRequestBody replaces the pull request body (retries refresh the
+// evidence-backed body rather than opening a second PR).
+func (c *Client) UpdatePullRequestBody(ctx context.Context, installationID int64, owner, repo string, number int64, body string) error {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	return c.do(ctx, http.MethodPatch, path, "Bearer "+token,
+		map[string]any{"body": body}, nil)
 }
 
 // do issues one API request. A non-2xx status returns *APIError; the

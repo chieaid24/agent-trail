@@ -26,6 +26,37 @@ If there is no diff:
 - Mark the task as no-change or failed.
 - Preserve the explanation.
 
+## Implementation (ADR-0011)
+
+Publishing lives in `apps/api/internal/runner` (`publish.go`) and runs
+inside the agent stages, while the worktree still exists. How each
+idempotency key is realized:
+
+- The working branch is derived deterministically from the task
+  (`issue-<n>-<title>-<task-id-prefix>`) and recorded on the task row,
+  first writer wins, so every retry and recovered owner lands on one
+  branch.
+- The pull request is found by head branch before one is created; a found
+  PR gets its body refreshed instead of a sibling.
+- The check run carries the attempt id as `external_id` and is searched
+  for on the head commit before one is created.
+- `final_commit_sha` and `pull_request_number` on the attempt are
+  first-write-wins.
+
+A clean worktree whose HEAD equals the base is the no-change outcome: no
+push, no PR, a `neutral` check on the base commit, an explaining issue
+comment, and the task fails with code `no_change` carrying the
+explanation (the state machine has no dedicated no-change state; the
+failed state with a distinct code is the recorded mapping). A clean
+worktree whose HEAD moved past the base is a recovered owner's earlier
+commit and publishes as-is.
+
+The issue comment is at-least-once: an owner that dies between the
+comment and the final transition leaves a duplicate comment on retry,
+matching the timeline's at-least-once delivery. `AWAITING_REVIEW` is the
+resting state - runners do not claim it, and the human review gate on the
+draft PR closes the loop.
+
 
 ## Revision Workflow
 

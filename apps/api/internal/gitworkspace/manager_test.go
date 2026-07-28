@@ -347,3 +347,76 @@ func TestWorkspaceContainsRejectsSymlinkEscape(t *testing.T) {
 		t.Fatalf("Contains(escape) = %v, %v; want false, nil", ok, err)
 	}
 }
+
+func TestHeadAndLookup(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	m := newTestManager(t)
+	origin, base := buildOrigin(t)
+	repo := RepoRef{ID: "repo-head", CloneURL: origin}
+
+	w, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-head", BaseSHA: base, BranchLabel: "head test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := m.Head(ctx, w)
+	if err != nil || head != base {
+		t.Fatalf("Head = %q, %v; want %q", head, err, base)
+	}
+
+	got, ok := m.Lookup("attempt-head", repo, w.Branch, base)
+	if !ok || got.Path != w.Path || got.Branch != w.Branch {
+		t.Fatalf("Lookup = %+v, %v", got, ok)
+	}
+	if _, ok := m.Lookup("attempt-gone", repo, w.Branch, base); ok {
+		t.Fatal("Lookup found a workspace that does not exist")
+	}
+
+	// After a commit, Head moves past the base.
+	if err := os.WriteFile(filepath.Join(w.Path, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := m.Commit(ctx, w, CommitParams{Message: "change", TaskID: "t1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err = m.Head(ctx, w)
+	if err != nil || head != sha || head == base {
+		t.Fatalf("Head after commit = %q, %v; want %q", head, err, sha)
+	}
+}
+
+// TestEnsureMirrorSkipsCheckedOutAgentBranches guards the refetch path: once
+// a working branch is pushed to origin, a later mirror fetch must not try to
+// update it (git refuses to fetch into a branch checked out in a worktree).
+func TestEnsureMirrorSkipsCheckedOutAgentBranches(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	m := newTestManager(t)
+	origin, base := buildOrigin(t)
+	repo := RepoRef{ID: "repo-refetch", CloneURL: origin}
+
+	w, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-refetch", BaseSHA: base, BranchLabel: "refetch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.Path, "new.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Commit(ctx, w, CommitParams{Message: "change", TaskID: "t1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Push(ctx, w, PushParams{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The branch now exists on origin and is checked out locally; a refetch
+	// must succeed and leave the local branch alone.
+	if _, err := m.EnsureMirror(ctx, repo); err != nil {
+		t.Fatalf("EnsureMirror after push: %v", err)
+	}
+}

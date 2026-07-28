@@ -205,11 +205,15 @@ created_at
 
 Every state transition emits `task.<new-status>` (e.g. `task.queued`,
 `task.timed_out`), plus `task.created` when the task is inserted. The
-GitHub integration emits `github.comment.posted` and
-`github.check_run.created` for its side effects. The validation family is
-implemented: `validation.started`, `validation.check.completed`,
-`validation.completed`, and `evidence.generated`. Other families
-(workspace, agent, command) arrive with their milestones.
+GitHub integration emits `github.comment.posted`,
+`github.check_run.created`, and `github.check_run.updated` for its side
+effects. The validation family is implemented: `validation.started`,
+`validation.check.completed`, `validation.completed`, and
+`evidence.generated`. Publishing emits `commit.created`, `branch.pushed`,
+`pull_request.created` or `pull_request.updated` (a replayed publish
+refreshes the existing PR), and `publishing.no_change` when a clean
+worktree ends the task without a PR; tasks outside the publishing path
+record `publishing.skipped`.
 Example event types:
 
 ```text
@@ -231,6 +235,10 @@ validation.completed
 commit.created
 branch.pushed
 pull_request.created
+pull_request.updated
+github.check_run.updated
+github.comment.posted
+publishing.no_change
 task.cancelled
 task.failed
 task.completed
