@@ -63,6 +63,15 @@ policy is enforced in code before git runs: branch under `agent-trail/`,
 `remote.origin.mirror=true`, that flag is disabled per push so an explicit
 refspec cannot be reinterpreted as a mirror push.
 
+Mirror refreshes (`EnsureMirror` on an existing cache) first reset the
+stored remote URL: the recorded one may embed an expired installation
+token. The refetch excludes `refs/heads/agent-trail/*`: those branches are
+born locally and pushed out, so local refs are their source of truth, and
+git would refuse to fetch into one checked out by a live worktree anyway.
+Recovery helpers: `Lookup` reattaches a surviving worktree by attempt id,
+and `CleanupStale` clears a dead owner's worktree and branch so the same
+attempt can provision fresh.
+
 Limitation: the per-repository fetch lock that serializes clone and fetch is
 process-local. A single runner process per host is safe; sharing one on-disk
 cache across processes on a host would need a cross-process file lock, deferred

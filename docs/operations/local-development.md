@@ -39,7 +39,7 @@ make seed              # demo tasks (skips when tasks already exist)
 make test              # unit tests, both apps
 make integration-test  # adds the suites that need a real database
 make e2e               # browser suite - lands with milestone 8
-make demo              # scripted issue-to-PR demo - lands with milestone 7
+make demo              # scripted issue-to-PR demo against a simulated GitHub
 make clean             # stop infra, drop volumes, remove build artifacts
 make hooks             # activate the pre-commit hook (once per clone)
 bash scripts/gate.sh   # the exact CI gate, locally

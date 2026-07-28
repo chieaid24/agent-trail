@@ -92,7 +92,7 @@ JOIN tasks t ON t.id = a.task_id
 WHERE a.status = 'active'
   AND (a.lease_expires_at IS NULL OR a.lease_expires_at < now())
   AND t.status IN ('queued', 'provisioning', 'planning', 'executing',
-                   'validating', 'publishing', 'awaiting_review')
+                   'validating', 'publishing')
 ORDER BY t.priority DESC, t.created_at
 FOR UPDATE OF a SKIP LOCKED
 LIMIT 1;
@@ -103,6 +103,9 @@ claim; any later status is recovery of an attempt whose owner lost its
 lease, and the new owner resumes from the recorded status. Delivery is
 at-least-once, so a resumed attempt may repeat agent events on the
 timeline; only-one-owner-at-a-time is the invariant the lease enforces.
+`awaiting_review` is deliberately not claimable: a published task rests
+there for the human on the draft PR, and re-claiming it would spin
+runners on finished work.
 
 Lease fields on `task_attempts`:
 
@@ -130,8 +133,11 @@ Because the runner and control plane share one process and one database,
 claiming goes straight through PostgreSQL (ADR-0003); the internal runner
 HTTP API in docs/architecture/api.md lands when runners move out of
 process (runner isolation milestone). Trusted validation runs in the
-workspace after editing ends (docs/architecture/validation.md, ADR-0009);
-publishing is recorded as skipped on the timeline until milestone 7, and
-the fake flow auto-completes from awaiting_review - there is nothing
-published to review yet, so the human review gate becomes real with
-publishing.
+workspace after editing ends (docs/architecture/validation.md, ADR-0009).
+For repository-backed tasks with the GitHub App configured, the workspace
+is a real git worktree and publishing commits, pushes, and opens the
+evidence-backed draft PR (docs/architecture/publishing.md, ADR-0011),
+leaving the task in awaiting_review for a human. Tasks without a
+repository (API-created) keep the fake local flow: temp-dir workspace,
+publishing recorded as skipped, auto-completion - there is nothing
+published to review.
