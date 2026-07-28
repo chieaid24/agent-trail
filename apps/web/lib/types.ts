@@ -1,8 +1,9 @@
-// Domain types for the dashboard, mirroring docs/architecture/data-model.md
-// and the task state machine. The dashboard is read-mostly, so these carry the
-// fields the UI renders, not the full persistence schema.
+// Wire types for the control-plane API (docs/architecture/api.md). Field
+// names and casing mirror the Go JSON tags exactly; every nullable column
+// arrives as null, never absent.
 
 export type TaskStatus =
+  | "created"
   | "queued"
   | "provisioning"
   | "planning"
@@ -10,13 +11,14 @@ export type TaskStatus =
   | "validating"
   | "publishing"
   | "awaiting_review"
+  | "revision_requested"
   | "completed"
   | "failed"
   | "cancelled"
   | "timed_out";
 
-// Terminal statuses accept no further transitions; cancellation is offered only
-// for the rest (task-state-machine.md: cancellation from any non-terminal state).
+export type TaskPhase = "pending" | "running" | "review" | "terminal";
+
 export const TERMINAL_STATUSES: readonly TaskStatus[] = [
   "completed",
   "failed",
@@ -30,64 +32,55 @@ export function isTerminal(status: TaskStatus): boolean {
 
 export interface Task {
   id: string;
-  repositoryId: string;
-  repositoryFullName: string;
-  sourceIssueNumber: number;
+  organization_id: string | null;
+  repository_id: string | null;
+  source_type: string;
+  source_issue_number: number | null;
+  source_comment_id: number | null;
   title: string;
   instructions: string;
   status: TaskStatus;
-  agentProvider: string;
-  agentModel: string;
-  baseCommitSha: string;
-  finalCommitSha: string | null;
-  workingBranch: string | null;
-  pullRequestNumber: number | null;
-  pullRequestUrl: string | null;
-  requestedBy: string;
-  maxRuntimeSeconds: number;
-  maxCostUsd: number;
-  costUsd: number;
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  failureCode: string | null;
-  failureMessage: string | null;
-  filesChanged: FileChange[];
-  deniedActions: DeniedAction[];
+  phase: TaskPhase;
+  priority: number;
+  base_branch: string;
+  base_commit_sha: string | null;
+  working_branch: string | null;
+  agent_provider: string | null;
+  agent_model: string | null;
+  policy_id: string | null;
+  requested_by_user_id: string | null;
+  max_runtime_seconds: number | null;
+  max_cost_usd: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  cancel_requested_at: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
 }
 
-export interface FileChange {
-  path: string;
-  additions: number;
-  deletions: number;
-}
+export type ActivitySource = "api" | "system" | "runner" | "agent";
+export type RedactionStatus = "none" | "pending" | "redacted";
 
-export interface DeniedAction {
-  action: string;
-  reason: string;
-  timestamp: string;
-}
-
-// One row of the append-only activity timeline (data-model.md: Activity event).
+// One row of the append-only activity timeline. Sequence numbers restart
+// per attempt; (attempt_number, sequence_number) orders the timeline and is
+// the SSE resume cursor.
 export interface ActivityEvent {
   id: string;
-  sequence: number;
-  type: string;
-  source: "runner" | "agent" | "platform";
+  task_attempt_id: string;
+  attempt_number: number;
+  sequence_number: number;
+  event_type: string;
+  source: ActivitySource;
   timestamp: string;
-  message: string;
-  redacted: boolean;
+  payload: Record<string, unknown>;
+  redaction_status: RedactionStatus;
+  created_at: string;
 }
 
-export type LogStream = "stdout" | "stderr";
-
-export interface LogLine {
-  sequence: number;
-  stream: LogStream;
-  text: string;
-  // Redacted lines render a visible marker, never a silent gap (DESIGN.md).
-  redacted: boolean;
-}
+export type ValidationStatus = "passed" | "failed" | "timed_out" | "error";
 
 export type ValidationCategory =
   | "unit_test"
@@ -101,71 +94,64 @@ export type ValidationCategory =
   | "build"
   | "custom";
 
-export type ValidationStatus = "passed" | "failed" | "skipped";
-
 export interface ValidationResult {
   id: string;
+  task_attempt_id: string;
+  attempt_number: number;
   name: string;
   category: ValidationCategory;
-  command: string;
+  command: string[];
   status: ValidationStatus;
-  exitCode: number | null;
-  durationMs: number | null;
+  exit_code: number | null;
+  duration_ms: number;
   summary: string;
-  // The trust distinction: platform-verified runs are trusted; agent-reported
-  // ones are claims. Never blurred (DESIGN.md, spec requirement).
-  trustedExecution: boolean;
+  // The trust distinction (VISION.md principle 4): true means the platform
+  // ran and measured the command; false means the agent merely claimed it.
+  trusted_execution: boolean;
+  created_at: string;
 }
 
-export interface EvidenceReport {
-  schemaVersion: string;
-  summaryMarkdown: string;
-  baseCommitSha: string;
-  finalCommitSha: string | null;
-  runnerImage: string;
-  agentProvider: string;
-  agentModel: string;
-  policyVersion: string;
-  runtimeSeconds: number;
-  createdAt: string;
+// The evidence report document (apps/api/internal/evidence/report.go).
+// Optional fields use omitempty on the Go side, so they may be absent.
+export interface EvidenceReportDocument {
+  schema_version: number;
+  task: {
+    id: string;
+    source_issue?: number;
+    title: string;
+    requested_by?: string;
+  };
+  execution: {
+    agent_provider?: string;
+    agent_model?: string;
+    base_commit?: string;
+    final_commit?: string;
+    duration_seconds?: number;
+  };
+  plan?: string[];
+  changes: {
+    files_changed: number;
+    files?: string[];
+  };
+  validation: {
+    name: string;
+    category?: string;
+    status: string;
+    trusted_execution: boolean;
+    exit_code?: number;
+    duration_ms?: number;
+    summary?: string;
+  }[];
+  risks?: string[];
+  unverified?: string[];
 }
 
-export type RunnerStatus = "idle" | "busy" | "draining" | "offline";
-
-export interface Runner {
+export interface StoredEvidence {
   id: string;
-  runnerType: string;
-  hostnameOrPod: string;
-  status: RunnerStatus;
-  capacity: number;
-  activeTasks: number;
-  currentTaskId: string | null;
-  lastHeartbeatAt: string;
-  cpuPercent: number;
-  memoryPercent: number;
-  diskPercent: number;
-  recentFailures: number;
-}
-
-export interface Repository {
-  id: string;
-  fullName: string;
-  owner: string;
-  name: string;
-  defaultBranch: string;
-  isPrivate: boolean;
-  isEnabled: boolean;
-  defaultPolicy: string;
-  validationConfig: string[];
-  activeTaskIds: string[];
-  completedTaskCount: number;
-  failedTaskCount: number;
-}
-
-export interface Organization {
-  id: string;
-  name: string;
-  slug: string;
-  accountLogin: string;
-  accountType: "Organization" | "User";
+  task_attempt_id: string;
+  attempt_number: number;
+  schema_version: number;
+  summary_markdown: string;
+  report: EvidenceReportDocument;
+  created_at: string;
 }
