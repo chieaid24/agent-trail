@@ -451,7 +451,6 @@ func ids(tasks []Task) []string {
 	return out
 }
 
-<<<<<<< HEAD
 func TestEventsAfterReturnsSuffixAcrossAttempts(t *testing.T) {
 	s := NewStore(testDB(t))
 	tk := mustCreate(t, s)
@@ -501,7 +500,9 @@ func TestEventsAfterReturnsSuffixAcrossAttempts(t *testing.T) {
 
 	if _, err := s.EventsAfter(ctx, "3b241101-e2bb-4255-8caf-4136c566a962", 0, 0, 0); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown task error = %v, want ErrNotFound", err)
-=======
+	}
+}
+
 func TestEnsureGitContextFirstWriterWins(t *testing.T) {
 	ts := NewStore(dbtest.Open(t))
 	ctx := context.Background()
@@ -543,6 +544,5 @@ func TestEnsureGitContextUnknownTask(t *testing.T) {
 		"1111111111111111111111111111111111111111", "agent-trail/x")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
->>>>>>> origin/main
 	}
 }
