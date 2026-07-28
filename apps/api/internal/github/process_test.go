@@ -50,7 +50,7 @@ func (f *fakeAPI) CreateIssueComment(_ context.Context, _ int64, _, _ string, _ 
 	return nil
 }
 
-func (f *fakeAPI) CreateCheckRun(context.Context, int64, string, string, string, string, string) (int64, error) {
+func (f *fakeAPI) CreateCheckRun(context.Context, int64, string, string, CheckRunParams) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.checkRuns++

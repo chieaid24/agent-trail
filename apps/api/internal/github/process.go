@@ -44,7 +44,7 @@ type API interface {
 	CollaboratorPermission(ctx context.Context, installationID int64, owner, repo, username string) (string, error)
 	BranchHeadSHA(ctx context.Context, installationID int64, owner, repo, branch string) (string, error)
 	CreateIssueComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int64, body string) error
-	CreateCheckRun(ctx context.Context, installationID int64, owner, repo, name, headSHA, status string) (int64, error)
+	CreateCheckRun(ctx context.Context, installationID int64, owner, repo string, p CheckRunParams) (int64, error)
 }
 
 // Processor handles accepted deliveries asynchronously: installation and
@@ -437,7 +437,12 @@ func (p *Processor) createCheckRun(ctx context.Context, d Delivery, instID int64
 	if err == nil {
 		var checkRunID int64
 		checkRunID, err = p.api.CreateCheckRun(ctx, instID, repo.Owner,
-			repo.Name, checkRunName, headSHA, "queued")
+			repo.Name, CheckRunParams{
+				Name:       checkRunName,
+				HeadSHA:    headSHA,
+				ExternalID: created.ID,
+				Status:     "queued",
+			})
 		if err == nil {
 			p.appendTaskEvent(ctx, created.ID, "github.check_run.created",
 				map[string]string{
