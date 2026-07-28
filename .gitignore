@@ -21,3 +21,5 @@ next-env.d.ts
 
 # Test artifacts
 coverage/
+apps/web/e2e/.artifacts/
+apps/web/e2e/screenshots/

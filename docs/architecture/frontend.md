@@ -1,5 +1,14 @@
 # Frontend
 
+Implemented: the dashboard overview and the task detail screen, against the
+task API surface that exists (docs/architecture/api.md). Login and
+installation, the repository page, and the runner page wait on their
+backend endpoints (auth, organizations/repositories, runners) and are
+tracked as queue issues. Runner health, recent repositories, the
+pull-request link, and the permissions and denied-actions views render once
+their data is served (denied actions also need a policy event surface the
+runner does not emit yet).
+
 ### Screens
 
 #### Login and installation

@@ -84,6 +84,10 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer's Flusher,
+// which streaming responses (SSE) need.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 // Middleware assigns each request a correlation id (honouring a valid inbound
 // X-Trace-Id), echoes it on the response, and logs one structured line per
 // request.

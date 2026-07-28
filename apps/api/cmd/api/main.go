@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -79,15 +80,19 @@ func run() error {
 			processor, logger, metrics)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	srv := &http.Server{
 		Addr: cfg.APIAddr,
 		Handler: httpapi.New(logger, pinger, tasks, validations,
 			evidenceReports, webhook, metrics.Handler()).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		// Request contexts derive from the signal context, so long-lived
+		// handlers (the SSE stream) end when shutdown starts instead of
+		// pinning Shutdown to its deadline.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	errc := make(chan error, 1)
 	go func() {

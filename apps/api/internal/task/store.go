@@ -299,6 +299,63 @@ func (s *Store) Events(ctx context.Context, id string, limit int) ([]Event, erro
 	return events, nil
 }
 
+// EventsAfter returns timeline events strictly after the (attempt, sequence)
+// cursor, ordered by attempt then sequence. It backs SSE resumption
+// (Last-Event-ID): a zero cursor returns the timeline from the start.
+func (s *Store) EventsAfter(ctx context.Context, id string, afterAttempt int, afterSequence int64, limit int) ([]Event, error) {
+	if !IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	var exists bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM tasks WHERE id = $1)`, id).Scan(&exists)
+	if err != nil {
+		return nil, fmt.Errorf("check task: %w", err)
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT e.id, e.task_attempt_id, a.attempt_number, e.sequence_number,
+			e.event_type, e.source, e."timestamp", e.payload_json,
+			e.redaction_status, e.created_at
+		FROM activity_events e
+		JOIN task_attempts a ON a.id = e.task_attempt_id
+		WHERE a.task_id = $1
+			AND (a.attempt_number, e.sequence_number) > ($2, $3)
+		ORDER BY a.attempt_number, e.sequence_number
+		LIMIT %d`, limit), id, afterAttempt, afterSequence)
+	if err != nil {
+		return nil, fmt.Errorf("list events after cursor: %w", err)
+	}
+	defer rows.Close()
+
+	events := []Event{}
+	for rows.Next() {
+		var e Event
+		var payload []byte
+		if err := rows.Scan(&e.ID, &e.TaskAttemptID, &e.AttemptNumber,
+			&e.SequenceNumber, &e.EventType, &e.Source, &e.Timestamp,
+			&payload, &e.RedactionStatus, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		e.Payload = json.RawMessage(payload)
+		events = append(events, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list events after cursor: %w", err)
+	}
+	return events, nil
+}
+
 // AppendAttemptEvent appends one non-transition activity event (agent
 // output, workspace lifecycle, ...) to an attempt's timeline. It takes the
 // task row lock so the sequence number cannot race a transition.

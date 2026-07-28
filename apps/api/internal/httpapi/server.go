@@ -27,6 +27,10 @@ type Server struct {
 	evidence    EvidenceService   // nil when DATABASE_URL is not configured
 	webhook     http.Handler      // nil when the GitHub integration is not configured
 	metrics     http.Handler      // nil disables GET /metrics
+
+	// SSE stream cadence; defaulted in New, shortened in tests.
+	streamPollInterval time.Duration
+	streamHeartbeat    time.Duration
 }
 
 var _ DBPinger = (*sql.DB)(nil)
@@ -40,6 +44,8 @@ func New(logger *slog.Logger, db DBPinger, tasks TaskService,
 		logger: logger, db: db, tasks: tasks,
 		validations: validations, evidence: ev,
 		webhook: webhook, metrics: metrics,
+		streamPollInterval: time.Second,
+		streamHeartbeat:    15 * time.Second,
 	}
 }
 
@@ -53,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}", s.handleGetTask)
 	mux.HandleFunc("POST /api/v1/tasks/{taskId}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/events", s.handleTaskEvents)
+	mux.HandleFunc("GET /api/v1/tasks/{taskId}/stream", s.handleTaskStream)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
 	mux.HandleFunc("POST /webhooks/github", s.handleWebhook)
