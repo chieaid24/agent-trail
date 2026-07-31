@@ -330,3 +330,24 @@ report_json
 report_object_key
 created_at
 ```
+
+### Task conflict
+
+Implemented (migration `00006_conflict_detection.sql`). One row per
+unordered pair of tasks in a repository whose published diffs overlap
+(conflict-detection.md). The pair is normalized (`task_a_id < task_b_id`,
+unique) so detection from either side writes the same row; the worker
+rewrites it whenever either side publishes. Reads filter both tasks to a
+non-terminal phase, so a finished task's warnings vanish without a delete.
+
+```text
+id
+repository_id
+task_a_id
+task_b_id
+kinds_json    -- non-empty array of: file_overlap, adjacent_lines,
+              -- merge_conflict, migration, dependency
+files_json    -- implicated paths
+detected_at
+updated_at
+```

@@ -35,6 +35,7 @@ Show:
 Show:
 
 - Status
+- Conflict warnings (overlapping active tasks, conflict-detection.md)
 - Original issue
 - Agent plan
 - Live timeline
