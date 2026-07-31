@@ -36,7 +36,16 @@ type runner struct{}
 // run executes git args in dir (empty means the process working directory) and
 // returns trimmed stdout. On a non-zero exit it returns a *CommandError with
 // credential-redacted stderr.
-func (runner) run(ctx context.Context, dir string, args ...string) (string, error) {
+func (r runner) run(ctx context.Context, dir string, args ...string) (string, error) {
+	out, _, err := r.runExit(ctx, dir, nil, args...)
+	return out, err
+}
+
+// runExit is run for commands whose listed non-zero exit codes carry data
+// rather than failure (merge-tree exits 1 on a conflicting merge): it returns
+// stdout and the exit code when the exit is 0 or listed in okExits, and a
+// *CommandError otherwise.
+func (runner) runExit(ctx context.Context, dir string, okExits []int, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, gitBin, args...)
 	cmd.Dir = dir
 	cmd.Env = hardenedEnv()
@@ -54,9 +63,14 @@ func (runner) run(ctx context.Context, dir string, args ...string) (string, erro
 			ce.ExitCode = -1
 			ce.Stderr = strings.TrimSpace(redactSecrets(err.Error()) + " " + ce.Stderr)
 		}
-		return "", ce
+		for _, code := range okExits {
+			if ce.ExitCode == code {
+				return strings.TrimRight(stdout.String(), "\n"), ce.ExitCode, nil
+			}
+		}
+		return "", ce.ExitCode, ce
 	}
-	return strings.TrimRight(stdout.String(), "\n"), nil
+	return strings.TrimRight(stdout.String(), "\n"), 0, nil
 }
 
 // hardenedEnv isolates git from host configuration and interactive prompts so
