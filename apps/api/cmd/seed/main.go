@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
+	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
@@ -136,9 +138,12 @@ func run() error {
 			slog.String("status", string(t.Status)),
 		)
 	}
+	if err := seedConflictDemo(ctx, db, store, organizationID, repositoryIDs[0]); err != nil {
+		return fmt.Errorf("seed conflict demo: %w", err)
+	}
 	logger.LogAttrs(ctx, slog.LevelInfo, "seed complete",
 		slog.String("event", "seed_done"),
-		slog.Int("tasks", len(demoTasks())),
+		slog.Int("tasks", len(demoTasks())+2),
 	)
 	return nil
 }
@@ -183,4 +188,56 @@ func seedRepositories(ctx context.Context, db *sql.DB) (string, []string, error)
 		ids = append(ids, id)
 	}
 	return organizationID, ids, nil
+}
+
+// Conflict demo pair titles; the e2e suite looks these up by title.
+const (
+	conflictTaskATitle = "Demo: extract the payment client"
+	conflictTaskBTitle = "Demo: add retries to the payment client"
+)
+
+// seedConflictDemo adds an active pair with a stored overlap warning.
+func seedConflictDemo(ctx context.Context, db *sql.DB, store *task.Store,
+	orgID, repoID string) error {
+	toAwaitingReview := []task.TransitionParams{
+		{To: task.StatusProvisioning}, {To: task.StatusPlanning},
+		{To: task.StatusExecuting}, {To: task.StatusValidating},
+		{To: task.StatusPublishing}, {To: task.StatusAwaitingReview},
+	}
+	pair := []struct {
+		title, instructions, base, branch string
+	}{
+		{conflictTaskATitle,
+			"Extract the payment HTTP client into internal/payments.",
+			strings.Repeat("a1", 20), "agent-trail/extract-payment-client"},
+		{conflictTaskBTitle,
+			"Add retry with backoff to the payment client.",
+			strings.Repeat("b2", 20), "agent-trail/payment-client-retries"},
+	}
+	ids := make([]string, len(pair))
+	for i, p := range pair {
+		t, err := store.Create(ctx, task.CreateParams{
+			Title:          p.title,
+			Instructions:   p.instructions,
+			OrganizationID: &orgID,
+			RepositoryID:   &repoID,
+		})
+		if err != nil {
+			return fmt.Errorf("create %q: %w", p.title, err)
+		}
+		for _, step := range toAwaitingReview {
+			if _, err := store.Transition(ctx, t.ID, step); err != nil {
+				return fmt.Errorf("transition %q to %s: %w", p.title, step.To, err)
+			}
+		}
+		if _, _, err := store.EnsureGitContext(ctx, t.ID, p.base, p.branch); err != nil {
+			return fmt.Errorf("git context %q: %w", p.title, err)
+		}
+		ids[i] = t.ID
+	}
+
+	return conflict.NewStore(db).Upsert(ctx, repoID, ids[0], ids[1],
+		[]conflict.Kind{conflict.KindFileOverlap, conflict.KindAdjacentLines,
+			conflict.KindMergeConflict},
+		[]string{"internal/payments/client.go"})
 }

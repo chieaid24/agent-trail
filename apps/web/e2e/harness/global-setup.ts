@@ -79,9 +79,17 @@ export default async function globalSetup(): Promise<void> {
 
   // The fake adapter finishes in seconds. The worker takes the seeded
   // queued task and also recovers the seeded mid-flight one, so wait until
-  // every seeded task is terminal and specs see stable timelines.
-  const terminal = new Set(["completed", "failed", "cancelled", "timed_out"]);
-  await waitFor("worker drives seeded tasks terminal", 60_000, async () => {
+  // every seeded task is settled and specs see stable timelines.
+  // awaiting_review counts as settled: it is a resting state the runner
+  // never claims, where the seeded conflict-demo pair deliberately stays.
+  const settled = new Set([
+    "completed",
+    "failed",
+    "cancelled",
+    "timed_out",
+    "awaiting_review",
+  ]);
+  await waitFor("worker drives seeded tasks to rest", 60_000, async () => {
     const res = await fetch(`${apiBaseUrl}/api/v1/tasks`).catch(() => null);
     if (!res?.ok) return false;
     const body = (await res.json()) as {
@@ -90,7 +98,7 @@ export default async function globalSetup(): Promise<void> {
     return (
       body.tasks.some(
         (t) => t.title === EXECUTED_TASK_TITLE && t.status === "completed",
-      ) && body.tasks.every((t) => terminal.has(t.status))
+      ) && body.tasks.every((t) => settled.has(t.status))
     );
   });
 }

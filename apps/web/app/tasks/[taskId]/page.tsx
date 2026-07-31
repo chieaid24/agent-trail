@@ -4,12 +4,19 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { CancelButton } from "@/components/CancelButton";
+import { ConflictWarning } from "@/components/ConflictWarning";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { LogViewer } from "@/components/LogViewer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Timeline } from "@/components/Timeline";
 import { ValidationList } from "@/components/ValidationList";
-import { ApiError, getEvidence, getTask, listValidations } from "@/lib/api";
+import {
+  ApiError,
+  getEvidence,
+  getTask,
+  listConflicts,
+  listValidations,
+} from "@/lib/api";
 import {
   formatDateTime,
   formatDuration,
@@ -18,7 +25,12 @@ import {
 } from "@/lib/format";
 import { changedFiles, latestPlan } from "@/lib/timeline";
 import { useTaskStream, type StreamState } from "@/lib/useTaskStream";
-import type { StoredEvidence, Task, ValidationResult } from "@/lib/types";
+import type {
+  StoredEvidence,
+  Task,
+  TaskConflict,
+  ValidationResult,
+} from "@/lib/types";
 import { isTerminal } from "@/lib/types";
 
 const TASK_POLL_MS = 10_000;
@@ -50,6 +62,7 @@ export default function TaskPage({
   const [state, setState] = useState<TaskState>({ phase: "loading" });
   const [validations, setValidations] = useState<ValidationResult[]>([]);
   const [evidence, setEvidence] = useState<StoredEvidence | null>(null);
+  const [conflicts, setConflicts] = useState<TaskConflict[]>([]);
   const [tab, setTab] = useState<TabKey>("timeline");
   const stream = useTaskStream(taskId);
 
@@ -82,14 +95,23 @@ export default function TaskPage({
     }
   }, [taskId]);
 
+  const loadConflicts = useCallback(async () => {
+    try {
+      setConflicts(await listConflicts(taskId));
+    } catch {
+      // Same: non-fatal, retried on the next trigger.
+    }
+  }, [taskId]);
+
   useEffect(() => {
     const initial = setTimeout(() => {
       void loadTask();
       void loadValidations();
       void loadEvidence();
+      void loadConflicts();
     }, 0);
     return () => clearTimeout(initial);
-  }, [loadTask, loadValidations, loadEvidence]);
+  }, [loadTask, loadValidations, loadEvidence, loadConflicts]);
 
   // The stream drives freshness: a lifecycle event refetches the task, a
   // validation or evidence event refetches its view.
@@ -101,6 +123,9 @@ export default function TaskPage({
   ).length;
   const evidenceEventCount = stream.events.filter(
     (e) => e.event_type === "evidence.generated",
+  ).length;
+  const conflictEventCount = stream.events.filter(
+    (e) => e.event_type === "conflict.detected",
   ).length;
 
   useEffect(() => {
@@ -118,14 +143,24 @@ export default function TaskPage({
     const refresh = setTimeout(() => void loadEvidence(), 0);
     return () => clearTimeout(refresh);
   }, [evidenceEventCount, loadEvidence]);
+  useEffect(() => {
+    if (conflictEventCount === 0) return;
+    const refresh = setTimeout(() => void loadConflicts(), 0);
+    return () => clearTimeout(refresh);
+  }, [conflictEventCount, loadConflicts]);
 
-  // Poll fallback while the task runs, in case the stream stalls.
+  // Poll fallback while the task runs, in case the stream stalls. Conflicts
+  // ride the same poll: a sibling's publish changes them with no event on
+  // this task's stream.
   const running = state.phase === "ready" && !isTerminal(state.task.status);
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(() => void loadTask(), TASK_POLL_MS);
+    const t = setInterval(() => {
+      void loadTask();
+      void loadConflicts();
+    }, TASK_POLL_MS);
     return () => clearInterval(t);
-  }, [running, loadTask]);
+  }, [running, loadTask, loadConflicts]);
 
   const files = useMemo(() => changedFiles(stream.events), [stream.events]);
   const plan = useMemo(() => latestPlan(stream.events), [stream.events]);
@@ -147,6 +182,7 @@ export default function TaskPage({
             task={state.task}
             streamState={stream.state}
             plan={plan}
+            conflicts={conflicts}
             onTaskChanged={(t) => setState({ phase: "ready", task: t })}
           >
             <TabBar
@@ -180,12 +216,14 @@ function TaskDetail({
   task,
   streamState,
   plan,
+  conflicts,
   onTaskChanged,
   children,
 }: {
   task: Task;
   streamState: StreamState;
   plan: string | null;
+  conflicts: TaskConflict[];
   onTaskChanged: (t: Task) => void;
   children: React.ReactNode;
 }) {
@@ -222,6 +260,7 @@ function TaskDetail({
             {task.failure_message ?? "No failure detail was recorded."}
           </p>
         ) : null}
+        <ConflictWarning conflicts={conflicts} />
 
         <dl className="mt-4 grid grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 text-sm lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
           {task.source_issue_number !== null && (

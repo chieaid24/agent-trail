@@ -22,6 +22,9 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 	db := dbtest.Open(t) // skips without TEST_DATABASE_URL
 	t.Setenv("DATABASE_URL", os.Getenv("TEST_DATABASE_URL"))
 
+	// The demo set plus the two-task conflict pair.
+	want := len(demoTasks()) + 2
+
 	if err := run(); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -29,8 +32,28 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM tasks`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != len(demoTasks()) {
-		t.Fatalf("tasks = %d, want %d", count, len(demoTasks()))
+	if count != want {
+		t.Fatalf("tasks = %d, want %d", count, want)
+	}
+
+	// The conflict pair rests at awaiting_review (unclaimable, non-terminal)
+	// with one stored warning between its members.
+	var pairCount int
+	if err := db.QueryRow(`
+		SELECT count(*) FROM tasks
+		WHERE title IN ($1, $2) AND status = 'awaiting_review'`,
+		conflictTaskATitle, conflictTaskBTitle).Scan(&pairCount); err != nil {
+		t.Fatal(err)
+	}
+	if pairCount != 2 {
+		t.Fatalf("awaiting_review pair tasks = %d, want 2", pairCount)
+	}
+	var conflictCount int
+	if err := db.QueryRow(`SELECT count(*) FROM task_conflicts`).Scan(&conflictCount); err != nil {
+		t.Fatal(err)
+	}
+	if conflictCount != 1 {
+		t.Fatalf("task_conflicts = %d, want 1", conflictCount)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM repositories`).Scan(&count); err != nil {
 		t.Fatal(err)
@@ -46,7 +69,7 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM tasks`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != len(demoTasks()) {
-		t.Fatalf("tasks after second run = %d, want %d", count, len(demoTasks()))
+	if count != want {
+		t.Fatalf("tasks after second run = %d, want %d", count, want)
 	}
 }

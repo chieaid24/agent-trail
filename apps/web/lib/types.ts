@@ -244,3 +244,22 @@ export interface RunnerDetail extends Runner {
   current_tasks: DashboardTask[];
   recent_failures: DashboardTask[];
 }
+
+export type ConflictKind =
+  | "file_overlap"
+  | "adjacent_lines"
+  | "merge_conflict"
+  | "migration"
+  | "dependency";
+
+// One stored overlap warning against another active task of the same
+// repository (docs/architecture/conflict-detection.md).
+export interface TaskConflict {
+  id: string;
+  other_task_id: string;
+  other_task_title: string;
+  kinds: ConflictKind[];
+  files: string[];
+  detected_at: string;
+  updated_at: string;
+}
