@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -221,7 +222,7 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, c *Claim, t task.Ta
 	}); err != nil {
 		return "", err
 	}
-	return e.publishToGitHub(ctx, c, t, pub, ws.Branch, sha)
+	return e.publishToGitHub(ctx, c, t, pub, ws.Branch, ws.BaseSHA, sha)
 }
 
 // publishRecovered resumes publishing for an attempt claimed at status
@@ -259,14 +260,17 @@ func (e *Executor) publishRecovered(ctx context.Context, c *Claim, t task.Task, 
 	if err := e.Store.RecordFinalCommit(ctx, c.AttemptID, head); err != nil {
 		return "", err
 	}
-	return e.publishToGitHub(ctx, c, t, pub, branch, head)
+	return e.publishToGitHub(ctx, c, t, pub, branch, base, head)
 }
 
 // publishToGitHub drives the GitHub surface from a pushed branch: one draft
 // PR (found or created by head branch), one check run (found or created by
 // external id), the issue comment, then awaiting_review. Every step is safe
 // to replay.
-func (e *Executor) publishToGitHub(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, branch, finalSHA string) (task.Status, error) {
+func (e *Executor) publishToGitHub(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, branch, baseSHA, finalSHA string) (task.Status, error) {
+	if err := e.detectConflicts(ctx, c, t, baseSHA, finalSHA); err != nil {
+		return "", err
+	}
 	rc := pub.repo
 	report, markdown, err := e.storedReport(ctx, c.TaskID)
 	if err != nil {
@@ -379,6 +383,42 @@ func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, p
 		}
 	}
 	return e.failTask(ctx, c, "no_change", explanation)
+}
+
+// detectConflicts compares the published diff against the repository's other
+// active tasks and records overlap warnings plus a timeline event per pair
+// (docs/architecture/conflict-detection.md). Detection is observability, so
+// its own failure is logged and never fails the publish; only a failed
+// timeline append propagates, like every other append.
+func (e *Executor) detectConflicts(ctx context.Context, c *Claim, t task.Task, baseSHA, finalSHA string) error {
+	if e.Conflicts == nil || t.RepositoryID == nil {
+		return nil
+	}
+	// Read-only mirror access needs no credential, so no clone URL.
+	repo := gitworkspace.RepoRef{ID: *t.RepositoryID}
+	detections, err := e.Conflicts.Detect(ctx, repo, *t.RepositoryID, t.ID, baseSHA, finalSHA)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		e.Logger.LogAttrs(ctx, slog.LevelWarn, "conflict detection failed",
+			slog.String("event", "conflict_detection_failed"),
+			slog.String("task_id", t.ID),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	for _, det := range detections {
+		if err := e.append(ctx, c, "conflict.detected", "runner", map[string]any{
+			"other_task_id":    det.OtherTaskID,
+			"other_task_title": det.OtherTaskTitle,
+			"kinds":            det.Kinds,
+			"files":            det.Files,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // upsertCheckRun creates the check run or, when a replayed publish already

@@ -20,6 +20,7 @@ import (
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
+	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/github"
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
@@ -87,10 +88,12 @@ func run() error {
 	metrics := observability.NewRegistry()
 
 	// GitHub publishing needs the App credentials and a workspace root;
-	// without them the worker runs the fake local flow only.
+	// without them the worker runs the fake local flow only. Conflict
+	// detection rides on the same workspace root: no mirrors, no diffs.
 	var workspaces *gitworkspace.Manager
 	var publishAPI runner.PublishGitHub
 	var repos runner.RepositoryResolver
+	var conflicts *conflict.Detector
 	if cfg.GitHubEnabled() {
 		keyPEM, err := os.ReadFile(cfg.GitHubAppPrivateKeyPath)
 		if err != nil {
@@ -107,6 +110,11 @@ func run() error {
 		}
 		publishAPI = client
 		repos = github.NewStore(db)
+		conflicts = &conflict.Detector{
+			Git:     workspaces,
+			Records: conflict.NewStore(db),
+			Logger:  logger,
+		}
 	}
 
 	host := &runner.Host{
@@ -121,6 +129,7 @@ func run() error {
 			Workspaces:    workspaces,
 			GitHub:        publishAPI,
 			Repos:         repos,
+			Conflicts:     conflicts,
 			LeaseDuration: cfg.RunnerLease,
 		},
 		Logger:        logger,

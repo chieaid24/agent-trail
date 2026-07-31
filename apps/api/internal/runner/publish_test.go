@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
+	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 	"github.com/chieaid24/agent-trail/apps/api/internal/github"
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
@@ -502,5 +503,86 @@ func TestPublishNoChangeCreatesNoPR(t *testing.T) {
 	refs := gitRun(t, f.origin, "for-each-ref", "--format=%(refname)", "refs/heads")
 	if refs != "refs/heads/main" {
 		t.Fatalf("origin refs = %q, want only main", refs)
+	}
+}
+
+// TestPublishDetectsConflictBetweenActiveTasks: two active tasks of one
+// repository publish in turn; both write the fake adapter's fixture files,
+// so the second publish must store a task_conflicts pair and record a
+// conflict.detected timeline event naming the first task.
+func TestPublishDetectsConflictBetweenActiveTasks(t *testing.T) {
+	f := newPublishFixture(t)
+	ctx := context.Background()
+	f.exec.Conflicts = &conflict.Detector{
+		Git:     f.exec.Workspaces,
+		Records: conflict.NewStore(f.db),
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	issue := int64(43)
+	second, err := f.tasks.Create(ctx, task.CreateParams{
+		Title:             "second publishing task",
+		Instructions:      "do the other thing",
+		BaseBranch:        "main",
+		SourceType:        "github_issue",
+		SourceIssueNumber: &issue,
+		OrganizationID:    f.task.OrganizationID,
+		RepositoryID:      f.task.RepositoryID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c1 := f.claim(t)
+	if c1.TaskID != f.task.ID {
+		t.Fatalf("first claim = %s, want %s", c1.TaskID, f.task.ID)
+	}
+	if err := f.exec.Execute(ctx, f.runner.ID, c1); err != nil {
+		t.Fatal(err)
+	}
+	c2 := f.claim(t)
+	if c2.TaskID != second.ID {
+		t.Fatalf("second claim = %s, want %s", c2.TaskID, second.ID)
+	}
+	if err := f.exec.Execute(ctx, f.runner.ID, c2); err != nil {
+		t.Fatal(err)
+	}
+
+	conflicts, err := conflict.NewStore(f.db).ListForTask(ctx, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 1 || conflicts[0].OtherTaskID != f.task.ID {
+		t.Fatalf("conflicts = %+v, want one naming the first task", conflicts)
+	}
+	gotKinds := map[conflict.Kind]bool{}
+	for _, k := range conflicts[0].Kinds {
+		gotKinds[k] = true
+	}
+	// Both tasks add the same fixture files with differing content: a file
+	// overlap that an add/add merge cannot resolve.
+	if !gotKinds[conflict.KindFileOverlap] || !gotKinds[conflict.KindMergeConflict] {
+		t.Fatalf("kinds = %v, want file_overlap and merge_conflict", conflicts[0].Kinds)
+	}
+	foundFixture := false
+	for _, file := range conflicts[0].Files {
+		if file == agent.FixtureFile {
+			foundFixture = true
+		}
+	}
+	if !foundFixture {
+		t.Fatalf("files = %v, want %s", conflicts[0].Files, agent.FixtureFile)
+	}
+
+	assertSubsequence(t, timelineTypes(t, f.tasks, second.ID), []string{
+		"branch.pushed", "conflict.detected", "pull_request.created",
+	})
+
+	// The first publish had no published sibling yet, so its own timeline
+	// carries no conflict event.
+	for _, ev := range timelineTypes(t, f.tasks, f.task.ID) {
+		if ev == "conflict.detected" {
+			t.Fatal("first task must not see a conflict before a sibling publishes")
+		}
 	}
 }
