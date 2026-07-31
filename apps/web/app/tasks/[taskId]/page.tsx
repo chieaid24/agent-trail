@@ -42,6 +42,11 @@ type TaskState =
   | { phase: "error"; message: string }
   | { phase: "ready"; task: Task };
 
+type ConflictState =
+  | { phase: "loading" }
+  | { phase: "ready"; items: TaskConflict[] }
+  | { phase: "error" };
+
 // Re-render clock for live runtimes.
 function useNow(intervalMs: number, enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -62,7 +67,9 @@ export default function TaskPage({
   const [state, setState] = useState<TaskState>({ phase: "loading" });
   const [validations, setValidations] = useState<ValidationResult[]>([]);
   const [evidence, setEvidence] = useState<StoredEvidence | null>(null);
-  const [conflicts, setConflicts] = useState<TaskConflict[]>([]);
+  const [conflicts, setConflicts] = useState<ConflictState>({
+    phase: "loading",
+  });
   const [tab, setTab] = useState<TabKey>("timeline");
   const stream = useTaskStream(taskId);
 
@@ -97,9 +104,9 @@ export default function TaskPage({
 
   const loadConflicts = useCallback(async () => {
     try {
-      setConflicts(await listConflicts(taskId));
+      setConflicts({ phase: "ready", items: await listConflicts(taskId) });
     } catch {
-      // Same: non-fatal, retried on the next trigger.
+      setConflicts({ phase: "error" });
     }
   }, [taskId]);
 
@@ -149,9 +156,7 @@ export default function TaskPage({
     return () => clearTimeout(refresh);
   }, [conflictEventCount, loadConflicts]);
 
-  // Poll fallback while the task runs, in case the stream stalls. Conflicts
-  // ride the same poll: a sibling's publish changes them with no event on
-  // this task's stream.
+  // Poll for sibling publishes, which do not reach this task's stream.
   const running = state.phase === "ready" && !isTerminal(state.task.status);
   useEffect(() => {
     if (!running) return;
@@ -183,6 +188,7 @@ export default function TaskPage({
             streamState={stream.state}
             plan={plan}
             conflicts={conflicts}
+            onRetryConflicts={loadConflicts}
             onTaskChanged={(t) => setState({ phase: "ready", task: t })}
           >
             <TabBar
@@ -217,13 +223,15 @@ function TaskDetail({
   streamState,
   plan,
   conflicts,
+  onRetryConflicts,
   onTaskChanged,
   children,
 }: {
   task: Task;
   streamState: StreamState;
   plan: string | null;
-  conflicts: TaskConflict[];
+  conflicts: ConflictState;
+  onRetryConflicts: () => void;
   onTaskChanged: (t: Task) => void;
   children: React.ReactNode;
 }) {
@@ -260,7 +268,27 @@ function TaskDetail({
             {task.failure_message ?? "No failure detail was recorded."}
           </p>
         ) : null}
-        <ConflictWarning conflicts={conflicts} />
+        {conflicts.phase === "loading" && (
+          <p className="mt-4 text-sm text-muted">Checking task overlaps...</p>
+        )}
+        {conflicts.phase === "error" && (
+          <div
+            role="alert"
+            className="mt-4 flex items-baseline gap-3 border border-border px-3 py-2 text-sm"
+          >
+            <span className="text-warning">Conflict warnings unavailable.</span>
+            <button
+              type="button"
+              onClick={onRetryConflicts}
+              className="font-semibold text-accent hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {conflicts.phase === "ready" && (
+          <ConflictWarning conflicts={conflicts.items} />
+        )}
 
         <dl className="mt-4 grid grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 text-sm lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
           {task.source_issue_number !== null && (

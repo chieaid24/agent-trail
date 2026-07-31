@@ -1,8 +1,6 @@
 import Link from "next/link";
 import type { ConflictKind, TaskConflict } from "@/lib/types";
 
-// Human labels for the deterministic detectors
-// (docs/architecture/conflict-detection.md).
 const KIND_LABELS: Record<ConflictKind, string> = {
   file_overlap: "same files",
   adjacent_lines: "adjacent lines",
@@ -15,15 +13,12 @@ export function conflictKindLabel(kind: ConflictKind): string {
   return KIND_LABELS[kind] ?? kind;
 }
 
-// Warning block for active-task overlap: one row per conflicting sibling,
-// naming the task, the detectors that fired, and the implicated files.
-// Warnings only; nothing is blocked.
 export function ConflictWarning({ conflicts }: { conflicts: TaskConflict[] }) {
   if (conflicts.length === 0) return null;
   return (
     <section
       aria-label="Conflict warnings"
-      className="mt-4 max-w-[72ch] rounded border border-border"
+      className="mt-4 rounded border border-border"
     >
       <h2 className="flex items-center gap-1.5 px-3 pt-2.5 text-sm font-semibold text-warning">
         <span
@@ -41,7 +36,7 @@ export function ConflictWarning({ conflicts }: { conflicts: TaskConflict[] }) {
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <Link
                 href={`/tasks/${c.other_task_id}`}
-                className="font-semibold text-foreground hover:underline"
+                className="min-w-0 font-semibold break-words text-accent hover:underline"
               >
                 {c.other_task_title}
               </Link>

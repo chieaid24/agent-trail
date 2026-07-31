@@ -79,9 +79,7 @@ export default async function globalSetup(): Promise<void> {
 
   // The fake adapter finishes in seconds. The worker takes the seeded
   // queued task and also recovers the seeded mid-flight one, so wait until
-  // every seeded task is settled and specs see stable timelines.
-  // awaiting_review counts as settled: it is a resting state the runner
-  // never claims, where the seeded conflict-demo pair deliberately stays.
+  // Awaiting-review demo tasks are settled and remain unclaimed.
   const settled = new Set([
     "completed",
     "failed",
