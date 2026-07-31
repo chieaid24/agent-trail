@@ -46,6 +46,9 @@ test("a task without stored conflicts shows no warning", async ({ page }) => {
   await expect(
     page.getByText("No active task overlaps detected."),
   ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "View active tasks" }),
+  ).toHaveAttribute("href", "/");
   await shootBothViewports(page, "07-conflict-empty");
 });
 
@@ -113,6 +116,12 @@ test("conflict warning handles long content", async ({ page }) => {
   expect(
     await warning.evaluate(
       (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  expect(
+    await warning.evaluate(
+      (element) => element.scrollHeight <= element.clientHeight,
     ),
   ).toBe(true);
   await shootBothViewports(page, "07-conflict-long-content");

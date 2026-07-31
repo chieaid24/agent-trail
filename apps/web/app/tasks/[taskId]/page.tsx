@@ -271,7 +271,7 @@ function TaskDetail({
             {task.failure_message ?? "No failure detail was recorded."}
           </p>
         ) : null}
-        <div className="mt-4 h-32">
+        <div className="mt-4 h-40 xl:h-32">
           {conflicts.phase === "loading" && (
             <p className="h-full rounded border border-border px-3 py-3 text-sm text-muted">
               Checking task overlaps...
@@ -295,9 +295,15 @@ function TaskDetail({
             </div>
           )}
           {conflicts.phase === "ready" && conflicts.items.length === 0 && (
-            <p className="h-full rounded border border-border px-3 py-3 text-sm text-muted">
-              No active task overlaps detected.
-            </p>
+            <div className="h-full rounded border border-border px-3 py-3 text-sm">
+              <p className="text-muted">No active task overlaps detected.</p>
+              <Link
+                href="/"
+                className="mt-2 inline-block rounded px-2 py-1 font-semibold text-accent hover:bg-surface hover:underline"
+              >
+                View active tasks
+              </Link>
+            </div>
           )}
           {conflicts.phase === "ready" && conflicts.items.length > 0 && (
             <ConflictWarning conflicts={conflicts.items} />
