@@ -1,13 +1,12 @@
 # Frontend
 
-Implemented: the dashboard overview and the task detail screen, against the
-task API surface that exists (docs/architecture/api.md). Login and
-installation, the repository page, and the runner page wait on their
-backend endpoints (auth, organizations/repositories, runners) and are
-tracked as queue issues. Runner health, recent repositories, the
-pull-request link, and the permissions and denied-actions views render once
-their data is served (denied actions also need a policy event surface the
-runner does not emit yet).
+Implemented: the dashboard overview, task detail, repository detail, and
+runner detail screens against the API surface in docs/architecture/api.md.
+The overview includes runner health and recently synced repositories.
+Login and installation remain tracked separately because the authentication
+endpoints do not exist yet. The pull-request link, permissions, and denied
+actions render once their data is served; denied actions also need a policy
+event surface the runner does not emit yet.
 
 ### Screens
 

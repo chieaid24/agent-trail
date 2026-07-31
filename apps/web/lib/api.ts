@@ -4,6 +4,12 @@
 
 import type {
   ActivityEvent,
+  Organization,
+  Repository,
+  RepositoryDetail,
+  RepositorySettings,
+  Runner,
+  RunnerDetail,
   StoredEvidence,
   Task,
   TaskStatus,
@@ -53,6 +59,50 @@ export async function listTasks(options?: {
   const query = params.size > 0 ? `?${params}` : "";
   const body = await request<{ tasks: Task[] }>(`/tasks${query}`);
   return body.tasks;
+}
+
+export async function listOrganizations(): Promise<Organization[]> {
+  const body = await request<{ organizations: Organization[] }>(
+    "/organizations",
+  );
+  return body.organizations;
+}
+
+export async function listRepositories(options?: {
+  organizationId?: string;
+  limit?: number;
+}): Promise<Repository[]> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set("limit", String(options.limit));
+  const query = params.size > 0 ? `?${params}` : "";
+  const path = options?.organizationId
+    ? `/organizations/${encodeURIComponent(options.organizationId)}/repositories`
+    : "/repositories";
+  const body = await request<{ repositories: Repository[] }>(`${path}${query}`);
+  return body.repositories;
+}
+
+export function getRepository(repositoryId: string): Promise<RepositoryDetail> {
+  return request<RepositoryDetail>(
+    `/repositories/${encodeURIComponent(repositoryId)}`,
+  );
+}
+
+export function getRepositorySettings(
+  repositoryId: string,
+): Promise<RepositorySettings> {
+  return request<RepositorySettings>(
+    `/repositories/${encodeURIComponent(repositoryId)}/settings`,
+  );
+}
+
+export async function listRunners(): Promise<Runner[]> {
+  const body = await request<{ runners: Runner[] }>("/runners");
+  return body.runners;
+}
+
+export function getRunner(runnerId: string): Promise<RunnerDetail> {
+  return request<RunnerDetail>(`/runners/${encodeURIComponent(runnerId)}`);
 }
 
 export function getTask(taskId: string): Promise<Task> {

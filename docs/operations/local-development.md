@@ -35,7 +35,7 @@ values; nothing outside `docker-compose.yml` uses them.
 make dev               # infra + migrations + api + worker + web
 make infra             # compose infrastructure only
 make migrate           # apply database migrations (goose)
-make seed              # demo tasks (skips when tasks already exist)
+make seed              # demo tasks and repositories (skips when tasks exist)
 make test              # unit tests, both apps
 make integration-test  # adds the suites that need a real database
 make e2e               # browser suite against its own disposable stack
@@ -87,8 +87,8 @@ E2E_PROJECT=agent-trail-e2e-lane E2E_POSTGRES_PORT=5468 \
 E2E_API_PORT=8108 E2E_WEB_PORT=3068 make e2e
 ```
 
-Audit screenshots land in `apps/web/e2e/screenshots/`; the curated set for
-the dashboard milestone is committed under `docs/screenshots/m8-dashboard/`.
+Audit screenshots land in `apps/web/e2e/screenshots/`. Curated evidence for
+each dashboard change lives under `docs/screenshots/`.
 
 ## Demo repository
 

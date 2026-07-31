@@ -155,3 +155,92 @@ export interface StoredEvidence {
   report: EvidenceReportDocument;
   created_at: string;
 }
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  github_account_login: string;
+  github_account_type: string;
+  repository_count: number;
+  enabled_repository_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RepositorySettings {
+  default_policy: string;
+  validation_file: string;
+}
+
+export interface Repository {
+  id: string;
+  organization_id: string;
+  github_repository_id: number;
+  owner: string;
+  name: string;
+  full_name: string;
+  default_branch: string;
+  is_private: boolean;
+  is_enabled: boolean;
+  settings: RepositorySettings;
+  active_task_count: number;
+  recent_task_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DashboardTask {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  phase: TaskPhase;
+  source_issue_number: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  failure_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RepositoryMetrics {
+  total_tasks: number;
+  active_tasks: number;
+  completed_tasks: number;
+  failed_tasks: number;
+  completion_rate: number | null;
+  median_runtime_millis: number | null;
+}
+
+export interface RepositoryDetail extends Repository {
+  metrics: RepositoryMetrics;
+  active_tasks: DashboardTask[];
+  recent_tasks: DashboardTask[];
+}
+
+export interface ResourceUsage {
+  cpu_percent: number | null;
+  memory_percent: number | null;
+  disk_percent: number | null;
+}
+
+export type RunnerStatus = "online" | "lost" | "offline";
+
+export interface Runner {
+  id: string;
+  runner_type: string;
+  hostname_or_pod: string;
+  status: RunnerStatus;
+  capacity: number;
+  active_task_count: number;
+  labels: Record<string, string>;
+  resources: ResourceUsage;
+  last_heartbeat_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RunnerDetail extends Runner {
+  current_tasks: DashboardTask[];
+  recent_failures: DashboardTask[];
+}

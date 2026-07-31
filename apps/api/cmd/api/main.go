@@ -16,6 +16,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
+	"github.com/chieaid24/agent-trail/apps/api/internal/dashboard"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/github"
 	"github.com/chieaid24/agent-trail/apps/api/internal/httpapi"
@@ -52,12 +53,15 @@ func run() error {
 	var validations httpapi.ValidationService
 	var evidenceReports httpapi.EvidenceService
 	var taskStore *task.Store
+	var apiOptions []httpapi.Option
 	if db != nil {
 		pinger = db
 		taskStore = task.NewStore(db)
 		tasks = taskStore
 		validations = validation.NewStore(db)
 		evidenceReports = evidence.NewStore(db)
+		apiOptions = append(apiOptions,
+			httpapi.WithDashboard(dashboard.NewStore(db)))
 	}
 
 	metrics := observability.NewRegistry()
@@ -86,7 +90,7 @@ func run() error {
 	srv := &http.Server{
 		Addr: cfg.APIAddr,
 		Handler: httpapi.New(logger, pinger, tasks, validations,
-			evidenceReports, webhook, metrics.Handler()).Handler(),
+			evidenceReports, webhook, metrics.Handler(), apiOptions...).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		// Request contexts derive from the signal context, so long-lived
 		// handlers (the SSE stream) end when shutdown starts instead of

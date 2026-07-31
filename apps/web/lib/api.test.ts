@@ -4,6 +4,11 @@ import {
   cancelTask,
   eventCursor,
   getEvidence,
+  getRepository,
+  getRunner,
+  listOrganizations,
+  listRepositories,
+  listRunners,
   listTasks,
   streamUrl,
 } from "./api";
@@ -52,6 +57,41 @@ describe("api client", () => {
   it("maps a network failure to status 0", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
     await expect(listTasks()).rejects.toMatchObject({ status: 0 });
+  });
+
+  it("unwraps dashboard collections", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { organizations: [{ id: "o1" }] }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, { repositories: [{ id: "r1" }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { runners: [{ id: "w1" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listOrganizations()).resolves.toEqual([{ id: "o1" }]);
+    await expect(
+      listRepositories({ organizationId: "o1", limit: 5 }),
+    ).resolves.toEqual([{ id: "r1" }]);
+    await expect(listRunners()).resolves.toEqual([{ id: "w1" }]);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/backend/api/v1/organizations",
+      "/backend/api/v1/organizations/o1/repositories?limit=5",
+      "/backend/api/v1/runners",
+    ]);
+  });
+
+  it("loads repository and runner detail", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { id: "r1" }))
+      .mockResolvedValueOnce(jsonResponse(200, { id: "w1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getRepository("r1")).resolves.toMatchObject({ id: "r1" });
+    await expect(getRunner("w1")).resolves.toMatchObject({ id: "w1" });
   });
 
   it("treats a missing evidence report as null, not an error", async () => {
