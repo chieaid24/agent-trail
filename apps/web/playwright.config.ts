@@ -28,7 +28,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `npm run dev -- -p ${webPort} -H 127.0.0.1`,
+    command: `node -e "require('node:fs').rmSync('.next',{recursive:true,force:true})" && npm run dev -- -p ${webPort} -H 127.0.0.1`,
     url: `http://127.0.0.1:${webPort}`,
     reuseExistingServer: false,
     timeout: 120_000,

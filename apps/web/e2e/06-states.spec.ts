@@ -47,8 +47,16 @@ async function mockTaskList(page: Page, tasks: unknown[]): Promise<void> {
 
 test("empty state", async ({ page }) => {
   await mockTaskList(page, []);
+  await page.route("**/backend/api/v1/runners", (route) =>
+    route.fulfill({ json: { runners: [] } }),
+  );
+  await page.route("**/backend/api/v1/repositories*", (route) =>
+    route.fulfill({ json: { repositories: [] } }),
+  );
   await page.goto("/");
   await expect(page.getByText("No tasks yet.", { exact: false })).toBeVisible();
+  await expect(page.getByText("No runners registered.")).toBeVisible();
+  await expect(page.getByText("No repositories synced.")).toBeVisible();
   await shootBothViewports(page, "dashboard-empty");
 });
 
@@ -131,6 +139,43 @@ test("full-spectrum grouped board", async ({ page }) => {
       completed_at: "2026-07-28T09:33:40Z",
     }),
   ]);
+  await page.route("**/backend/api/v1/runners", (route) =>
+    route.fulfill({
+      json: {
+        runners: [
+          {
+            id: "3b241101-e2bb-4255-8caf-4136c566a907",
+            hostname_or_pod: "runner-demo-1",
+            status: "online",
+            capacity: 4,
+            active_task_count: 2,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/backend/api/v1/repositories*", (route) =>
+    route.fulfill({
+      json: {
+        repositories: [
+          {
+            id: "3b241101-e2bb-4255-8caf-4136c566a908",
+            full_name: "example/control-plane",
+            active_task_count: 2,
+            recent_task_count: 18,
+            updated_at: "2026-07-28T12:00:00Z",
+          },
+          {
+            id: "3b241101-e2bb-4255-8caf-4136c566a909",
+            full_name: "example/runner-images",
+            active_task_count: 0,
+            recent_task_count: 3,
+            updated_at: "2026-07-28T11:30:00Z",
+          },
+        ],
+      },
+    }),
+  );
   await page.goto("/");
   await expect(page.getByRole("region", { name: "Running" })).toBeVisible();
   await expect(

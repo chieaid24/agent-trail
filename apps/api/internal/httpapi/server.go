@@ -1,5 +1,4 @@
-// Package httpapi wires the control-plane HTTP surface: health endpoints and
-// the /api/v1 task API (docs/architecture/api.md).
+// Package httpapi wires the control-plane HTTP surface.
 package httpapi
 
 import (
@@ -25,6 +24,7 @@ type Server struct {
 	tasks       TaskService       // nil when DATABASE_URL is not configured
 	validations ValidationService // nil when DATABASE_URL is not configured
 	evidence    EvidenceService   // nil when DATABASE_URL is not configured
+	dashboard   DashboardService  // nil when DATABASE_URL is not configured
 	webhook     http.Handler      // nil when the GitHub integration is not configured
 	metrics     http.Handler      // nil disables GET /metrics
 
@@ -35,18 +35,30 @@ type Server struct {
 
 var _ DBPinger = (*sql.DB)(nil)
 
+// Option adds an optional HTTP API dependency.
+type Option func(*Server)
+
+// WithDashboard enables organization, repository, and runner read endpoints.
+func WithDashboard(service DashboardService) Option {
+	return func(s *Server) { s.dashboard = service }
+}
+
 // New returns a Server. Nil dependencies degrade cleanly: readiness reports
 // the database as not configured, and the task API and webhook answer 503.
 func New(logger *slog.Logger, db DBPinger, tasks TaskService,
 	validations ValidationService, ev EvidenceService,
-	webhook, metrics http.Handler) *Server {
-	return &Server{
+	webhook, metrics http.Handler, options ...Option) *Server {
+	s := &Server{
 		logger: logger, db: db, tasks: tasks,
 		validations: validations, evidence: ev,
 		webhook: webhook, metrics: metrics,
 		streamPollInterval: time.Second,
 		streamHeartbeat:    15 * time.Second,
 	}
+	for _, option := range options {
+		option(s)
+	}
+	return s
 }
 
 // Handler returns the routed HTTP handler with observability middleware.
@@ -62,6 +74,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/stream", s.handleTaskStream)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
+	mux.HandleFunc("GET /api/v1/organizations", s.handleListOrganizations)
+	mux.HandleFunc("GET /api/v1/organizations/{organizationId}", s.handleGetOrganization)
+	mux.HandleFunc("GET /api/v1/organizations/{organizationId}/repositories", s.handleOrganizationRepositories)
+	mux.HandleFunc("GET /api/v1/repositories", s.handleListRepositories)
+	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", s.handleGetRepository)
+	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/settings", s.handleRepositorySettings)
+	mux.HandleFunc("GET /api/v1/runners", s.handleListRunners)
+	mux.HandleFunc("GET /api/v1/runners/{runnerId}", s.handleGetRunner)
 	mux.HandleFunc("POST /webhooks/github", s.handleWebhook)
 	if s.metrics != nil {
 		mux.Handle("GET /metrics", s.metrics)

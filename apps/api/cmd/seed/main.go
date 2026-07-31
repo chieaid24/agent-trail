@@ -30,6 +30,7 @@ func main() {
 type demoTask struct {
 	title        string
 	instructions string
+	repository   int
 	path         []task.TransitionParams
 }
 
@@ -38,6 +39,7 @@ func demoTasks() []demoTask {
 		{
 			title:        "Demo: fix flaky login test",
 			instructions: "Investigate the flaky login integration test and make it deterministic.",
+			repository:   0,
 			path: []task.TransitionParams{
 				{To: task.StatusProvisioning}, {To: task.StatusPlanning},
 				{To: task.StatusExecuting}, {To: task.StatusValidating},
@@ -48,11 +50,13 @@ func demoTasks() []demoTask {
 		{
 			title:        "Demo: add pagination to the audit log",
 			instructions: "Add cursor pagination to the audit log endpoint.",
+			repository:   -1,
 			// Stays queued: shows the pending column.
 		},
 		{
 			title:        "Demo: upgrade the TLS library",
 			instructions: "Upgrade the TLS dependency and run the full test suite.",
+			repository:   1,
 			path: []task.TransitionParams{
 				{To: task.StatusProvisioning}, {To: task.StatusPlanning},
 				{To: task.StatusExecuting}, {To: task.StatusValidating},
@@ -66,6 +70,7 @@ func demoTasks() []demoTask {
 		{
 			title:        "Demo: rename the billing module",
 			instructions: "Rename billing to invoicing across the codebase.",
+			repository:   -1,
 			path: []task.TransitionParams{
 				{To: task.StatusProvisioning}, {To: task.StatusPlanning},
 				{To: task.StatusExecuting},
@@ -105,12 +110,18 @@ func run() error {
 		return nil
 	}
 
+	organizationID, repositoryIDs, err := seedRepositories(ctx, db)
+	if err != nil {
+		return err
+	}
 	store := task.NewStore(db)
 	for _, d := range demoTasks() {
-		t, err := store.Create(ctx, task.CreateParams{
-			Title:        d.title,
-			Instructions: d.instructions,
-		})
+		params := task.CreateParams{Title: d.title, Instructions: d.instructions}
+		if d.repository >= 0 {
+			params.OrganizationID = &organizationID
+			params.RepositoryID = &repositoryIDs[d.repository]
+		}
+		t, err := store.Create(ctx, params)
 		if err != nil {
 			return fmt.Errorf("create %q: %w", d.title, err)
 		}
@@ -130,4 +141,46 @@ func run() error {
 		slog.Int("tasks", len(demoTasks())),
 	)
 	return nil
+}
+
+func seedRepositories(ctx context.Context, db *sql.DB) (string, []string, error) {
+	var organizationID string
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO organizations
+			(name, slug, github_account_id, github_account_login,
+			 github_account_type)
+		VALUES ('Agent Trail', 'agent-trail', 118775203, 'chieaid24', 'User')
+		RETURNING id`).Scan(&organizationID)
+	if err != nil {
+		return "", nil, fmt.Errorf("seed organization: %w", err)
+	}
+
+	type repository struct {
+		githubID int64
+		name     string
+		settings string
+	}
+	repositories := []repository{
+		{965381124, "agent-trail",
+			`{"default_policy":"restricted","validation_file":".agent-trail/validation.yaml"}`},
+		{965381125, "runner-images",
+			`{"default_policy":"platform default","validation_file":".agent-trail/validation.yaml"}`},
+	}
+	ids := make([]string, 0, len(repositories))
+	for _, repository := range repositories {
+		var id string
+		err := db.QueryRowContext(ctx, `
+			INSERT INTO repositories
+				(organization_id, github_repository_id, owner, name,
+				 full_name, clone_url, settings_json)
+			VALUES ($1, $2, 'chieaid24', $3, 'chieaid24/' || $3,
+				'https://github.com/chieaid24/' || $3 || '.git', $4)
+			RETURNING id`, organizationID, repository.githubID,
+			repository.name, repository.settings).Scan(&id)
+		if err != nil {
+			return "", nil, fmt.Errorf("seed repository %s: %w", repository.name, err)
+		}
+		ids = append(ids, id)
+	}
+	return organizationID, ids, nil
 }

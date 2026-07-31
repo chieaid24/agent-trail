@@ -9,6 +9,16 @@ export interface ApiTask {
   status: string;
 }
 
+export interface ApiRepository {
+  id: string;
+  full_name: string;
+}
+
+export interface ApiRunner {
+  id: string;
+  hostname_or_pod: string;
+}
+
 export async function apiListTasks(): Promise<ApiTask[]> {
   const res = await fetch(`${apiBaseUrl}/api/v1/tasks`);
   if (!res.ok) throw new Error(`list tasks: ${res.status}`);
@@ -33,6 +43,20 @@ export async function apiCreateTask(
   });
   if (!res.ok) throw new Error(`create task: ${res.status}`);
   return (await res.json()) as ApiTask;
+}
+
+export async function apiListRepositories(): Promise<ApiRepository[]> {
+  const res = await fetch(`${apiBaseUrl}/api/v1/repositories`);
+  if (!res.ok) throw new Error(`list repositories: ${res.status}`);
+  const body = (await res.json()) as { repositories: ApiRepository[] };
+  return body.repositories;
+}
+
+export async function apiListRunners(): Promise<ApiRunner[]> {
+  const res = await fetch(`${apiBaseUrl}/api/v1/runners`);
+  if (!res.ok) throw new Error(`list runners: ${res.status}`);
+  const body = (await res.json()) as { runners: ApiRunner[] };
+  return body.runners;
 }
 
 export async function apiWaitForStatus(

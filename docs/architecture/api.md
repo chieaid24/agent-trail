@@ -17,15 +17,48 @@ GET  /me
 
 ### Organizations and repositories
 
+Implemented: organization and repository reads. Repository enablement and
+settings writes land with the authenticated installation flow.
+
 ```text
 GET  /organizations
 GET  /organizations/{orgId}
 GET  /organizations/{orgId}/repositories
+GET  /repositories
+GET  /repositories/{repoId}
 POST /repositories/{repoId}/enable
 POST /repositories/{repoId}/disable
 GET  /repositories/{repoId}/settings
 PUT  /repositories/{repoId}/settings
 ```
+
+Read semantics:
+
+- `GET /organizations` returns each GitHub account with total and enabled
+  repository counts.
+- `GET /organizations/{orgId}/repositories` returns that account's synced
+  repositories. `GET /repositories` returns the same read model across all
+  accounts, newest sync first. Both accept `?limit=` (max 200).
+- `GET /repositories/{repoId}` returns repository settings, task metrics,
+  up to 10 active tasks, and the 10 most recently updated tasks.
+- Repository settings expose `default_policy` and `validation_file`.
+  Missing overrides resolve to `platform default` and
+  `.agent-trail/validation.yaml`.
+
+### Runners
+
+Implemented: runner reads.
+
+```text
+GET /runners
+GET /runners/{runnerId}
+```
+
+`GET /runners` returns status, capacity, active slot count, heartbeat, labels,
+and optional CPU, memory, and disk percentages. The detail endpoint also
+returns current tasks and the 10 most recent failed or timed-out tasks.
+Resource percentages remain `null` until a runner reports `cpu_percent`,
+`memory_percent`, and `disk_percent` labels.
 
 ### Tasks
 

@@ -1,12 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { RunnerStatus } from "@/components/RunnerStatus";
 import { TaskRows } from "@/components/TaskRows";
-import { ApiError, listTasks } from "@/lib/api";
-import { formatDuration } from "@/lib/format";
+import { ApiError, listRepositories, listRunners, listTasks } from "@/lib/api";
+import { formatDateTime, formatDuration } from "@/lib/format";
 import { groupTasks, overviewStats } from "@/lib/overview";
-import type { Task } from "@/lib/types";
+import type { Repository, Runner, Task } from "@/lib/types";
 
 const POLL_MS = 5000;
 const repoUrl = "https://github.com/chieaid24/agent-trail";
@@ -14,15 +16,24 @@ const repoUrl = "https://github.com/chieaid24/agent-trail";
 type LoadState =
   | { phase: "loading" }
   | { phase: "error"; message: string }
-  | { phase: "ready"; tasks: Task[] };
+  | {
+      phase: "ready";
+      tasks: Task[];
+      runners: Runner[];
+      repositories: Repository[];
+    };
 
 export default function Home() {
   const [state, setState] = useState<LoadState>({ phase: "loading" });
 
   const load = useCallback(async () => {
     try {
-      const tasks = await listTasks({ limit: 200 });
-      setState({ phase: "ready", tasks });
+      const [tasks, runners, repositories] = await Promise.all([
+        listTasks({ limit: 200 }),
+        listRunners(),
+        listRepositories({ limit: 8 }),
+      ]);
+      setState({ phase: "ready", tasks, runners, repositories });
     } catch (err) {
       const message =
         err instanceof ApiError ? err.message : "unexpected failure";
@@ -42,26 +53,162 @@ export default function Home() {
   return (
     <AppShell>
       <div className="px-8 py-6">
-        <header className="flex items-baseline justify-between gap-6">
-          <h1 className="text-lg font-semibold">Tasks</h1>
-          {state.phase === "ready" && state.tasks.length > 0 && (
-            <Summary tasks={state.tasks} />
-          )}
+        <header>
+          <h1 className="text-lg font-semibold">Overview</h1>
+          <p className="mt-1 text-sm text-muted">
+            Live control-plane activity and execution capacity.
+          </p>
         </header>
         <div className="mt-6">
-          {state.phase === "loading" && <Skeleton />}
+          {state.phase === "loading" && <OverviewSkeleton />}
           {state.phase === "error" && (
             <ErrorNotice message={state.message} onRetry={load} />
           )}
-          {state.phase === "ready" &&
-            (state.tasks.length === 0 ? (
-              <Empty />
-            ) : (
-              <Groups tasks={state.tasks} />
-            ))}
+          {state.phase === "ready" && (
+            <>
+              <OperationalOverview
+                runners={state.runners}
+                repositories={state.repositories}
+              />
+              <section aria-labelledby="tasks-heading" className="mt-8">
+                <header className="flex items-baseline justify-between gap-6 border-b border-border pb-2">
+                  <h2 id="tasks-heading" className="text-base font-semibold">
+                    Tasks
+                  </h2>
+                  {state.tasks.length > 0 && <Summary tasks={state.tasks} />}
+                </header>
+                <div className="mt-4">
+                  {state.tasks.length === 0 ? (
+                    <Empty />
+                  ) : (
+                    <Groups tasks={state.tasks} />
+                  )}
+                </div>
+              </section>
+            </>
+          )}
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function OperationalOverview({
+  runners,
+  repositories,
+}: {
+  runners: Runner[];
+  repositories: Repository[];
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-8">
+      <section aria-labelledby="runners-heading">
+        <div className="flex items-baseline justify-between border-b border-border pb-2">
+          <h2 id="runners-heading" className="text-base font-semibold">
+            Runner health
+          </h2>
+          {runners.length > 0 && (
+            <span className="text-sm text-muted">
+              {runners.filter((runner) => runner.status === "online").length} of{" "}
+              {runners.length} online
+            </span>
+          )}
+        </div>
+        {runners.length === 0 ? (
+          <OperationalEmpty
+            message="No runners registered."
+            action="Start a worker"
+            href={`${repoUrl}/blob/main/docs/operations/local-development.md`}
+          />
+        ) : (
+          <ul>
+            {runners.map((runner) => (
+              <li key={runner.id} className="border-b border-border">
+                <Link
+                  href={`/runners/${runner.id}`}
+                  className="grid grid-cols-[1fr_auto] gap-x-4 px-2 py-2 hover:bg-surface"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono text-sm">
+                      {runner.hostname_or_pod}
+                    </span>
+                    <span className="mt-0.5 block text-sm text-muted">
+                      {runner.active_task_count} of {runner.capacity} slots in
+                      use
+                    </span>
+                  </span>
+                  <RunnerStatus status={runner.status} />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="repositories-heading">
+        <div className="flex items-baseline justify-between border-b border-border pb-2">
+          <h2 id="repositories-heading" className="text-base font-semibold">
+            Recent repositories
+          </h2>
+          {repositories.length > 0 && (
+            <span className="text-sm text-muted">
+              {repositories.length} synced
+            </span>
+          )}
+        </div>
+        {repositories.length === 0 ? (
+          <OperationalEmpty
+            message="No repositories synced."
+            action="Configure the GitHub App"
+            href={`${repoUrl}/blob/main/docs/architecture/github-app.md`}
+          />
+        ) : (
+          <ul>
+            {repositories.map((repository) => (
+              <li key={repository.id} className="border-b border-border">
+                <Link
+                  href={`/repositories/${repository.id}`}
+                  className="grid grid-cols-[1fr_auto] gap-x-4 px-2 py-2 hover:bg-surface"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono text-sm">
+                      {repository.full_name}
+                    </span>
+                    <span className="mt-0.5 block text-sm text-muted">
+                      {repository.active_task_count} active,{" "}
+                      {repository.recent_task_count} changed in 30 days
+                    </span>
+                  </span>
+                  <span className="text-right text-sm text-muted">
+                    {formatDateTime(repository.updated_at)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function OperationalEmpty({
+  message,
+  action,
+  href,
+}: {
+  message: string;
+  action: string;
+  href: string;
+}) {
+  return (
+    <p className="px-2 py-6 text-sm text-muted">
+      {message}{" "}
+      <a href={href} className="text-accent hover:underline">
+        {action}
+      </a>
+      .
+    </p>
   );
 }
 
@@ -102,7 +249,7 @@ function Groups({ tasks }: { tasks: Task[] }) {
 
 function Empty() {
   return (
-    <div className="mt-24 flex justify-center">
+    <div className="flex justify-center py-16">
       <div className="max-w-sm text-center">
         <p className="text-sm text-muted">
           No tasks yet. Comment{" "}
@@ -143,12 +290,27 @@ function ErrorNotice({
   );
 }
 
-function Skeleton() {
+function OverviewSkeleton() {
   return (
-    <div aria-hidden className="flex animate-pulse flex-col gap-2">
-      {[0, 1, 2, 3, 4].map((i) => (
-        <div key={i} className="h-8 rounded bg-surface" />
-      ))}
+    <div aria-hidden className="animate-pulse">
+      <div className="grid grid-cols-2 gap-8">
+        {[0, 1].map((column) => (
+          <div key={column}>
+            <div className="h-5 w-36 rounded bg-surface" />
+            <div className="mt-3 flex flex-col gap-2">
+              {[0, 1, 2].map((row) => (
+                <div key={row} className="h-10 rounded bg-surface" />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-8 h-5 w-20 rounded bg-surface" />
+      <div className="mt-3 flex flex-col gap-2">
+        {[0, 1, 2, 3].map((row) => (
+          <div key={row} className="h-8 rounded bg-surface" />
+        ))}
+      </div>
     </div>
   );
 }

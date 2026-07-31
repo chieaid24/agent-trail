@@ -32,6 +32,12 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 	if count != len(demoTasks()) {
 		t.Fatalf("tasks = %d, want %d", count, len(demoTasks()))
 	}
+	if err := db.QueryRow(`SELECT count(*) FROM repositories`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("repositories = %d, want 2", count)
+	}
 
 	// Second run must not duplicate.
 	if err := run(); err != nil {

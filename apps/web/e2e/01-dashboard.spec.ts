@@ -10,6 +10,12 @@ test("overview lists seeded tasks with grouped state and summary", async ({
   await expect(page.getByRole("region", { name: "Finished" })).toBeVisible();
   await expect(page.getByText(EXECUTED_TASK_TITLE)).toBeVisible();
   await expect(page.getByText("Demo: upgrade the TLS library")).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Runner health" }),
+  ).toContainText("online");
+  await expect(
+    page.getByRole("region", { name: "Recent repositories" }),
+  ).toContainText("chieaid24/agent-trail");
 
   // The summary strip is computed from the visible tasks.
   await expect(page.getByText(/\d+ tasks/)).toBeVisible();

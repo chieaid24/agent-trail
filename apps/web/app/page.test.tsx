@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import Home from "./page";
-import type { Task } from "@/lib/types";
+import type { Repository, Runner, Task } from "@/lib/types";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -44,16 +44,27 @@ function demoTask(overrides: Partial<Task>): Task {
   };
 }
 
+function dashboardFetch(
+  tasks: Task[],
+  runners: Runner[] = [],
+  repositories: Repository[] = [],
+) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (url.includes("/runners")) return jsonResponse({ runners });
+    if (url.includes("/repositories")) {
+      return jsonResponse({ repositories });
+    }
+    return jsonResponse({ tasks });
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
 test("renders the shell and empty state when no tasks exist", async () => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(jsonResponse({ tasks: [] })),
-  );
+  vi.stubGlobal("fetch", dashboardFetch([], [], []));
   render(<Home />);
 
   expect(screen.getByText("Agent Trail")).toBeDefined();
@@ -75,7 +86,7 @@ test("groups tasks by attention and links to detail", async () => {
       started_at: "2026-07-28T12:01:00Z",
     }),
   ];
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ tasks })));
+  vi.stubGlobal("fetch", dashboardFetch(tasks));
   render(<Home />);
 
   expect(await screen.findByText("Working")).toBeDefined();
@@ -86,6 +97,37 @@ test("groups tasks by attention and links to detail", async () => {
   expect(link.getAttribute("href")).toBe(
     "/tasks/3b241101-e2bb-4255-8caf-4136c566a902",
   );
+});
+
+test("shows runner health and recent repositories", async () => {
+  const runner = {
+    id: "88f57a9f-0cd6-4fd8-8c14-6d4710a3370f",
+    hostname_or_pod: "runner-1",
+    status: "online",
+    capacity: 2,
+    active_task_count: 1,
+  } as Runner;
+  const repository = {
+    id: "39be2f56-3419-4a0a-a7ad-1a72698c0cc5",
+    full_name: "chieaid24/agent-trail",
+    active_task_count: 1,
+    recent_task_count: 4,
+    updated_at: "2026-07-28T12:00:00Z",
+  } as Repository;
+  vi.stubGlobal("fetch", dashboardFetch([], [runner], [repository]));
+  render(<Home />);
+
+  expect(await screen.findByText("runner-1")).toBeDefined();
+  expect(screen.getByText("1 of 2 slots in use")).toBeDefined();
+  expect(screen.getByText("chieaid24/agent-trail")).toBeDefined();
+  expect(
+    screen.getByRole("link", { name: /runner-1/ }).getAttribute("href"),
+  ).toBe(`/runners/${runner.id}`);
+  expect(
+    screen
+      .getByRole("link", { name: /chieaid24\/agent-trail/ })
+      .getAttribute("href"),
+  ).toBe(`/repositories/${repository.id}`);
 });
 
 test("shows the error state when the control plane is unreachable", async () => {
