@@ -172,7 +172,7 @@ func branchLabel(t task.Task) string {
 // publishFromWorkspace publishes a live worktree: commit, push, then the
 // GitHub surface. A clean tree whose HEAD equals the base is the no-change
 // outcome; a clean tree whose HEAD moved is a recovered owner's commit.
-func (e *Executor) publishFromWorkspace(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, ws gitworkspace.Workspace, summary string) (task.Status, error) {
+func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, ws gitworkspace.Workspace, summary string) (task.Status, error) {
 	if t.BaseCommitSHA != nil && ws.BaseSHA != *t.BaseCommitSHA {
 		return "", e.failTask(ctx, c, "base_mismatch", fmt.Sprintf(
 			"workspace base %s does not match recorded base %s",
@@ -222,13 +222,13 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, c *Claim, t task.Ta
 	}); err != nil {
 		return "", err
 	}
-	return e.publishToGitHub(ctx, c, t, pub, ws.Branch, ws.BaseSHA, sha)
+	return e.publishToGitHub(ctx, log, c, t, pub, ws.Branch, ws.BaseSHA, sha)
 }
 
 // publishRecovered resumes publishing for an attempt claimed at status
 // publishing: reattach the surviving worktree when it exists, otherwise
 // publish from the already-pushed branch, otherwise the work is gone.
-func (e *Executor) publishRecovered(ctx context.Context, c *Claim, t task.Task, pub *publishTarget) (task.Status, error) {
+func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget) (task.Status, error) {
 	if t.WorkingBranch == nil || t.BaseCommitSHA == nil {
 		return "", e.failTask(ctx, c, "publish_state_missing",
 			"task reached publishing without a recorded branch and base commit")
@@ -245,7 +245,7 @@ func (e *Executor) publishRecovered(ctx context.Context, c *Claim, t task.Task, 
 		if _, err := e.Workspaces.EnsureMirror(ctx, repoRef); err != nil {
 			return "", err
 		}
-		return e.publishFromWorkspace(ctx, c, t, pub, ws, "")
+		return e.publishFromWorkspace(ctx, log, c, t, pub, ws, "")
 	}
 
 	head, err := e.GitHub.BranchHeadSHA(ctx, rc.InstallationID, rc.Owner, rc.Name, branch)
@@ -260,15 +260,15 @@ func (e *Executor) publishRecovered(ctx context.Context, c *Claim, t task.Task, 
 	if err := e.Store.RecordFinalCommit(ctx, c.AttemptID, head); err != nil {
 		return "", err
 	}
-	return e.publishToGitHub(ctx, c, t, pub, branch, base, head)
+	return e.publishToGitHub(ctx, log, c, t, pub, branch, base, head)
 }
 
 // publishToGitHub drives the GitHub surface from a pushed branch: one draft
 // PR (found or created by head branch), one check run (found or created by
 // external id), the issue comment, then awaiting_review. Every step is safe
 // to replay.
-func (e *Executor) publishToGitHub(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, branch, baseSHA, finalSHA string) (task.Status, error) {
-	if err := e.detectConflicts(ctx, c, t, baseSHA, finalSHA); err != nil {
+func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, branch, baseSHA, finalSHA string) (task.Status, error) {
+	if err := e.detectConflicts(ctx, log, c, t, pub.repo, baseSHA, finalSHA); err != nil {
 		return "", err
 	}
 	rc := pub.repo
@@ -386,19 +386,30 @@ func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, p
 }
 
 // detectConflicts records warnings without failing publication.
-func (e *Executor) detectConflicts(ctx context.Context, c *Claim, t task.Task, baseSHA, finalSHA string) error {
+func (e *Executor) detectConflicts(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, rc github.RepositoryContext, baseSHA, finalSHA string) error {
 	if e.Conflicts == nil || t.RepositoryID == nil {
 		return nil
 	}
-	repo := gitworkspace.RepoRef{ID: *t.RepositoryID}
-	detections, err := e.Conflicts.Detect(ctx, repo, *t.RepositoryID, t.ID, baseSHA, finalSHA)
+	repo, err := e.repoRef(ctx, rc)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		e.Logger.LogAttrs(ctx, slog.LevelWarn, "conflict detection failed",
+		log.LogAttrs(ctx, slog.LevelWarn, "conflict detection failed",
 			slog.String("event", "conflict_detection_failed"),
-			slog.String("task_id", t.ID),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	detector := *e.Conflicts
+	detector.Logger = log
+	detections, err := detector.Detect(ctx, repo, *t.RepositoryID, t.ID, baseSHA, finalSHA)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		log.LogAttrs(ctx, slog.LevelWarn, "conflict detection failed",
+			slog.String("event", "conflict_detection_failed"),
 			slog.String("error", err.Error()),
 		)
 		return nil

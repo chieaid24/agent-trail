@@ -15,12 +15,19 @@ const adjacencyWindow = 3
 var dependencyManifests = map[string]bool{
 	"go.mod": true, "go.sum": true,
 	"package.json": true, "package-lock.json": true,
-	"pnpm-lock.yaml": true, "yarn.lock": true,
+	"npm-shrinkwrap.json": true, "pnpm-lock.yaml": true,
+	"yarn.lock": true, "bun.lock": true, "bun.lockb": true,
 	"requirements.txt": true, "Pipfile": true, "Pipfile.lock": true,
-	"pyproject.toml": true, "poetry.lock": true,
+	"pyproject.toml": true, "poetry.lock": true, "uv.lock": true,
 	"Cargo.toml": true, "Cargo.lock": true,
 	"Gemfile": true, "Gemfile.lock": true,
 	"composer.json": true, "composer.lock": true,
+	"pom.xml": true, "build.gradle": true, "build.gradle.kts": true,
+	"settings.gradle": true, "settings.gradle.kts": true, "gradle.lockfile": true,
+	"packages.lock.json": true, "Directory.Packages.props": true,
+	"Package.swift": true, "Package.resolved": true,
+	"mix.exs": true, "mix.lock": true,
+	"pubspec.yaml": true, "pubspec.lock": true,
 }
 
 // ChangeSet contains changed paths and base-side hunks.

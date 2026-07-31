@@ -11,6 +11,7 @@ import (
 
 // GitOps provides conflict-related Git operations.
 type GitOps interface {
+	EnsureMirror(ctx context.Context, repo gitworkspace.RepoRef) (string, error)
 	HasCommit(ctx context.Context, repo gitworkspace.RepoRef, sha string) (bool, error)
 	ChangedFiles(ctx context.Context, repo gitworkspace.RepoRef, base, head string) ([]string, error)
 	DiffHunks(ctx context.Context, repo gitworkspace.RepoRef, base, head string) (map[string][]gitworkspace.LineRange, error)
@@ -20,8 +21,7 @@ type GitOps interface {
 // Records reads sibling diffs and stores warnings.
 type Records interface {
 	ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID string) ([]Sibling, error)
-	Upsert(ctx context.Context, repositoryID, taskID, otherTaskID string, kinds []Kind, files []string) error
-	DeletePair(ctx context.Context, taskID, otherTaskID string) error
+	Reconcile(ctx context.Context, repositoryID, taskID string, detections []Detection) error
 }
 
 // Detector compares and stores active-task overlaps.
@@ -39,6 +39,9 @@ func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, reposi
 	}
 	if len(siblings) == 0 {
 		return nil, nil
+	}
+	if _, err := d.Git.EnsureMirror(ctx, repo); err != nil {
+		return nil, err
 	}
 
 	self, err := d.changeSet(ctx, repo, base, final)
@@ -77,21 +80,17 @@ func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, reposi
 			files = mergeSorted(files, conflicted)
 		}
 
-		if len(kinds) == 0 {
-			if err := d.Records.DeletePair(ctx, taskID, sib.TaskID); err != nil {
-				return detections, err
-			}
-			continue
+		if len(kinds) > 0 {
+			detections = append(detections, Detection{
+				OtherTaskID:    sib.TaskID,
+				OtherTaskTitle: sib.Title,
+				Kinds:          kinds,
+				Files:          files,
+			})
 		}
-		if err := d.Records.Upsert(ctx, repositoryID, taskID, sib.TaskID, kinds, files); err != nil {
-			return detections, err
-		}
-		detections = append(detections, Detection{
-			OtherTaskID:    sib.TaskID,
-			OtherTaskTitle: sib.Title,
-			Kinds:          kinds,
-			Files:          files,
-		})
+	}
+	if err := d.Records.Reconcile(ctx, repositoryID, taskID, detections); err != nil {
+		return nil, err
 	}
 	return detections, nil
 }

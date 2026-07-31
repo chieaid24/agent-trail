@@ -109,8 +109,10 @@ func TestUpsertListAndDelete(t *testing.T) {
 
 	kinds := []Kind{KindFileOverlap, KindMergeConflict}
 	files := []string{"app.go"}
-	if err := s.Upsert(ctx, repoID, a.ID, b.ID, kinds, files); err != nil {
-		t.Fatalf("Upsert: %v", err)
+	if err := s.Reconcile(ctx, repoID, a.ID, []Detection{{
+		OtherTaskID: b.ID, Kinds: kinds, Files: files,
+	}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
 	}
 
 	fromA, err := s.ListForTask(ctx, a.ID)
@@ -131,9 +133,10 @@ func TestUpsertListAndDelete(t *testing.T) {
 		t.Errorf("fromB = %+v", fromB)
 	}
 
-	if err := s.Upsert(ctx, repoID, b.ID, a.ID, []Kind{KindFileOverlap},
-		[]string{"lib.go"}); err != nil {
-		t.Fatalf("Upsert(update): %v", err)
+	if err := s.Reconcile(ctx, repoID, b.ID, []Detection{{
+		OtherTaskID: a.ID, Kinds: []Kind{KindFileOverlap}, Files: []string{"lib.go"},
+	}}); err != nil {
+		t.Fatalf("Reconcile(update): %v", err)
 	}
 	fromA, err = s.ListForTask(ctx, a.ID)
 	if err != nil {
@@ -144,8 +147,8 @@ func TestUpsertListAndDelete(t *testing.T) {
 		t.Errorf("after update fromA = %+v", fromA)
 	}
 
-	if err := s.DeletePair(ctx, b.ID, a.ID); err != nil {
-		t.Fatalf("DeletePair: %v", err)
+	if err := s.Reconcile(ctx, repoID, a.ID, nil); err != nil {
+		t.Fatalf("Reconcile(clean): %v", err)
 	}
 	fromA, err = s.ListForTask(ctx, a.ID)
 	if err != nil {
@@ -164,7 +167,9 @@ func TestListForTaskHidesTerminalPairs(t *testing.T) {
 
 	a := createRepoTask(t, db, repoID, "task a", "")
 	b := createRepoTask(t, db, repoID, "task b", "")
-	if err := s.Upsert(ctx, repoID, a.ID, b.ID, []Kind{KindFileOverlap}, nil); err != nil {
+	if err := s.Reconcile(ctx, repoID, a.ID, []Detection{{
+		OtherTaskID: b.ID, Kinds: []Kind{KindFileOverlap},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -178,9 +183,42 @@ func TestListForTaskHidesTerminalPairs(t *testing.T) {
 	}
 }
 
-func TestUpsertRejectsEmptyKinds(t *testing.T) {
+func TestReconcileRollsBackTheWholeTaskSet(t *testing.T) {
+	db := dbtest.Open(t)
+	ctx := context.Background()
+	s := NewStore(db)
+	repoID := createRepository(t, db)
+	a := createRepoTask(t, db, repoID, "task a", "")
+	b := createRepoTask(t, db, repoID, "task b", "")
+	c := createRepoTask(t, db, repoID, "task c", "")
+	if err := s.Reconcile(ctx, repoID, a.ID, []Detection{{
+		OtherTaskID: b.ID, Kinds: []Kind{KindFileOverlap}, Files: []string{"old.go"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := s.Reconcile(ctx, repoID, a.ID, []Detection{
+		{OtherTaskID: b.ID, Kinds: []Kind{KindFileOverlap}, Files: []string{"new.go"}},
+		{OtherTaskID: c.ID, Kinds: []Kind{"unknown"}},
+	})
+	if err == nil {
+		t.Fatal("invalid replacement must fail")
+	}
+	conflicts, err := s.ListForTask(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 1 || conflicts[0].OtherTaskID != b.ID ||
+		!reflect.DeepEqual(conflicts[0].Files, []string{"old.go"}) {
+		t.Fatalf("conflicts after rollback = %+v", conflicts)
+	}
+}
+
+func TestReconcileRejectsEmptyKinds(t *testing.T) {
 	s := NewStore(nil)
-	if err := s.Upsert(context.Background(), "r", "a", "b", nil, nil); err == nil {
+	if err := s.Reconcile(context.Background(), "r", "a", []Detection{{
+		OtherTaskID: "b",
+	}}); err == nil {
 		t.Error("empty kinds must be rejected")
 	}
 }
@@ -212,8 +250,9 @@ func TestConflictConstraints(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := createRepoTask(t, db, repoB, "task b", "")
-	if err := NewStore(db).Upsert(ctx, repoA, a.ID, b.ID,
-		[]Kind{KindFileOverlap}, nil); err == nil {
+	if err := NewStore(db).Reconcile(ctx, repoA, a.ID, []Detection{{
+		OtherTaskID: b.ID, Kinds: []Kind{KindFileOverlap},
+	}}); err == nil {
 		t.Fatal("cross-repository pair must fail")
 	}
 
@@ -225,5 +264,16 @@ func TestConflictConstraints(t *testing.T) {
 		createRepoTask(t, db, repoA, "task c", "").ID)
 	if err == nil {
 		t.Fatal("unknown conflict kind must fail")
+	}
+
+	c := createRepoTask(t, db, repoA, "task c", "")
+	if err := NewStore(db).Reconcile(ctx, repoA, a.ID, []Detection{{
+		OtherTaskID: c.ID, Kinds: []Kind{KindFileOverlap},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET repository_id = $1 WHERE id = $2`,
+		repoB, c.ID); err == nil {
+		t.Fatal("moving a task must not invalidate an existing conflict pair")
 	}
 }

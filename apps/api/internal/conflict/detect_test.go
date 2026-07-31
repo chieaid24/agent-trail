@@ -118,3 +118,20 @@ func TestRangesAdjacentBoundary(t *testing.T) {
 		t.Error("gap of 4 lines must not be adjacent")
 	}
 }
+
+func TestDependencyManifestEcosystems(t *testing.T) {
+	files := []string{
+		"pom.xml", "build.gradle", "gradle.lockfile", "uv.lock", "bun.lock",
+		"packages.lock.json", "Package.resolved", "mix.lock", "pubspec.lock",
+	}
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			kinds, gotFiles := Overlap(ChangeSet{Files: []string{file}},
+				ChangeSet{Files: []string{file}})
+			if !reflect.DeepEqual(kinds, []Kind{KindFileOverlap, KindDependency}) ||
+				!reflect.DeepEqual(gotFiles, []string{file}) {
+				t.Fatalf("Overlap(%s) = %v %v", file, kinds, gotFiles)
+			}
+		})
+	}
+}

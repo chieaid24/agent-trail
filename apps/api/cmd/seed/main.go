@@ -234,8 +234,10 @@ func seedConflictDemo(ctx context.Context, db *sql.DB, store *task.Store,
 		ids[i] = t.ID
 	}
 
-	return conflict.NewStore(db).Upsert(ctx, repoID, ids[0], ids[1],
-		[]conflict.Kind{conflict.KindFileOverlap, conflict.KindAdjacentLines,
+	return conflict.NewStore(db).Reconcile(ctx, repoID, ids[0], []conflict.Detection{{
+		OtherTaskID: ids[1],
+		Kinds: []conflict.Kind{conflict.KindFileOverlap, conflict.KindAdjacentLines,
 			conflict.KindMergeConflict},
-		[]string{"internal/payments/client.go"})
+		Files: []string{"internal/payments/client.go"},
+	}})
 }

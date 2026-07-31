@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
@@ -54,43 +55,89 @@ func (s *Store) ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID 
 	return siblings, nil
 }
 
-// Upsert replaces the normalized warning for a task pair.
-func (s *Store) Upsert(ctx context.Context, repositoryID, taskID, otherTaskID string, kinds []Kind, files []string) error {
-	if len(kinds) == 0 {
-		return fmt.Errorf("conflict: upsert needs at least one kind")
+// Reconcile atomically replaces taskID's conflict set.
+func (s *Store) Reconcile(ctx context.Context, repositoryID, taskID string, detections []Detection) (retErr error) {
+	desired := make(map[string]Detection, len(detections))
+	for _, detection := range detections {
+		if len(detection.Kinds) == 0 {
+			return fmt.Errorf("conflict: reconcile needs at least one kind")
+		}
+		desired[detection.OtherTaskID] = detection
 	}
-	kindsJSON, err := json.Marshal(kinds)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("conflict: encode kinds: %w", err)
+		return fmt.Errorf("conflict: begin reconcile: %w", err)
 	}
-	if files == nil {
-		files = []string{}
-	}
-	filesJSON, err := json.Marshal(files)
+	defer func() {
+		if retErr != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	rows, err := tx.QueryContext(ctx, `
+		SELECT CASE WHEN task_a_id = $1 THEN task_b_id ELSE task_a_id END
+		FROM task_conflicts
+		WHERE task_a_id = $1 OR task_b_id = $1
+		ORDER BY task_a_id, task_b_id
+		FOR UPDATE`, taskID)
 	if err != nil {
-		return fmt.Errorf("conflict: encode files: %w", err)
+		return fmt.Errorf("conflict: lock existing pairs: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO task_conflicts (repository_id, task_a_id, task_b_id, kinds, files)
-		VALUES ($1, LEAST($2::uuid, $3::uuid), GREATEST($2::uuid, $3::uuid), $4, $5)
-		ON CONFLICT ON CONSTRAINT task_conflicts_pair_key
-		DO UPDATE SET kinds = EXCLUDED.kinds, files = EXCLUDED.files,
-			updated_at = now()`,
-		repositoryID, taskID, otherTaskID, kindsJSON, filesJSON)
-	if err != nil {
-		return fmt.Errorf("conflict: upsert: %w", err)
+	var existing []string
+	for rows.Next() {
+		var otherTaskID string
+		if err := rows.Scan(&otherTaskID); err != nil {
+			rows.Close()
+			return fmt.Errorf("conflict: scan existing pair: %w", err)
+		}
+		existing = append(existing, otherTaskID)
 	}
-	return nil
-}
-
-// DeletePair removes a clean task pair.
-func (s *Store) DeletePair(ctx context.Context, taskID, otherTaskID string) error {
-	_, err := s.db.ExecContext(ctx, `
-		DELETE FROM task_conflicts
-		WHERE task_a_id = LEAST($1::uuid, $2::uuid)
-		  AND task_b_id = GREATEST($1::uuid, $2::uuid)`, taskID, otherTaskID)
-	if err != nil {
-		return fmt.Errorf("conflict: delete pair: %w", err)
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("conflict: close existing pairs: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("conflict: read existing pairs: %w", err)
+	}
+	for _, otherTaskID := range existing {
+		if _, ok := desired[otherTaskID]; ok {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM task_conflicts
+			WHERE task_a_id = LEAST($1::uuid, $2::uuid)
+			  AND task_b_id = GREATEST($1::uuid, $2::uuid)`, taskID, otherTaskID); err != nil {
+			return fmt.Errorf("conflict: delete stale pair: %w", err)
+		}
+	}
+	otherTaskIDs := make([]string, 0, len(desired))
+	for otherTaskID := range desired {
+		otherTaskIDs = append(otherTaskIDs, otherTaskID)
+	}
+	sort.Strings(otherTaskIDs)
+	for _, otherTaskID := range otherTaskIDs {
+		detection := desired[otherTaskID]
+		kindsJSON, err := json.Marshal(detection.Kinds)
+		if err != nil {
+			return fmt.Errorf("conflict: encode kinds: %w", err)
+		}
+		files := detection.Files
+		if files == nil {
+			files = []string{}
+		}
+		filesJSON, err := json.Marshal(files)
+		if err != nil {
+			return fmt.Errorf("conflict: encode files: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_conflicts (repository_id, task_a_id, task_b_id, kinds, files)
+			VALUES ($1, LEAST($2::uuid, $3::uuid), GREATEST($2::uuid, $3::uuid), $4, $5)
+			ON CONFLICT ON CONSTRAINT task_conflicts_pair_key
+			DO UPDATE SET kinds = EXCLUDED.kinds, files = EXCLUDED.files,
+				updated_at = now()`, repositoryID, taskID, otherTaskID, kindsJSON, filesJSON); err != nil {
+			return fmt.Errorf("conflict: upsert pair: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("conflict: commit reconcile: %w", err)
 	}
 	return nil
 }

@@ -389,12 +389,8 @@ func (failingConflictRecords) ActiveSiblings(context.Context, string, string) ([
 	return nil, errors.New("conflict store unavailable")
 }
 
-func (failingConflictRecords) Upsert(context.Context, string, string, string,
-	[]conflict.Kind, []string) error {
-	return nil
-}
-
-func (failingConflictRecords) DeletePair(context.Context, string, string) error {
+func (failingConflictRecords) Reconcile(context.Context, string, string,
+	[]conflict.Detection) error {
 	return nil
 }
 

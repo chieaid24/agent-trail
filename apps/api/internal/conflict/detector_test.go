@@ -97,18 +97,18 @@ func TestDetectorFixtureSet(t *testing.T) {
 			}
 
 			if tc.wantKinds == nil {
-				if len(detections) != 0 || len(records.upserts) != 0 {
-					t.Fatalf("clean pair produced detections %v upserts %v",
-						detections, records.upserts)
+				if len(detections) != 0 || len(records.detections) != 0 {
+					t.Fatalf("clean pair produced detections %v / %v",
+						detections, records.detections)
 				}
-				if records.deletes != 1 {
-					t.Fatalf("clean pair must delete a stale row, deletes = %d", records.deletes)
+				if records.reconciles != 1 {
+					t.Fatalf("clean pair reconciles = %d, want 1", records.reconciles)
 				}
 				return
 			}
-			if len(detections) != 1 || len(records.upserts) != 1 {
-				t.Fatalf("detections = %v, upserts = %v, want one each",
-					detections, records.upserts)
+			if len(detections) != 1 || len(records.detections) != 1 {
+				t.Fatalf("detections = %v / %v, want one each",
+					detections, records.detections)
 			}
 			got := detections[0]
 			if got.OtherTaskID != "task-b" {
@@ -120,11 +120,11 @@ func TestDetectorFixtureSet(t *testing.T) {
 			if !reflect.DeepEqual(got.Files, tc.wantFiles) {
 				t.Errorf("files = %v, want %v", got.Files, tc.wantFiles)
 			}
-			if !reflect.DeepEqual(records.upserts[0], upsertCall{
-				repositoryID: "repo-uuid", taskID: "task-a", otherTaskID: "task-b",
-				kinds: tc.wantKinds, files: tc.wantFiles,
+			if !reflect.DeepEqual(records.detections[0], Detection{
+				OtherTaskID: "task-b", OtherTaskTitle: "sibling",
+				Kinds: tc.wantKinds, Files: tc.wantFiles,
 			}) {
-				t.Errorf("upsert = %+v", records.upserts[0])
+				t.Errorf("reconciled detection = %+v", records.detections[0])
 			}
 		})
 	}
@@ -144,9 +144,31 @@ func TestDetectorSkipsSiblingMissingFromMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
-	if len(detections) != 0 || len(records.upserts) != 0 || records.deletes != 0 {
-		t.Errorf("missing sibling commits must be skipped, got %v / %v / %d",
-			detections, records.upserts, records.deletes)
+	if len(detections) != 0 || len(records.detections) != 0 || records.reconciles != 1 {
+		t.Errorf("missing sibling commits must clear stale state, got %v / %v / %d",
+			detections, records.detections, records.reconciles)
+	}
+}
+
+func TestDetectorRefreshesRemoteAgentBranches(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	f := buildFixture(t, fixtureCases()[1])
+	remoteFinal := commitEdits(t, f.source, f.base, "remote-host",
+		[]edit{{path: "app.go", line: 11, content: []string{"changed remotely"}}})
+	runGit(t, f.source, "push", "-q", f.origin,
+		remoteFinal+":refs/heads/agent-trail/remote-host")
+	records := &fakeRecords{siblings: []Sibling{{
+		TaskID: "task-remote", Title: "remote", BaseSHA: f.base, FinalSHA: remoteFinal,
+	}}}
+	d := &Detector{Git: f.manager, Records: records, Logger: testLogger()}
+
+	detections, err := d.Detect(ctx, f.repo, "repo-uuid", "task-a", f.base, f.finalA)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if len(detections) != 1 || detections[0].OtherTaskID != "task-remote" {
+		t.Fatalf("detections = %+v, want remote task", detections)
 	}
 }
 
@@ -164,6 +186,8 @@ func TestDetectorNoSiblings(t *testing.T) {
 type fixture struct {
 	manager *gitworkspace.Manager
 	repo    gitworkspace.RepoRef
+	source  string
+	origin  string
 	base    string
 	finalA  string
 	finalB  string
@@ -216,7 +240,8 @@ func buildFixture(t *testing.T, tc fixtureCase) fixture {
 	if _, err := manager.EnsureMirror(context.Background(), repo); err != nil {
 		t.Fatalf("EnsureMirror: %v", err)
 	}
-	return fixture{manager: manager, repo: repo, base: base, finalA: finalA, finalB: finalB}
+	return fixture{manager: manager, repo: repo, source: src, origin: origin,
+		base: base, finalA: finalA, finalB: finalB}
 }
 
 func commitEdits(t *testing.T, src, base, branch string, edits []edit) string {
@@ -256,29 +281,19 @@ func writeFixtureFile(t *testing.T, root, path string, lines []string) {
 	}
 }
 
-type upsertCall struct {
-	repositoryID, taskID, otherTaskID string
-	kinds                             []Kind
-	files                             []string
-}
-
 type fakeRecords struct {
-	siblings []Sibling
-	upserts  []upsertCall
-	deletes  int
+	siblings   []Sibling
+	detections []Detection
+	reconciles int
 }
 
 func (f *fakeRecords) ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID string) ([]Sibling, error) {
 	return f.siblings, nil
 }
 
-func (f *fakeRecords) Upsert(ctx context.Context, repositoryID, taskID, otherTaskID string, kinds []Kind, files []string) error {
-	f.upserts = append(f.upserts, upsertCall{repositoryID, taskID, otherTaskID, kinds, files})
-	return nil
-}
-
-func (f *fakeRecords) DeletePair(ctx context.Context, taskID, otherTaskID string) error {
-	f.deletes++
+func (f *fakeRecords) Reconcile(ctx context.Context, repositoryID, taskID string, detections []Detection) error {
+	f.reconciles++
+	f.detections = append(f.detections, detections...)
 	return nil
 }
 

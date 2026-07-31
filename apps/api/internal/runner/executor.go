@@ -200,7 +200,7 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 			// Recovery only: the previous owner died mid-publishing. Its
 			// worktree survives on the same host; otherwise the pushed
 			// branch (if any) carries the work.
-			next, err := e.publishRecovered(ctx, c, t, pub)
+			next, err := e.publishRecovered(ctx, log, c, t, pub)
 			if err != nil {
 				return err
 			}
@@ -373,7 +373,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	if pub == nil {
 		return next, nil
 	}
-	return e.publishFromWorkspace(ctx, c, t, pub, ws, result.Summary)
+	return e.publishFromWorkspace(ctx, log, c, t, pub, ws, result.Summary)
 }
 
 // workspaceLostNote explains an unrunnable recovery-path validation.
