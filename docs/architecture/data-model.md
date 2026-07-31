@@ -340,8 +340,8 @@ Implemented (migration `00006_conflict_detection.sql`). One row per
 unordered pair of tasks in a repository whose published diffs overlap
 (conflict-detection.md). The pair is normalized (`task_a_id < task_b_id`,
 unique) so detection from either side writes the same row; the worker
-rewrites it whenever either side publishes. Reads filter both tasks to a
-non-terminal phase, so a finished task's warnings vanish without a delete.
+atomically reconciles the publishing task's rows. Reads filter both tasks to
+a non-terminal phase, so a finished task's warnings vanish without a delete.
 
 ```text
 id
@@ -354,3 +354,8 @@ files         -- implicated paths
 detected_at
 updated_at
 ```
+
+All three foreign keys are non-null. Composite foreign keys require both
+tasks' `repository_id` to equal the row's `repository_id`, including after a
+parent task update. `kinds` is a non-empty JSONB array limited to the listed
+values. `files` is a JSONB array containing only strings.

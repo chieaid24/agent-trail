@@ -53,8 +53,10 @@ worktree whose HEAD moved past the base is a recovered owner's earlier
 commit and publishes as-is.
 
 After the branch push, the worker records deterministic conflict warnings
-before it creates or refreshes the pull request (ADR-0012). Detection failure
-is logged and does not fail publishing; the draft pull request still opens.
+before it creates or refreshes the pull request (ADR-0012). It refreshes the
+mirror from origin, then atomically reconciles the publishing task's warnings.
+Detection failure is logged and does not fail publishing; the draft pull
+request still opens.
 
 The issue comment is at-least-once: an owner that dies between the
 comment and the final transition leaves a duplicate comment on retry,

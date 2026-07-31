@@ -16,8 +16,9 @@ must stay cheap to read.
 ## Decision
 
 The worker detects conflicts at publish time, right after an attempt's
-diff is pushed, and persists the result as one normalized row per task
-pair; the API and dashboard only read stored rows, filtered to pairs whose
+diff is pushed. It refreshes the mirror from origin, computes the complete
+active-sibling result, and atomically reconciles one normalized row per task
+pair. The API and dashboard only read stored rows, filtered to pairs whose
 tasks are both still active.
 
 ## Alternatives
@@ -35,27 +36,29 @@ tasks are both still active.
 
 ## Consequences
 
-- Warnings are exactly as fresh as the last publish: a pair updates when
-  either side publishes, never between publishes. That matches what the
-  warning means - published diffs overlap - and costs one detection pass
-  per publish instead of one per read.
+- Warnings reflect the last successful detection pass. A pair updates when
+  either side publishes, never between publishes, and a failed pass leaves
+  the previous set intact.
 - Both tasks' dashboards read the same row, so the warning is symmetric by
   construction.
 - Detection failure is observability failure, not publish failure: it logs
   and the publish proceeds.
-- A sibling published from another host is skipped until the mirror holds
-  its commits (single-host MVP always does); multi-host detection needs a
-  mirror fetch strategy first.
+- Remote agent branches use remote-tracking refs, so refreshing the mirror
+  observes commits published by other hosts without changing a local branch.
+- Activity events append after the warning transaction. The timeline is
+  at-least-once and can briefly lag stored warnings while a publish retries.
 
 ## Security implications
 
-Detection changes no refs or worktrees, mints no credentials, and never
-touches the network. `git merge-tree --write-tree` may add an unreachable
-tree object to the mirror object database. Stored rows carry only task ids,
-detector kinds, and file paths - no diff content leaves git.
+Detection reuses an installation-scoped credential to fetch origin into the
+worker-owned mirror. It changes no local branches or worktrees.
+`git merge-tree --write-tree` may add unreachable objects, including result
+trees and auto-merged blobs, to the mirror object database. Stored rows carry
+only task ids, detector kinds, and file paths - no diff content leaves git.
 
 ## Revisit conditions
 
-- Runners spread across hosts (detection starts skipping real siblings).
+- The brief record-before-push window causes enough skipped comparisons to
+  justify a retry queue.
 - Phase 2 structural detectors need more than changed paths and hunks.
 - The publish path's latency budget stops affording the extra git calls.
