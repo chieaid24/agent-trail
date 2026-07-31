@@ -33,7 +33,10 @@ export default function RunnerPage({
     }
   }, [runnerId]);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    const initial = setTimeout(() => void load(), 0);
+    return () => clearTimeout(initial);
+  }, [load]);
 
   return (
     <AppShell>

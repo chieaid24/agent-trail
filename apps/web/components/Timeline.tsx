@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useState } from "react";
 import { formatTime } from "@/lib/format";
 import { describeEvent } from "@/lib/timeline";
 import type { ActivityEvent } from "@/lib/types";
@@ -10,14 +10,11 @@ import type { ActivityEvent } from "@/lib/types";
 // tint (globals.css .row-appear).
 export function Timeline({ events }: { events: ActivityEvent[] }) {
   // Cursor of the newest event present at first render; anything after it
-  // animates. useRef, not state: the boundary must not move on re-render.
-  const initialCursor = useRef<string | null>(null);
-  if (initialCursor.current === null) {
+  // animates. The boundary must not move on re-render.
+  const [initialCursor] = useState(() => {
     const last = events[events.length - 1];
-    initialCursor.current = last
-      ? `${last.attempt_number}:${last.sequence_number}`
-      : "";
-  }
+    return last ? `${last.attempt_number}:${last.sequence_number}` : "";
+  });
 
   if (events.length === 0) {
     return (
@@ -35,10 +32,7 @@ export function Timeline({ events }: { events: ActivityEvent[] }) {
         <TimelineRow
           key={e.id}
           event={e}
-          animate={
-            initialCursor.current !== "" &&
-            isAfter(e, initialCursor.current ?? "")
-          }
+          animate={initialCursor !== "" && isAfter(e, initialCursor)}
         />
       ))}
     </ol>

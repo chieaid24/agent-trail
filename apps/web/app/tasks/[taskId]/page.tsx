@@ -83,9 +83,12 @@ export default function TaskPage({
   }, [taskId]);
 
   useEffect(() => {
-    void loadTask();
-    void loadValidations();
-    void loadEvidence();
+    const initial = setTimeout(() => {
+      void loadTask();
+      void loadValidations();
+      void loadEvidence();
+    }, 0);
+    return () => clearTimeout(initial);
   }, [loadTask, loadValidations, loadEvidence]);
 
   // The stream drives freshness: a lifecycle event refetches the task, a
@@ -101,13 +104,19 @@ export default function TaskPage({
   ).length;
 
   useEffect(() => {
-    if (taskEventCount > 0) void loadTask();
+    if (taskEventCount === 0) return;
+    const refresh = setTimeout(() => void loadTask(), 0);
+    return () => clearTimeout(refresh);
   }, [taskEventCount, loadTask]);
   useEffect(() => {
-    if (validationEventCount > 0) void loadValidations();
+    if (validationEventCount === 0) return;
+    const refresh = setTimeout(() => void loadValidations(), 0);
+    return () => clearTimeout(refresh);
   }, [validationEventCount, loadValidations]);
   useEffect(() => {
-    if (evidenceEventCount > 0) void loadEvidence();
+    if (evidenceEventCount === 0) return;
+    const refresh = setTimeout(() => void loadEvidence(), 0);
+    return () => clearTimeout(refresh);
   }, [evidenceEventCount, loadEvidence]);
 
   // Poll fallback while the task runs, in case the stream stalls.
