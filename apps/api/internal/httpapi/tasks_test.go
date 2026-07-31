@@ -84,7 +84,7 @@ func do(t *testing.T, h http.Handler, method, path, body string) *httptest.Respo
 }
 
 func TestTaskRoutesUnavailableWithoutDatabase(t *testing.T) {
-	h := New(testLogger(), nil, nil, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil, nil).Handler()
 	for _, tc := range [][2]string{
 		{http.MethodGet, "/api/v1/tasks"},
 		{http.MethodPost, "/api/v1/tasks"},
@@ -101,7 +101,7 @@ func TestTaskRoutesUnavailableWithoutDatabase(t *testing.T) {
 
 func TestCreateTask(t *testing.T) {
 	f := &fakeTasks{task: task.Task{ID: testUUID, Status: task.StatusQueued}}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodPost, "/api/v1/tasks",
 		`{"title": "  Fix the bug  ", "instructions": "do it", "priority": 5}`)
@@ -125,7 +125,7 @@ func TestCreateTask(t *testing.T) {
 
 func TestCreateTaskValidation(t *testing.T) {
 	f := &fakeTasks{}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	long := strings.Repeat("x", 501)
 	for name, body := range map[string]string{
@@ -150,7 +150,7 @@ func TestCreateTaskValidation(t *testing.T) {
 
 func TestGetTask(t *testing.T) {
 	f := &fakeTasks{task: task.Task{ID: testUUID}}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID, "")
 	if rec.Code != http.StatusOK {
@@ -171,7 +171,7 @@ func TestGetTask(t *testing.T) {
 
 func TestListTasks(t *testing.T) {
 	f := &fakeTasks{tasks: []task.Task{{ID: testUUID}}}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks?status=queued&limit=10", "")
 	if rec.Code != http.StatusOK {
@@ -191,7 +191,7 @@ func TestListTasks(t *testing.T) {
 
 func TestCancelTask(t *testing.T) {
 	f := &fakeTasks{task: task.Task{ID: testUUID, Status: task.StatusCancelled}}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodPost, "/api/v1/tasks/"+testUUID+"/cancel",
 		`{"reason": "no longer needed"}`)
@@ -217,7 +217,7 @@ func TestCancelTask(t *testing.T) {
 
 func TestTaskEvents(t *testing.T) {
 	f := &fakeTasks{events: []task.Event{{ID: testUUID, EventType: "task.created"}}}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/events?limit=100", "")
 	if rec.Code != http.StatusOK {
@@ -237,7 +237,7 @@ func TestTaskEvents(t *testing.T) {
 
 func TestVersionConflictMapsTo409(t *testing.T) {
 	f := &fakeTasks{err: &task.VersionConflictError{Expected: 1, Actual: 3}}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodPost, "/api/v1/tasks/"+testUUID+"/cancel", "")
 	if rec.Code != http.StatusConflict {
@@ -247,7 +247,7 @@ func TestVersionConflictMapsTo409(t *testing.T) {
 
 func TestUnexpectedErrorMapsTo500(t *testing.T) {
 	f := &fakeTasks{err: context.DeadlineExceeded}
-	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, f, nil, nil, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID, "")
 	if rec.Code != http.StatusInternalServerError {

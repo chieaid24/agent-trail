@@ -16,6 +16,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
+	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 	"github.com/chieaid24/agent-trail/apps/api/internal/dashboard"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/github"
@@ -61,7 +62,8 @@ func run() error {
 		validations = validation.NewStore(db)
 		evidenceReports = evidence.NewStore(db)
 		apiOptions = append(apiOptions,
-			httpapi.WithDashboard(dashboard.NewStore(db)))
+			httpapi.WithDashboard(dashboard.NewStore(db)),
+			httpapi.WithConflicts(conflict.NewStore(db)))
 	}
 
 	metrics := observability.NewRegistry()
