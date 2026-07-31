@@ -8,10 +8,11 @@
 4. Generate evidence.
 5. Create a commit if changes exist.
 6. Push the branch.
-7. Create or update one draft pull request.
-8. Create or update one GitHub Check.
-9. Post an issue comment.
-10. Mark the attempt `AWAITING_REVIEW`.
+7. Detect overlap with published active-task diffs.
+8. Create or update one draft pull request.
+9. Create or update one GitHub Check.
+10. Post an issue comment.
+11. Mark the attempt `AWAITING_REVIEW`.
 
 Idempotency keys:
 
@@ -50,6 +51,10 @@ explanation (the state machine has no dedicated no-change state; the
 failed state with a distinct code is the recorded mapping). A clean
 worktree whose HEAD moved past the base is a recovered owner's earlier
 commit and publishes as-is.
+
+After the branch push, the worker records deterministic conflict warnings
+before it creates or refreshes the pull request (ADR-0012). Detection failure
+is logged and does not fail publishing; the draft pull request still opens.
 
 The issue comment is at-least-once: an owner that dies between the
 comment and the final transition leaves a duplicate comment on retry,

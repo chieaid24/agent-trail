@@ -213,7 +213,9 @@ effects. The validation family is implemented: `validation.started`,
 `pull_request.created` or `pull_request.updated` (a replayed publish
 refreshes the existing PR), and `publishing.no_change` when a clean
 worktree ends the task without a PR; tasks outside the publishing path
-record `publishing.skipped`.
+record `publishing.skipped`. Conflict detection emits `conflict.detected`
+after a pushed branch overlaps an active sibling; its payload carries the
+other task's id and title, detector kinds, and implicated files.
 Example event types:
 
 ```text
@@ -234,6 +236,7 @@ validation.started
 validation.completed
 commit.created
 branch.pushed
+conflict.detected
 pull_request.created
 pull_request.updated
 github.check_run.updated
@@ -345,9 +348,9 @@ id
 repository_id
 task_a_id
 task_b_id
-kinds_json    -- non-empty array of: file_overlap, adjacent_lines,
+kinds         -- non-empty array of: file_overlap, adjacent_lines,
               -- merge_conflict, migration, dependency
-files_json    -- implicated paths
+files         -- implicated paths
 detected_at
 updated_at
 ```

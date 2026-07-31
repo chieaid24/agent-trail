@@ -9,15 +9,16 @@ the draft PRs decides (ADR-0012).
 Detection runs in the worker at publish time, after an attempt's diff is
 committed and pushed: the just-published `base..final` range is compared
 against the latest published range of every other non-terminal task of the
-repository (`internal/conflict`). All comparisons are read-only git
-plumbing against the repository's bare mirror cache (`internal/gitworkspace`):
+repository (`internal/conflict`). Comparisons never change refs or worktrees
+in the repository's bare mirror cache (`internal/gitworkspace`):
 
 - `git diff --name-only` - changed-path sets; a non-empty intersection is
   `file_overlap`.
 - `git diff --unified=0` - base-side hunk ranges; edits to a shared file
   within 3 lines of each other are `adjacent_lines`.
-- `git merge-tree --write-tree` - a temporary in-memory merge of the two
-  final commits; conflicts are `merge_conflict` with the conflicted paths.
+- `git merge-tree --write-tree` - a temporary merge of the two final commits;
+  conflicts are `merge_conflict` with the conflicted paths. Git may write an
+  unreachable tree object to the mirror object database but changes no ref.
 - Both diffs touching SQL files under a `migrations/` directory is
   `migration`, even when the files differ (ordering collides).
 - Both diffs touching the same dependency manifest or lockfile

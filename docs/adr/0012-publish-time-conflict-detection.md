@@ -49,9 +49,10 @@ tasks are both still active.
 
 ## Security implications
 
-Detection is read-only against local mirrors using recorded commit SHAs;
-it mints no credentials and never touches the network. Stored rows carry
-only task ids, detector kinds, and file paths - no diff content leaves git.
+Detection changes no refs or worktrees, mints no credentials, and never
+touches the network. `git merge-tree --write-tree` may add an unreachable
+tree object to the mirror object database. Stored rows carry only task ids,
+detector kinds, and file paths - no diff content leaves git.
 
 ## Revisit conditions
 

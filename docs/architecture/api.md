@@ -106,9 +106,10 @@ Implemented semantics:
   `no evidence report for task` until one exists.
 - `GET /tasks/{taskId}/conflicts` returns the task's stored overlap
   warnings against other still-active tasks of its repository
-  (conflict-detection.md), each carrying the other task's id and title,
-  the detector `kinds` that fired, and the implicated `files`. An empty
-  list is the normal no-conflict state.
+  (conflict-detection.md). Each warning carries its id, detection and update
+  timestamps, the other task's id and title, the detector `kinds` that fired,
+  and the implicated `files`. An empty list is the normal no-conflict state;
+  an unknown task returns 404.
 - Errors are `{"error": "message"}`: 400 malformed input, 404 unknown task,
   409 illegal transition or stale version, 503 when no database is
   configured.
