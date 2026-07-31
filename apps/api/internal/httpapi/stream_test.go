@@ -15,7 +15,7 @@ import (
 // streamServer returns a handler whose stream loop runs fast enough to
 // finish inside a test.
 func streamServer(f *fakeTasks) http.Handler {
-	s := New(testLogger(), nil, f, nil, nil, nil, nil, nil)
+	s := New(testLogger(), nil, f, nil, nil, nil, nil)
 	s.streamPollInterval = time.Millisecond
 	s.streamHeartbeat = time.Millisecond
 	return s.Handler()
@@ -151,7 +151,7 @@ func TestTaskStreamHeartbeatsUntilClientCloses(t *testing.T) {
 }
 
 func TestTaskStreamUnavailableWithoutDatabase(t *testing.T) {
-	h := New(testLogger(), nil, nil, nil, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil).Handler()
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/stream", "")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)

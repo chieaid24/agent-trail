@@ -20,7 +20,7 @@ func (f *fakeConflicts) ListForTask(context.Context, string) ([]conflict.TaskCon
 }
 
 func TestTaskConflictsUnavailableWithoutDB(t *testing.T) {
-	h := New(testLogger(), nil, nil, nil, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil).Handler()
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/conflicts", "")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
@@ -28,7 +28,8 @@ func TestTaskConflictsUnavailableWithoutDB(t *testing.T) {
 }
 
 func TestTaskConflictsRejectsBadID(t *testing.T) {
-	h := New(testLogger(), nil, nil, nil, nil, &fakeConflicts{}, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil,
+		WithConflicts(&fakeConflicts{})).Handler()
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/not-a-uuid/conflicts", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -43,7 +44,8 @@ func TestTaskConflictsList(t *testing.T) {
 		DetectedAt: time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
 		UpdatedAt:  time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
 	}}}
-	h := New(testLogger(), nil, nil, nil, nil, f, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil,
+		WithConflicts(f)).Handler()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/conflicts", "")
 	if rec.Code != http.StatusOK {
@@ -72,8 +74,8 @@ func TestTaskConflictsList(t *testing.T) {
 }
 
 func TestTaskConflictsEmptyList(t *testing.T) {
-	h := New(testLogger(), nil, nil, nil, nil,
-		&fakeConflicts{conflicts: []conflict.TaskConflict{}}, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil,
+		WithConflicts(&fakeConflicts{conflicts: []conflict.TaskConflict{}})).Handler()
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/conflicts", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

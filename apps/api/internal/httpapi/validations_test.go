@@ -32,7 +32,7 @@ func (f *fakeEvidence) GetForTask(_ context.Context, taskID string) (evidence.St
 }
 
 func TestValidationAndEvidenceRoutesUnavailableWithoutDatabase(t *testing.T) {
-	h := New(testLogger(), nil, nil, nil, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil).Handler()
 	for _, path := range []string{
 		"/api/v1/tasks/" + testUUID + "/validations",
 		"/api/v1/tasks/" + testUUID + "/evidence",
@@ -51,7 +51,7 @@ func TestTaskValidations(t *testing.T) {
 		Status: validation.StatusFailed, ExitCode: &code,
 		TrustedExecution: true,
 	}}}
-	h := New(testLogger(), nil, nil, f, nil, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, f, nil, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/validations", "")
 	if rec.Code != http.StatusOK {
@@ -71,7 +71,7 @@ func TestTaskValidations(t *testing.T) {
 
 func TestTaskValidationsErrors(t *testing.T) {
 	h := New(testLogger(), nil, nil,
-		&fakeValidations{err: task.ErrNotFound}, nil, nil, nil, nil).Handler()
+		&fakeValidations{err: task.ErrNotFound}, nil, nil, nil).Handler()
 	if rec := do(t, h, http.MethodGet,
 		"/api/v1/tasks/"+testUUID+"/validations", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown task = %d, want 404", rec.Code)
@@ -88,7 +88,7 @@ func TestTaskEvidence(t *testing.T) {
 		SummaryMarkdown: "# Evidence: t",
 		Report:          json.RawMessage(`{"schema_version":1}`),
 	}}
-	h := New(testLogger(), nil, nil, nil, f, nil, nil, nil).Handler()
+	h := New(testLogger(), nil, nil, nil, f, nil, nil).Handler()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/evidence", "")
 	if rec.Code != http.StatusOK {
@@ -106,13 +106,13 @@ func TestTaskEvidence(t *testing.T) {
 
 func TestTaskEvidenceErrors(t *testing.T) {
 	noReport := New(testLogger(), nil, nil, nil,
-		&fakeEvidence{err: evidence.ErrNoReport}, nil, nil, nil).Handler()
+		&fakeEvidence{err: evidence.ErrNoReport}, nil, nil).Handler()
 	if rec := do(t, noReport, http.MethodGet,
 		"/api/v1/tasks/"+testUUID+"/evidence", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("no report = %d, want 404", rec.Code)
 	}
 	unknown := New(testLogger(), nil, nil, nil,
-		&fakeEvidence{err: task.ErrNotFound}, nil, nil, nil).Handler()
+		&fakeEvidence{err: task.ErrNotFound}, nil, nil).Handler()
 	if rec := do(t, unknown, http.MethodGet,
 		"/api/v1/tasks/"+testUUID+"/evidence", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown task = %d, want 404", rec.Code)
