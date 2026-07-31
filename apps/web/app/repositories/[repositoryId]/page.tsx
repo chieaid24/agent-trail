@@ -35,7 +35,10 @@ export default function RepositoryPage({
     }
   }, [repositoryId]);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    const initial = setTimeout(() => void load(), 0);
+    return () => clearTimeout(initial);
+  }, [load]);
 
   return (
     <AppShell>

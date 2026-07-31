@@ -40,10 +40,6 @@ export function useTaskStream(taskId: string): TaskStream {
   const [finalStatus, setFinalStatus] = useState<TaskStatus | null>(null);
 
   useEffect(() => {
-    setEvents([]);
-    setState("connecting");
-    setFinalStatus(null);
-
     let es: EventSource | null = null;
     let reopenTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
@@ -93,10 +89,16 @@ export function useTaskStream(taskId: string): TaskStream {
       };
     };
 
-    open();
+    const initial = setTimeout(() => {
+      setEvents([]);
+      setState("connecting");
+      setFinalStatus(null);
+      open();
+    }, 0);
 
     return () => {
       cancelled = true;
+      clearTimeout(initial);
       if (reopenTimer !== null) clearTimeout(reopenTimer);
       es?.close();
     };

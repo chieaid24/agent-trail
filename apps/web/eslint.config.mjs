@@ -6,10 +6,10 @@ export default defineConfig([
   ...nextVitals,
   ...nextTypescript,
   {
+    files: ["vendor/**/*.cjs"],
     rules: {
-      "react-hooks/refs": "off",
-      "react-hooks/set-state-in-effect": "off",
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
-  globalIgnores([".next/**", "node_modules/**", "next-env.d.ts", "vendor/**"]),
+  globalIgnores([".next/**", "node_modules/**", "next-env.d.ts"]),
 ]);

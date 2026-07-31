@@ -19,12 +19,10 @@ do not yet require:
   address GHSA-mh99-v99m-4gvg while preserving the callable CommonJS export
   required by ESLint's legacy Minimatch consumers.
 
-The Next.js 16 lint configuration enables React Compiler-oriented checks for
-render-time ref reads and state updates initiated by effects. The dashboard does
-not enable React Compiler, and its polling, server-sent event, and timeline
-components intentionally use those patterns to synchronize external data. The
-ESLint configuration disables only `react-hooks/refs` and
-`react-hooks/set-state-in-effect`.
+The Next.js 16 lint configuration also checks render-time ref reads and
+synchronous state updates initiated by effects. The dashboard schedules its
+initial API and server-sent event synchronization after the effect returns, and
+the timeline stores its mount-time animation boundary as immutable state.
 
 Run the audit from the dashboard directory:
 
@@ -38,5 +36,5 @@ npm audit --audit-level=high
 
 No high or critical advisory remains in the installed dependency graph. Recheck
 the overrides when Next.js and the ESLint plugins update their dependency
-ranges. Remove the compatibility package once the ESLint plugins use Minimatch
-10 or newer.
+ranges. Remove the compatibility package once every legacy ESLint consumer no
+longer requires the callable Minimatch 3 API.
