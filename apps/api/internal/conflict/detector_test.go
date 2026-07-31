@@ -186,10 +186,10 @@ func baseFiles() map[string][]string {
 		return out
 	}
 	return map[string][]string{
-		"app.go":  lines(),
-		"lib.go":  lines(),
-		"docs.md": lines(),
-		"go.mod":  lines(),
+		"app.go":                    lines(),
+		"lib.go":                    lines(),
+		"docs.md":                   lines(),
+		"go.mod":                    lines(),
 		"migrations/00001_init.sql": {"CREATE TABLE init (id INT);"},
 	}
 }
