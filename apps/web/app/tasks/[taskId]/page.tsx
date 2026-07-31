@@ -4,12 +4,19 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { CancelButton } from "@/components/CancelButton";
+import { ConflictWarning } from "@/components/ConflictWarning";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { LogViewer } from "@/components/LogViewer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Timeline } from "@/components/Timeline";
 import { ValidationList } from "@/components/ValidationList";
-import { ApiError, getEvidence, getTask, listValidations } from "@/lib/api";
+import {
+  ApiError,
+  getEvidence,
+  getTask,
+  listConflicts,
+  listValidations,
+} from "@/lib/api";
 import {
   formatDateTime,
   formatDuration,
@@ -18,7 +25,12 @@ import {
 } from "@/lib/format";
 import { changedFiles, latestPlan } from "@/lib/timeline";
 import { useTaskStream, type StreamState } from "@/lib/useTaskStream";
-import type { StoredEvidence, Task, ValidationResult } from "@/lib/types";
+import type {
+  StoredEvidence,
+  Task,
+  TaskConflict,
+  ValidationResult,
+} from "@/lib/types";
 import { isTerminal } from "@/lib/types";
 
 const TASK_POLL_MS = 10_000;
@@ -29,6 +41,11 @@ type TaskState =
   | { phase: "loading" }
   | { phase: "error"; message: string }
   | { phase: "ready"; task: Task };
+
+type ConflictState =
+  | { phase: "loading" }
+  | { phase: "ready"; items: TaskConflict[] }
+  | { phase: "error" };
 
 // Re-render clock for live runtimes.
 function useNow(intervalMs: number, enabled: boolean): number {
@@ -50,6 +67,9 @@ export default function TaskPage({
   const [state, setState] = useState<TaskState>({ phase: "loading" });
   const [validations, setValidations] = useState<ValidationResult[]>([]);
   const [evidence, setEvidence] = useState<StoredEvidence | null>(null);
+  const [conflicts, setConflicts] = useState<ConflictState>({
+    phase: "loading",
+  });
   const [tab, setTab] = useState<TabKey>("timeline");
   const stream = useTaskStream(taskId);
 
@@ -82,14 +102,23 @@ export default function TaskPage({
     }
   }, [taskId]);
 
+  const loadConflicts = useCallback(async () => {
+    try {
+      setConflicts({ phase: "ready", items: await listConflicts(taskId) });
+    } catch {
+      setConflicts({ phase: "error" });
+    }
+  }, [taskId]);
+
   useEffect(() => {
     const initial = setTimeout(() => {
       void loadTask();
       void loadValidations();
       void loadEvidence();
+      void loadConflicts();
     }, 0);
     return () => clearTimeout(initial);
-  }, [loadTask, loadValidations, loadEvidence]);
+  }, [loadTask, loadValidations, loadEvidence, loadConflicts]);
 
   // The stream drives freshness: a lifecycle event refetches the task, a
   // validation or evidence event refetches its view.
@@ -102,12 +131,18 @@ export default function TaskPage({
   const evidenceEventCount = stream.events.filter(
     (e) => e.event_type === "evidence.generated",
   ).length;
+  const conflictEventCount = stream.events.filter(
+    (e) => e.event_type === "conflict.detected",
+  ).length;
 
   useEffect(() => {
     if (taskEventCount === 0) return;
-    const refresh = setTimeout(() => void loadTask(), 0);
+    const refresh = setTimeout(
+      () => void Promise.all([loadTask(), loadConflicts()]),
+      0,
+    );
     return () => clearTimeout(refresh);
-  }, [taskEventCount, loadTask]);
+  }, [taskEventCount, loadTask, loadConflicts]);
   useEffect(() => {
     if (validationEventCount === 0) return;
     const refresh = setTimeout(() => void loadValidations(), 0);
@@ -118,14 +153,22 @@ export default function TaskPage({
     const refresh = setTimeout(() => void loadEvidence(), 0);
     return () => clearTimeout(refresh);
   }, [evidenceEventCount, loadEvidence]);
+  useEffect(() => {
+    if (conflictEventCount === 0) return;
+    const refresh = setTimeout(() => void loadConflicts(), 0);
+    return () => clearTimeout(refresh);
+  }, [conflictEventCount, loadConflicts]);
 
-  // Poll fallback while the task runs, in case the stream stalls.
+  // Poll for sibling publishes, which do not reach this task's stream.
   const running = state.phase === "ready" && !isTerminal(state.task.status);
   useEffect(() => {
     if (!running) return;
-    const t = setInterval(() => void loadTask(), TASK_POLL_MS);
+    const t = setInterval(() => {
+      void loadTask();
+      void loadConflicts();
+    }, TASK_POLL_MS);
     return () => clearInterval(t);
-  }, [running, loadTask]);
+  }, [running, loadTask, loadConflicts]);
 
   const files = useMemo(() => changedFiles(stream.events), [stream.events]);
   const plan = useMemo(() => latestPlan(stream.events), [stream.events]);
@@ -147,6 +190,8 @@ export default function TaskPage({
             task={state.task}
             streamState={stream.state}
             plan={plan}
+            conflicts={conflicts}
+            onRetryConflicts={loadConflicts}
             onTaskChanged={(t) => setState({ phase: "ready", task: t })}
           >
             <TabBar
@@ -180,12 +225,16 @@ function TaskDetail({
   task,
   streamState,
   plan,
+  conflicts,
+  onRetryConflicts,
   onTaskChanged,
   children,
 }: {
   task: Task;
   streamState: StreamState;
   plan: string | null;
+  conflicts: ConflictState;
+  onRetryConflicts: () => void;
   onTaskChanged: (t: Task) => void;
   children: React.ReactNode;
 }) {
@@ -222,6 +271,44 @@ function TaskDetail({
             {task.failure_message ?? "No failure detail was recorded."}
           </p>
         ) : null}
+        <div className="mt-4 h-40 xl:h-32">
+          {conflicts.phase === "loading" && (
+            <p className="h-full rounded border border-border px-3 py-3 text-sm text-muted">
+              Checking task overlaps...
+            </p>
+          )}
+          {conflicts.phase === "error" && (
+            <div
+              role="alert"
+              className="flex h-full items-start gap-3 rounded border border-border px-3 py-2 text-sm"
+            >
+              <span className="py-1 text-warning">
+                Conflict warnings unavailable.
+              </span>
+              <button
+                type="button"
+                onClick={onRetryConflicts}
+                className="rounded px-2 py-1 font-semibold text-accent hover:bg-surface hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {conflicts.phase === "ready" && conflicts.items.length === 0 && (
+            <div className="h-full rounded border border-border px-3 py-3 text-sm">
+              <p className="text-muted">No active task overlaps detected.</p>
+              <Link
+                href="/"
+                className="mt-2 inline-block rounded px-2 py-1 font-semibold text-accent hover:bg-surface hover:underline"
+              >
+                View active tasks
+              </Link>
+            </div>
+          )}
+          {conflicts.phase === "ready" && conflicts.items.length > 0 && (
+            <ConflictWarning conflicts={conflicts.items} />
+          )}
+        </div>
 
         <dl className="mt-4 grid grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 text-sm lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
           {task.source_issue_number !== null && (

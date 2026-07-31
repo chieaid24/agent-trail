@@ -62,9 +62,10 @@ Resource percentages remain `null` until a runner reports `cpu_percent`,
 
 ### Tasks
 
-Implemented: list, create, get, cancel, events, validations, evidence. The
-rest of the surface lands with its milestone (retry with the runner,
-commands with the real agent adapter, artifacts with GitHub publishing).
+Implemented: list, create, get, cancel, events, validations, evidence,
+conflicts. The rest of the surface lands with its milestone (retry with the
+runner, commands with the real agent adapter, artifacts with GitHub
+publishing).
 
 Security limitation: the implemented task endpoints are currently
 unauthenticated - anyone who can reach the API can create and cancel tasks.
@@ -82,6 +83,7 @@ GET  /tasks/{taskId}/events
 GET  /tasks/{taskId}/commands
 GET  /tasks/{taskId}/validations
 GET  /tasks/{taskId}/evidence
+GET  /tasks/{taskId}/conflicts
 GET  /tasks/{taskId}/artifacts
 ```
 
@@ -102,6 +104,13 @@ Implemented semantics:
 - `GET /tasks/{taskId}/evidence` returns the latest attempt's evidence
   report (JSON document plus rendered Markdown summary); 404 with
   `no evidence report for task` until one exists.
+- `GET /tasks/{taskId}/conflicts` returns the task's stored overlap
+  warnings as `{"conflicts":[...]}` against other still-active tasks of its
+  repository (conflict-detection.md). Each warning carries its id, detection
+  and update timestamps, the other task's id and title, the detector `kinds`
+  that fired, and the implicated `files`. Rows are ordered by initial
+  `detected_at` descending, then id. An empty list is the normal no-conflict
+  state; an unknown task returns 404.
 - Errors are `{"error": "message"}`: 400 malformed input, 404 unknown task,
   409 illegal transition or stale version, 503 when no database is
   configured.

@@ -213,7 +213,9 @@ effects. The validation family is implemented: `validation.started`,
 `pull_request.created` or `pull_request.updated` (a replayed publish
 refreshes the existing PR), and `publishing.no_change` when a clean
 worktree ends the task without a PR; tasks outside the publishing path
-record `publishing.skipped`.
+record `publishing.skipped`. Conflict detection emits `conflict.detected`
+after a pushed branch overlaps an active sibling; its payload carries the
+other task's id and title, detector kinds, and implicated files.
 Example event types:
 
 ```text
@@ -234,6 +236,7 @@ validation.started
 validation.completed
 commit.created
 branch.pushed
+conflict.detected
 pull_request.created
 pull_request.updated
 github.check_run.updated
@@ -330,3 +333,29 @@ report_json
 report_object_key
 created_at
 ```
+
+### Task conflict
+
+Implemented (migration `00006_conflict_detection.sql`). One row per
+unordered pair of tasks in a repository whose published diffs overlap
+(conflict-detection.md). The pair is normalized (`task_a_id < task_b_id`,
+unique) so detection from either side writes the same row; the worker
+atomically reconciles the publishing task's rows. Reads filter both tasks to
+a non-terminal phase, so a finished task's warnings vanish without a delete.
+
+```text
+id
+repository_id
+task_a_id
+task_b_id
+kinds         -- non-empty array of: file_overlap, adjacent_lines,
+              -- merge_conflict, migration, dependency
+files         -- implicated paths
+detected_at
+updated_at
+```
+
+All three foreign keys are non-null. Composite foreign keys require both
+tasks' `repository_id` to equal the row's `repository_id`, including after a
+parent task update. `kinds` is a non-empty JSONB array limited to the listed
+values. `files` is a JSONB array containing only strings.

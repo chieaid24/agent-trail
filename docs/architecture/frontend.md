@@ -35,6 +35,7 @@ Show:
 Show:
 
 - Status
+- Conflict warnings (overlapping active tasks, conflict-detection.md)
 - Original issue
 - Agent plan
 - Live timeline
@@ -47,6 +48,12 @@ Show:
 - Pull-request link
 - Runtime and cost
 - Cancellation button
+
+Conflict warnings have loading, empty, unavailable with Retry, populated, and
+long-content states in a fixed-height region. Active tasks poll warnings every
+10 seconds because a sibling publish does not enter the viewed task's event
+stream. Task lifecycle events reload both task and warning data, so a task that
+turns terminal clears the active-only warning surface.
 
 #### Repository page
 

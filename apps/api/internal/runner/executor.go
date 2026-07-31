@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
+	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
@@ -54,6 +55,8 @@ type Executor struct {
 	Workspaces *gitworkspace.Manager
 	GitHub     PublishGitHub
 	Repos      RepositoryResolver
+	// Conflicts records active-task overlap; nil disables detection.
+	Conflicts *conflict.Detector
 	// LeaseDuration is the claim lease; the executor extends it at a third
 	// of this interval while it works.
 	LeaseDuration time.Duration
@@ -197,7 +200,7 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 			// Recovery only: the previous owner died mid-publishing. Its
 			// worktree survives on the same host; otherwise the pushed
 			// branch (if any) carries the work.
-			next, err := e.publishRecovered(ctx, c, t, pub)
+			next, err := e.publishRecovered(ctx, log, c, t, pub)
 			if err != nil {
 				return err
 			}
@@ -370,7 +373,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	if pub == nil {
 		return next, nil
 	}
-	return e.publishFromWorkspace(ctx, c, t, pub, ws, result.Summary)
+	return e.publishFromWorkspace(ctx, log, c, t, pub, ws, result.Summary)
 }
 
 // workspaceLostNote explains an unrunnable recovery-path validation.

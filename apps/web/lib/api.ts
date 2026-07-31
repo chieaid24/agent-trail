@@ -12,6 +12,7 @@ import type {
   RunnerDetail,
   StoredEvidence,
   Task,
+  TaskConflict,
   TaskStatus,
   ValidationResult,
 } from "./types";
@@ -131,6 +132,13 @@ export async function listValidations(
     `/tasks/${encodeURIComponent(taskId)}/validations`,
   );
   return body.validations;
+}
+
+export async function listConflicts(taskId: string): Promise<TaskConflict[]> {
+  const body = await request<{ conflicts: TaskConflict[] }>(
+    `/tasks/${encodeURIComponent(taskId)}/conflicts`,
+  );
+  return body.conflicts;
 }
 
 // Evidence is null until the runner generates a report; a 404 is that

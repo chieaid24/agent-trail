@@ -25,6 +25,7 @@ type Server struct {
 	validations ValidationService // nil when DATABASE_URL is not configured
 	evidence    EvidenceService   // nil when DATABASE_URL is not configured
 	dashboard   DashboardService  // nil when DATABASE_URL is not configured
+	conflicts   ConflictService   // nil when DATABASE_URL is not configured
 	webhook     http.Handler      // nil when the GitHub integration is not configured
 	metrics     http.Handler      // nil disables GET /metrics
 
@@ -41,6 +42,11 @@ type Option func(*Server)
 // WithDashboard enables organization, repository, and runner read endpoints.
 func WithDashboard(service DashboardService) Option {
 	return func(s *Server) { s.dashboard = service }
+}
+
+// WithConflicts enables task conflict endpoints.
+func WithConflicts(service ConflictService) Option {
+	return func(s *Server) { s.conflicts = service }
 }
 
 // New returns a Server. Nil dependencies degrade cleanly: readiness reports
@@ -74,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/stream", s.handleTaskStream)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
+	mux.HandleFunc("GET /api/v1/tasks/{taskId}/conflicts", s.handleTaskConflicts)
 	mux.HandleFunc("GET /api/v1/organizations", s.handleListOrganizations)
 	mux.HandleFunc("GET /api/v1/organizations/{organizationId}", s.handleGetOrganization)
 	mux.HandleFunc("GET /api/v1/organizations/{organizationId}/repositories", s.handleOrganizationRepositories)

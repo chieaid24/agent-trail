@@ -132,9 +132,13 @@ func (m *Manager) EnsureMirror(ctx context.Context, repo RepoRef) (string, error
 		// locally (worktree add) and pushed out, so the local refs are the
 		// source of truth - and fetching one back would be refused anyway
 		// while its worktree has it checked out.
-		if _, err := m.git.run(ctx, mirror, "fetch", "--prune", "origin",
+		if _, err := m.git.run(ctx, mirror, "fetch", "--prune", "--refmap=", "origin",
 			"+refs/*:refs/*", "^refs/heads/"+BranchPrefix+"*"); err != nil {
 			return "", fmt.Errorf("gitworkspace: fetch mirror: %w", err)
+		}
+		if _, err := m.git.run(ctx, mirror, "fetch", "--prune", "--refmap=", "origin",
+			"+refs/heads/"+BranchPrefix+"*:refs/remotes/origin/"+BranchPrefix+"*"); err != nil {
+			return "", fmt.Errorf("gitworkspace: fetch agent branches: %w", err)
 		}
 		return mirror, nil
 	}

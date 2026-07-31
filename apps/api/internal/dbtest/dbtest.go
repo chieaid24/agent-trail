@@ -66,7 +66,7 @@ func Open(t *testing.T) *sql.DB {
 		TRUNCATE tasks, task_attempts, activity_events, organizations,
 			github_installations, repositories,
 			github_webhook_deliveries, runners,
-			validation_results, evidence_reports`); err != nil {
+			validation_results, evidence_reports, task_conflicts`); err != nil {
 		t.Fatal(err)
 	}
 	return db
