@@ -137,9 +137,12 @@ export default function TaskPage({
 
   useEffect(() => {
     if (taskEventCount === 0) return;
-    const refresh = setTimeout(() => void loadTask(), 0);
+    const refresh = setTimeout(
+      () => void Promise.all([loadTask(), loadConflicts()]),
+      0,
+    );
     return () => clearTimeout(refresh);
-  }, [taskEventCount, loadTask]);
+  }, [taskEventCount, loadTask, loadConflicts]);
   useEffect(() => {
     if (validationEventCount === 0) return;
     const refresh = setTimeout(() => void loadValidations(), 0);
@@ -268,27 +271,38 @@ function TaskDetail({
             {task.failure_message ?? "No failure detail was recorded."}
           </p>
         ) : null}
-        {conflicts.phase === "loading" && (
-          <p className="mt-4 text-sm text-muted">Checking task overlaps...</p>
-        )}
-        {conflicts.phase === "error" && (
-          <div
-            role="alert"
-            className="mt-4 flex items-baseline gap-3 border border-border px-3 py-2 text-sm"
-          >
-            <span className="text-warning">Conflict warnings unavailable.</span>
-            <button
-              type="button"
-              onClick={onRetryConflicts}
-              className="font-semibold text-accent hover:underline"
+        <div className="mt-4 h-32">
+          {conflicts.phase === "loading" && (
+            <p className="h-full rounded border border-border px-3 py-3 text-sm text-muted">
+              Checking task overlaps...
+            </p>
+          )}
+          {conflicts.phase === "error" && (
+            <div
+              role="alert"
+              className="flex h-full items-start gap-3 rounded border border-border px-3 py-2 text-sm"
             >
-              Retry
-            </button>
-          </div>
-        )}
-        {conflicts.phase === "ready" && (
-          <ConflictWarning conflicts={conflicts.items} />
-        )}
+              <span className="py-1 text-warning">
+                Conflict warnings unavailable.
+              </span>
+              <button
+                type="button"
+                onClick={onRetryConflicts}
+                className="rounded px-2 py-1 font-semibold text-accent hover:bg-surface hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {conflicts.phase === "ready" && conflicts.items.length === 0 && (
+            <p className="h-full rounded border border-border px-3 py-3 text-sm text-muted">
+              No active task overlaps detected.
+            </p>
+          )}
+          {conflicts.phase === "ready" && conflicts.items.length > 0 && (
+            <ConflictWarning conflicts={conflicts.items} />
+          )}
+        </div>
 
         <dl className="mt-4 grid grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 text-sm lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
           {task.source_issue_number !== null && (

@@ -43,6 +43,9 @@ test("a task without stored conflicts shows no warning", async ({ page }) => {
 
   await expect(page.getByText("Instructions")).toBeVisible();
   await expect(page.getByLabel("Conflict warnings")).toHaveCount(0);
+  await expect(
+    page.getByText("No active task overlaps detected."),
+  ).toBeVisible();
   await shootBothViewports(page, "07-conflict-empty");
 });
 
@@ -61,14 +64,24 @@ test("conflict warning loading state", async ({ page }) => {
 
 test("conflict warning error state", async ({ page }) => {
   const a = await apiTaskByTitle(TASK_A);
-  await page.route("**/backend/api/v1/tasks/*/conflicts", (route) =>
-    route.abort(),
-  );
+  let unavailable = true;
+  await page.route("**/backend/api/v1/tasks/*/conflicts", async (route) => {
+    if (unavailable) {
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
   await page.goto(`/tasks/${a.id}`);
 
   await expect(page.getByText("Conflict warnings unavailable.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  const retry = page.getByRole("button", { name: "Retry" });
+  await expect(retry).toBeVisible();
   await shootBothViewports(page, "07-conflict-error");
+
+  unavailable = false;
+  await retry.click();
+  await expect(page.getByLabel("Conflict warnings")).toBeVisible();
 });
 
 test("conflict warning handles long content", async ({ page }) => {

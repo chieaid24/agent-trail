@@ -18,7 +18,7 @@ export function ConflictWarning({ conflicts }: { conflicts: TaskConflict[] }) {
   return (
     <section
       aria-label="Conflict warnings"
-      className="mt-4 rounded border border-border"
+      className="h-full overflow-y-auto rounded border border-border"
     >
       <h2 className="flex items-center gap-1.5 px-3 pt-2.5 text-sm font-semibold text-warning">
         <span
