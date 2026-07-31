@@ -22,9 +22,7 @@ test("task detail warns about the overlapping active task", async ({
   await expect(
     warning.getByText("same files, adjacent lines, merge conflict"),
   ).toBeVisible();
-  await expect(
-    warning.getByText("internal/payments/client.go"),
-  ).toBeVisible();
+  await expect(warning.getByText("internal/payments/client.go")).toBeVisible();
 
   await shootBothViewports(page, "07-conflict-warning");
 });
