@@ -13,12 +13,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "next": "15.5.21",
+    "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "3.3.6",
     "@playwright/test": "1.62.0",
     "@tailwindcss/postcss": "4.3.3",
     "@testing-library/react": "16.3.2",
@@ -26,12 +25,18 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.4",
+    "brace-expansion": "file:vendor/brace-expansion",
     "eslint": "9.39.5",
-    "eslint-config-next": "15.5.21",
+    "eslint-config-next": "16.2.12",
     "jsdom": "29.1.1",
     "prettier": "3.9.6",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
+  },
+  "overrides": {
+    "brace-expansion": "$brace-expansion",
+    "postcss": "8.5.25",
+    "sharp": "0.35.3"
   }
 }
