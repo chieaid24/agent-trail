@@ -190,13 +190,11 @@ func seedRepositories(ctx context.Context, db *sql.DB) (string, []string, error)
 	return organizationID, ids, nil
 }
 
-// Conflict demo pair titles; the e2e suite looks these up by title.
 const (
 	conflictTaskATitle = "Demo: extract the payment client"
 	conflictTaskBTitle = "Demo: add retries to the payment client"
 )
 
-// seedConflictDemo adds an active pair with a stored overlap warning.
 func seedConflictDemo(ctx context.Context, db *sql.DB, store *task.Store,
 	orgID, repoID string) error {
 	toAwaitingReview := []task.TransitionParams{

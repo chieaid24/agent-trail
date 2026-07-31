@@ -87,9 +87,7 @@ func run() error {
 	tasks := task.NewStore(db)
 	metrics := observability.NewRegistry()
 
-	// GitHub publishing needs the App credentials and a workspace root;
-	// without them the worker runs the fake local flow only. Conflict
-	// detection rides on the same workspace root: no mirrors, no diffs.
+	// Publishing and conflict detection share the GitHub workspace mirror.
 	var workspaces *gitworkspace.Manager
 	var publishAPI runner.PublishGitHub
 	var repos runner.RepositoryResolver

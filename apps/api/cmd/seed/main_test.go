@@ -22,7 +22,6 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 	db := dbtest.Open(t) // skips without TEST_DATABASE_URL
 	t.Setenv("DATABASE_URL", os.Getenv("TEST_DATABASE_URL"))
 
-	// The demo set plus the two-task conflict pair.
 	want := len(demoTasks()) + 2
 
 	if err := run(); err != nil {
@@ -36,8 +35,6 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 		t.Fatalf("tasks = %d, want %d", count, want)
 	}
 
-	// The conflict pair rests at awaiting_review (unclaimable, non-terminal)
-	// with one stored warning between its members.
 	var pairCount int
 	if err := db.QueryRow(`
 		SELECT count(*) FROM tasks

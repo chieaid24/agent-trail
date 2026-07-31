@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// Store is the PostgreSQL persistence for detected conflicts and the reader
-// for the sibling diffs detection compares against.
+// Store persists conflict warnings and reads sibling diffs.
 type Store struct {
 	db *sql.DB
 }
@@ -18,9 +19,7 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// ActiveSiblings returns every other non-terminal task in the repository
-// that has a published diff to compare against: its latest attempt carrying
-// both a base and a final commit.
+// ActiveSiblings returns published diffs for active repository tasks.
 func (s *Store) ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID string) ([]Sibling, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT t.id, t.title, a.base_commit_sha, a.final_commit_sha
@@ -55,9 +54,7 @@ func (s *Store) ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID 
 	return siblings, nil
 }
 
-// Upsert records the detected conflict for a task pair, replacing any
-// earlier detection of the same pair. The pair is normalized in SQL so both
-// detection directions write one row.
+// Upsert replaces the normalized warning for a task pair.
 func (s *Store) Upsert(ctx context.Context, repositoryID, taskID, otherTaskID string, kinds []Kind, files []string) error {
 	if len(kinds) == 0 {
 		return fmt.Errorf("conflict: upsert needs at least one kind")
@@ -86,8 +83,7 @@ func (s *Store) Upsert(ctx context.Context, repositoryID, taskID, otherTaskID st
 	return nil
 }
 
-// DeletePair removes a stored conflict once a re-detection finds the pair
-// clean (one side republished without the overlap).
+// DeletePair removes a clean task pair.
 func (s *Store) DeletePair(ctx context.Context, taskID, otherTaskID string) error {
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM task_conflicts
@@ -99,10 +95,16 @@ func (s *Store) DeletePair(ctx context.Context, taskID, otherTaskID string) erro
 	return nil
 }
 
-// ListForTask returns the stored conflicts involving taskID whose both
-// members are still active, oriented toward the other task. A terminal task
-// on either side silences the warning without touching the row.
+// ListForTask returns active warnings oriented toward the other task.
 func (s *Store) ListForTask(ctx context.Context, taskID string) ([]TaskConflict, error) {
+	var exists bool
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM tasks WHERE id = $1)`, taskID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("conflict: find task: %w", err)
+	}
+	if !exists {
+		return nil, task.ErrNotFound
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, o.id, o.title, c.kinds, c.files, c.detected_at, c.updated_at
 		FROM task_conflicts c

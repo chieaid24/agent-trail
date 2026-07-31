@@ -11,30 +11,17 @@ import (
 	"strings"
 )
 
-// Conflict-detection plumbing (docs/architecture/conflict-detection.md).
-// Every operation is a read-only comparison run in the bare mirror cache, so
-// no worktree or network access is needed; the commits under comparison are
-// present locally because every attempt of a repository commits through the
-// mirror's shared object store. HasCommit guards the cases where they are
-// not (an attempt published from another host, or a pruned object).
-
-// ErrMirrorMissing reports that the repository has no local mirror, so there
-// is nothing to compare against.
+// ErrMirrorMissing reports a missing repository mirror.
 var ErrMirrorMissing = errors.New("gitworkspace: repository mirror missing")
 
-// LineRange is a 1-based inclusive span of lines in one file, in the
-// coordinates of a diff's base side.
+// LineRange is a 1-based inclusive base-side span.
 type LineRange struct {
 	Start int
 	End   int
 }
 
-// hunkHeaderRe captures the base-side "-start,count" of a unified hunk
-// header, count omitted meaning 1.
 var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+`)
 
-// mirrorPath returns the existing mirror of repo, without touching the
-// network or creating anything.
 func (m *Manager) mirrorPath(repo RepoRef) (string, error) {
 	if !validComponent(repo.ID) {
 		return "", fmt.Errorf("gitworkspace: repository id %q is not a safe path component", repo.ID)
@@ -66,8 +53,7 @@ func (m *Manager) HasCommit(ctx context.Context, repo RepoRef, sha string) (bool
 	return code == 0, nil
 }
 
-// ChangedFiles lists the paths that differ between base and head, renames
-// split into delete plus add so every touched path appears.
+// ChangedFiles lists touched paths, splitting renames into delete and add.
 func (m *Manager) ChangedFiles(ctx context.Context, repo RepoRef, base, head string) ([]string, error) {
 	mirror, err := m.diffTarget(repo, base, head)
 	if err != nil {
@@ -86,10 +72,7 @@ func (m *Manager) ChangedFiles(ctx context.Context, repo RepoRef, base, head str
 	return strings.Split(out, "\n"), nil
 }
 
-// DiffHunks returns, per changed path, the base-side line ranges the diff
-// touches. A pure insertion (base-side count 0) is recorded as the single
-// line it inserts after, so adjacency to surrounding edits still registers.
-// Binary files appear in ChangedFiles but carry no hunks.
+// DiffHunks returns base-side ranges; insertions use their preceding line.
 func (m *Manager) DiffHunks(ctx context.Context, repo RepoRef, base, head string) (map[string][]LineRange, error) {
 	mirror, err := m.diffTarget(repo, base, head)
 	if err != nil {
@@ -105,9 +88,7 @@ func (m *Manager) DiffHunks(ctx context.Context, repo RepoRef, base, head string
 	return parseHunks(out)
 }
 
-// MergeTree attempts a temporary in-memory merge of the two commits
-// (git merge-tree --write-tree, real merge-ort machinery, no worktree) and
-// returns whether it is clean plus the conflicted paths when it is not.
+// MergeTree reports whether two commits merge and names conflicted paths.
 func (m *Manager) MergeTree(ctx context.Context, repo RepoRef, commitA, commitB string) (bool, []string, error) {
 	mirror, err := m.diffTarget(repo, commitA, commitB)
 	if err != nil {
@@ -116,9 +97,7 @@ func (m *Manager) MergeTree(ctx context.Context, repo RepoRef, commitA, commitB 
 	lock := m.lockFor(repo.ID)
 	lock.Lock()
 	defer lock.Unlock()
-	// Exit 0 is a clean merge, 1 a conflicted one; anything else (e.g.
-	// unrelated histories) is an error. Output is the merged tree OID, then
-	// with --name-only one conflicted path per line.
+	// Exit 1 carries the tree OID followed by conflicted paths.
 	out, code, err := m.git.runExit(ctx, mirror, []int{1},
 		"merge-tree", "--write-tree", "--no-messages", "--name-only", commitA, commitB)
 	if err != nil {
@@ -137,7 +116,6 @@ func (m *Manager) MergeTree(ctx context.Context, repo RepoRef, commitA, commitB 
 	return false, conflicted, nil
 }
 
-// diffTarget validates a two-commit comparison and returns the mirror path.
 func (m *Manager) diffTarget(repo RepoRef, a, b string) (string, error) {
 	mirror, err := m.mirrorPath(repo)
 	if err != nil {
@@ -151,7 +129,6 @@ func (m *Manager) diffTarget(repo RepoRef, a, b string) (string, error) {
 	return mirror, nil
 }
 
-// parseHunks reads --unified=0 output into base-side ranges per path.
 func parseHunks(out string) (map[string][]LineRange, error) {
 	hunks := map[string][]LineRange{}
 	var oldPath, newPath, current string
@@ -162,7 +139,6 @@ func parseHunks(out string) (map[string][]LineRange, error) {
 			current = ""
 		case strings.HasPrefix(line, "+++ "):
 			newPath = strings.TrimPrefix(strings.TrimPrefix(line, "+++ "), "b/")
-			// A deletion has no new side; fall back to the old path.
 			current = newPath
 			if newPath == "/dev/null" {
 				current = oldPath
@@ -187,8 +163,6 @@ func parseHunks(out string) (map[string][]LineRange, error) {
 			}
 			r := LineRange{Start: start, End: start + count - 1}
 			if count == 0 {
-				// Pure insertion after line start: a zero-width range at the
-				// insertion point.
 				r = LineRange{Start: start, End: start}
 			}
 			hunks[current] = append(hunks[current], r)

@@ -55,9 +55,7 @@ type Executor struct {
 	Workspaces *gitworkspace.Manager
 	GitHub     PublishGitHub
 	Repos      RepositoryResolver
-	// Conflicts, when set, compares each published diff against the other
-	// active tasks of the repository and records overlap warnings
-	// (docs/architecture/conflict-detection.md). nil skips detection.
+	// Conflicts records active-task overlap; nil disables detection.
 	Conflicts *conflict.Detector
 	// LeaseDuration is the claim lease; the executor extends it at a third
 	// of this interval while it works.

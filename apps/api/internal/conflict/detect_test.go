@@ -83,10 +83,9 @@ func TestOverlap(t *testing.T) {
 			wantFiles: []string{"go.mod"},
 		},
 		{
-			label: "different dependency manifests",
-			a:     ChangeSet{Files: []string{"go.mod"}},
-			b:     ChangeSet{Files: []string{"apps/web/package.json"}},
-			// Different ecosystems do not contend.
+			label:     "different dependency manifests",
+			a:         ChangeSet{Files: []string{"go.mod"}},
+			b:         ChangeSet{Files: []string{"apps/web/package.json"}},
 			wantKinds: nil,
 			wantFiles: []string{},
 		},
@@ -100,7 +99,6 @@ func TestOverlap(t *testing.T) {
 			if !reflect.DeepEqual(files, tc.wantFiles) {
 				t.Errorf("files = %v, want %v", files, tc.wantFiles)
 			}
-			// Symmetric by construction: both directions must agree.
 			revKinds, revFiles := Overlap(tc.b, tc.a)
 			if !reflect.DeepEqual(revKinds, tc.wantKinds) || !reflect.DeepEqual(revFiles, tc.wantFiles) {
 				t.Errorf("Overlap is not symmetric: reversed = %v %v", revKinds, revFiles)

@@ -385,16 +385,11 @@ func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, p
 	return e.failTask(ctx, c, "no_change", explanation)
 }
 
-// detectConflicts compares the published diff against the repository's other
-// active tasks and records overlap warnings plus a timeline event per pair
-// (docs/architecture/conflict-detection.md). Detection is observability, so
-// its own failure is logged and never fails the publish; only a failed
-// timeline append propagates, like every other append.
+// detectConflicts records warnings without failing publication.
 func (e *Executor) detectConflicts(ctx context.Context, c *Claim, t task.Task, baseSHA, finalSHA string) error {
 	if e.Conflicts == nil || t.RepositoryID == nil {
 		return nil
 	}
-	// Read-only mirror access needs no credential, so no clone URL.
 	repo := gitworkspace.RepoRef{ID: *t.RepositoryID}
 	detections, err := e.Conflicts.Detect(ctx, repo, *t.RepositoryID, t.ID, baseSHA, finalSHA)
 	if err != nil {

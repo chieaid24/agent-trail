@@ -1,37 +1,25 @@
-// Package conflict implements phase-1 conflict detection
-// (docs/architecture/conflict-detection.md): after an attempt publishes, the
-// worker compares its diff against every other active task in the same
-// repository and records deterministic overlaps - shared files, adjacent
-// lines, a failed temporary merge, migration collisions, and shared
-// dependency manifests - as one row per task pair. The dashboard surfaces
-// the stored warnings; nothing here blocks a task.
+// Package conflict detects overlap between active task diffs.
 package conflict
 
 import "time"
 
-// Kind names one deterministic detector that fired for a task pair.
+// Kind identifies an overlap detector.
 type Kind string
 
 const (
-	// KindFileOverlap: both diffs change at least one common file.
+	// KindFileOverlap marks a shared changed file.
 	KindFileOverlap Kind = "file_overlap"
-	// KindAdjacentLines: both diffs touch lines of a common file within
-	// adjacencyWindow lines of each other (base-side coordinates).
+	// KindAdjacentLines marks nearby base-side hunks.
 	KindAdjacentLines Kind = "adjacent_lines"
-	// KindMergeConflict: a temporary merge of the two final commits
-	// (git merge-tree) reports content conflicts.
+	// KindMergeConflict marks a failed temporary merge.
 	KindMergeConflict Kind = "merge_conflict"
-	// KindMigration: both diffs add or change schema migration files, which
-	// collide on ordering even when the files differ.
+	// KindMigration marks concurrent migration changes.
 	KindMigration Kind = "migration"
-	// KindDependency: both diffs change the same dependency manifest or
-	// lockfile.
+	// KindDependency marks a shared dependency file.
 	KindDependency Kind = "dependency"
 )
 
-// TaskConflict is one stored warning as the API serves it, oriented from the
-// requested task toward the other member of the pair. JSON tags are the wire
-// shape (docs/architecture/api.md).
+// TaskConflict is a stored warning oriented toward the other task.
 type TaskConflict struct {
 	ID             string    `json:"id"`
 	OtherTaskID    string    `json:"other_task_id"`
@@ -42,8 +30,7 @@ type TaskConflict struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// Sibling is another active task in the same repository with a published
-// diff to compare against: its latest attempt's base and final commits.
+// Sibling is an active repository task with a published diff.
 type Sibling struct {
 	TaskID   string
 	Title    string
@@ -51,8 +38,7 @@ type Sibling struct {
 	FinalSHA string
 }
 
-// Detection is the outcome of comparing one pair, returned so the caller can
-// record it on the activity timeline.
+// Detection is one conflicting task pair.
 type Detection struct {
 	OtherTaskID    string
 	OtherTaskTitle string

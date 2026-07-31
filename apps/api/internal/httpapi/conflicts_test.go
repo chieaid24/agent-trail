@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 type fakeConflicts struct {
@@ -82,5 +83,14 @@ func TestTaskConflictsEmptyList(t *testing.T) {
 	}
 	if body := rec.Body.String(); body != "{\"conflicts\":[]}\n" {
 		t.Fatalf("body = %q, want empty conflicts array", body)
+	}
+}
+
+func TestTaskConflictsUnknownTask(t *testing.T) {
+	h := New(testLogger(), nil, nil, nil, nil, nil, nil,
+		WithConflicts(&fakeConflicts{err: task.ErrNotFound})).Handler()
+	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/conflicts", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }

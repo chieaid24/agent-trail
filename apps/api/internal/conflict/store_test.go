@@ -3,6 +3,7 @@ package conflict
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,8 +12,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// createRepository inserts the organization and repository rows conflicts
-// hang off, returning the repository id.
 func createRepository(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	ctx := context.Background()
@@ -38,8 +37,6 @@ func createRepository(t *testing.T, db *sql.DB) string {
 	return repoID
 }
 
-// createRepoTask creates a task bound to the repository. When finalSHA is
-// set, its first attempt gains a published base and final commit.
 func createRepoTask(t *testing.T, db *sql.DB, repoID, title, finalSHA string) task.Task {
 	t.Helper()
 	ctx := context.Background()
@@ -61,7 +58,6 @@ func createRepoTask(t *testing.T, db *sql.DB, repoID, title, finalSHA string) ta
 	return tk
 }
 
-// completeTask walks a task to the completed terminal state.
 func completeTask(t *testing.T, db *sql.DB, taskID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -117,7 +113,6 @@ func TestUpsertListAndDelete(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	// Both orientations see one row, each naming the other task.
 	fromA, err := s.ListForTask(ctx, a.ID)
 	if err != nil {
 		t.Fatalf("ListForTask(a): %v", err)
@@ -136,7 +131,6 @@ func TestUpsertListAndDelete(t *testing.T) {
 		t.Errorf("fromB = %+v", fromB)
 	}
 
-	// Re-detection from the other direction replaces the same row.
 	if err := s.Upsert(ctx, repoID, b.ID, a.ID, []Kind{KindFileOverlap},
 		[]string{"lib.go"}); err != nil {
 		t.Fatalf("Upsert(update): %v", err)
@@ -188,5 +182,48 @@ func TestUpsertRejectsEmptyKinds(t *testing.T) {
 	s := NewStore(nil)
 	if err := s.Upsert(context.Background(), "r", "a", "b", nil, nil); err == nil {
 		t.Error("empty kinds must be rejected")
+	}
+}
+
+func TestListForTaskRejectsUnknownTask(t *testing.T) {
+	db := dbtest.Open(t)
+	_, err := NewStore(db).ListForTask(context.Background(),
+		"3b241101-e2bb-4255-8caf-4136c566a962")
+	if !errors.Is(err, task.ErrNotFound) {
+		t.Fatalf("err = %v, want task.ErrNotFound", err)
+	}
+}
+
+func TestConflictConstraints(t *testing.T) {
+	db := dbtest.Open(t)
+	ctx := context.Background()
+	repoA := createRepository(t, db)
+	a := createRepoTask(t, db, repoA, "task a", "")
+
+	var repoB string
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO repositories (organization_id, github_repository_id,
+			owner, name, full_name, clone_url)
+		SELECT organization_id, 2, owner, 'other', owner || '/other',
+			'https://example.com/test-org/other.git'
+		FROM repositories WHERE id = $1
+		RETURNING id`, repoA).Scan(&repoB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := createRepoTask(t, db, repoB, "task b", "")
+	if err := NewStore(db).Upsert(ctx, repoA, a.ID, b.ID,
+		[]Kind{KindFileOverlap}, nil); err == nil {
+		t.Fatal("cross-repository pair must fail")
+	}
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO task_conflicts
+			(repository_id, task_a_id, task_b_id, kinds, files)
+		VALUES ($1, LEAST($2::uuid, $3::uuid), GREATEST($2::uuid, $3::uuid),
+			'["unknown"]', '[]')`, repoA, a.ID,
+		createRepoTask(t, db, repoA, "task c", "").ID)
+	if err == nil {
+		t.Fatal("unknown conflict kind must fail")
 	}
 }

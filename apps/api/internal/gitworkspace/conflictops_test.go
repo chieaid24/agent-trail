@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// buildComparisonOrigin creates a repository whose main holds numbered-line
-// files, plus two branches diverging from it, and returns the mirror-ready
-// origin with the three SHAs.
 func buildComparisonOrigin(t *testing.T) (origin, base, editA, editB string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -27,7 +24,6 @@ func buildComparisonOrigin(t *testing.T) (origin, base, editA, editB string) {
 	runGit(t, src, "commit", "-q", "-m", "base")
 	base = runGit(t, src, "rev-parse", "HEAD")
 
-	// Branch a: edit app.go line 5 and add a file.
 	runGit(t, src, "checkout", "-q", "-b", "a", base)
 	lines := numberedLines(12)
 	lines[4] = "line05 changed by a"
@@ -37,7 +33,6 @@ func buildComparisonOrigin(t *testing.T) (origin, base, editA, editB string) {
 	runGit(t, src, "commit", "-q", "-m", "edit a")
 	editA = runGit(t, src, "rev-parse", "HEAD")
 
-	// Branch b: edit app.go line 6 (conflicts with a) and delete lib.go.
 	runGit(t, src, "checkout", "-q", "-b", "b", base)
 	lines = numberedLines(12)
 	lines[5] = "line06 changed by b"

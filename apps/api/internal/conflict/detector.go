@@ -9,8 +9,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// GitOps is the slice of gitworkspace the detector needs; implemented by
-// *gitworkspace.Manager.
+// GitOps provides conflict-related Git operations.
 type GitOps interface {
 	HasCommit(ctx context.Context, repo gitworkspace.RepoRef, sha string) (bool, error)
 	ChangedFiles(ctx context.Context, repo gitworkspace.RepoRef, base, head string) ([]string, error)
@@ -18,28 +17,21 @@ type GitOps interface {
 	MergeTree(ctx context.Context, repo gitworkspace.RepoRef, commitA, commitB string) (bool, []string, error)
 }
 
-// Records is the store slice the detector reads and writes; implemented by
-// *Store, faked in tests.
+// Records reads sibling diffs and stores warnings.
 type Records interface {
 	ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID string) ([]Sibling, error)
 	Upsert(ctx context.Context, repositoryID, taskID, otherTaskID string, kinds []Kind, files []string) error
 	DeletePair(ctx context.Context, taskID, otherTaskID string) error
 }
 
-// Detector compares one published diff against every active sibling in the
-// repository and persists the resulting warnings.
+// Detector compares and stores active-task overlaps.
 type Detector struct {
 	Git     GitOps
 	Records Records
 	Logger  *slog.Logger
 }
 
-// Detect runs after taskID publishes base..final: it recomputes this task's
-// pair rows against every active sibling, upserting pairs that conflict and
-// deleting pairs that no longer do. A sibling whose commits are not in the
-// local mirror (published from another host, or pruned) is skipped and
-// logged, never guessed about. The returned detections carry only the pairs
-// that conflict.
+// Detect refreshes taskID's warnings against active siblings.
 func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, repositoryID, taskID, base, final string) ([]Detection, error) {
 	siblings, err := d.Records.ActiveSiblings(ctx, repositoryID, taskID)
 	if err != nil {
@@ -104,7 +96,6 @@ func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, reposi
 	return detections, nil
 }
 
-// changeSet loads one diff's files and base-side hunks.
 func (d *Detector) changeSet(ctx context.Context, repo gitworkspace.RepoRef, base, final string) (ChangeSet, error) {
 	files, err := d.Git.ChangedFiles(ctx, repo, base, final)
 	if err != nil {
@@ -117,7 +108,6 @@ func (d *Detector) changeSet(ctx context.Context, repo gitworkspace.RepoRef, bas
 	return ChangeSet{Files: files, Hunks: hunks}, nil
 }
 
-// commitsPresent reports whether every sha is in the local mirror.
 func (d *Detector) commitsPresent(ctx context.Context, repo gitworkspace.RepoRef, shas ...string) (bool, error) {
 	for _, sha := range shas {
 		ok, err := d.Git.HasCommit(ctx, repo, sha)
@@ -131,7 +121,6 @@ func (d *Detector) commitsPresent(ctx context.Context, repo gitworkspace.RepoRef
 	return true, nil
 }
 
-// mergeSorted unions two path lists, sorted and deduplicated.
 func mergeSorted(a, b []string) []string {
 	seen := map[string]bool{}
 	for _, f := range a {

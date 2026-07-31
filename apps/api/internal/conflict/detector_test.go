@@ -15,11 +15,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// The labelled fixture set behind the milestone's acceptance criterion:
-// each case builds two real branches over one base commit and asserts
-// exactly which deterministic detectors fire.
-
-// edit is one file mutation a fixture branch applies.
 type edit struct {
 	path    string
 	line    int      // 1-based line to replace; 0 writes content wholesale
@@ -166,7 +161,6 @@ func TestDetectorNoSiblings(t *testing.T) {
 	}
 }
 
-// fixture is one built repository: a mirror plus the three commits.
 type fixture struct {
 	manager *gitworkspace.Manager
 	repo    gitworkspace.RepoRef
@@ -175,8 +169,6 @@ type fixture struct {
 	finalB  string
 }
 
-// baseFiles are the files every fixture base commit holds: 12 numbered lines
-// each, wide enough that distant edits merge cleanly.
 func baseFiles() map[string][]string {
 	lines := func() []string {
 		out := make([]string, 12)
@@ -227,7 +219,6 @@ func buildFixture(t *testing.T, tc fixtureCase) fixture {
 	return fixture{manager: manager, repo: repo, base: base, finalA: finalA, finalB: finalB}
 }
 
-// commitEdits applies edits on a branch cut from base and returns its SHA.
 func commitEdits(t *testing.T, src, base, branch string, edits []edit) string {
 	t.Helper()
 	runGit(t, src, "checkout", "-q", "-b", branch, base)
@@ -271,7 +262,6 @@ type upsertCall struct {
 	files                             []string
 }
 
-// fakeRecords is an in-memory Records so fixture tests need no database.
 type fakeRecords struct {
 	siblings []Sibling
 	upserts  []upsertCall
@@ -303,7 +293,6 @@ func requireGit(t *testing.T) {
 	}
 }
 
-// runGit runs git for fixtures with a hermetic env and a fixed identity.
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)

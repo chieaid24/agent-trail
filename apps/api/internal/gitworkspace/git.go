@@ -41,10 +41,7 @@ func (r runner) run(ctx context.Context, dir string, args ...string) (string, er
 	return out, err
 }
 
-// runExit is run for commands whose listed non-zero exit codes carry data
-// rather than failure (merge-tree exits 1 on a conflicting merge): it returns
-// stdout and the exit code when the exit is 0 or listed in okExits, and a
-// *CommandError otherwise.
+// runExit accepts listed non-zero data exits.
 func (runner) runExit(ctx context.Context, dir string, okExits []int, args ...string) (string, int, error) {
 	cmd := exec.CommandContext(ctx, gitBin, args...)
 	cmd.Dir = dir

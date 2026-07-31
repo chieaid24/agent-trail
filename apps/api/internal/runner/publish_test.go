@@ -383,6 +383,46 @@ func TestPublishOpensOneDraftPR(t *testing.T) {
 	}
 }
 
+type failingConflictRecords struct{}
+
+func (failingConflictRecords) ActiveSiblings(context.Context, string, string) ([]conflict.Sibling, error) {
+	return nil, errors.New("conflict store unavailable")
+}
+
+func (failingConflictRecords) Upsert(context.Context, string, string, string,
+	[]conflict.Kind, []string) error {
+	return nil
+}
+
+func (failingConflictRecords) DeletePair(context.Context, string, string) error {
+	return nil
+}
+
+func TestPublishContinuesWhenConflictDetectionFails(t *testing.T) {
+	f := newPublishFixture(t)
+	f.exec.Conflicts = &conflict.Detector{
+		Records: failingConflictRecords{},
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	if err := f.exec.Execute(context.Background(), f.runner.ID, f.claim(t)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.tasks.Get(context.Background(), f.task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != task.StatusAwaitingReview || f.fake.prsCreated != 1 {
+		t.Fatalf("status = %s, prs = %d; want awaiting_review and 1",
+			got.Status, f.fake.prsCreated)
+	}
+	for _, event := range timelineTypes(t, f.tasks, f.task.ID) {
+		if event == "conflict.detected" {
+			t.Fatal("failed detection must not emit a conflict event")
+		}
+	}
+}
+
 // TestPublishRetryCreatesNoSecondPR is the idempotency acceptance: an owner
 // dies mid-publish (after commit, push, PR, and check, before the issue
 // comment and the transition), and the recovering owner reattaches the
@@ -506,10 +546,6 @@ func TestPublishNoChangeCreatesNoPR(t *testing.T) {
 	}
 }
 
-// TestPublishDetectsConflictBetweenActiveTasks: two active tasks of one
-// repository publish in turn; both write the fake adapter's fixture files,
-// so the second publish must store a task_conflicts pair and record a
-// conflict.detected timeline event naming the first task.
 func TestPublishDetectsConflictBetweenActiveTasks(t *testing.T) {
 	f := newPublishFixture(t)
 	ctx := context.Background()
@@ -559,8 +595,6 @@ func TestPublishDetectsConflictBetweenActiveTasks(t *testing.T) {
 	for _, k := range conflicts[0].Kinds {
 		gotKinds[k] = true
 	}
-	// Both tasks add the same fixture files with differing content: a file
-	// overlap that an add/add merge cannot resolve.
 	if !gotKinds[conflict.KindFileOverlap] || !gotKinds[conflict.KindMergeConflict] {
 		t.Fatalf("kinds = %v, want file_overlap and merge_conflict", conflicts[0].Kinds)
 	}
@@ -578,8 +612,6 @@ func TestPublishDetectsConflictBetweenActiveTasks(t *testing.T) {
 		"branch.pushed", "conflict.detected", "pull_request.created",
 	})
 
-	// The first publish had no published sibling yet, so its own timeline
-	// carries no conflict event.
 	for _, ev := range timelineTypes(t, f.tasks, f.task.ID) {
 		if ev == "conflict.detected" {
 			t.Fatal("first task must not see a conflict before a sibling publishes")
