@@ -69,8 +69,14 @@ func run() error {
 			httpapi.WithConflicts(conflict.NewStore(db)))
 	}
 
-	// The session layer needs the OAuth credentials and the database.
-	if cfg.AuthEnabled() && db != nil {
+	// Sessions live in the database; refuse a half-configured session
+	// layer instead of silently serving without one.
+	if cfg.AuthEnabled() && db == nil {
+		return errors.New(
+			"GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET are set " +
+				"but DATABASE_URL is not; sessions need the database")
+	}
+	if cfg.AuthEnabled() {
 		oauthClient := auth.NewOAuthClient(cfg.GitHubOAuthClientID,
 			cfg.GitHubOAuthClientSecret, cfg.GitHubOAuthBaseURL,
 			cfg.GitHubAPIBaseURL, metrics)

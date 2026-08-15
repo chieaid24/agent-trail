@@ -77,8 +77,10 @@ flow), implemented on the standard library per ADR-0006.
   cookie binds the OAuth callback to the initiating browser. There is no
   per-request CSRF token; revisit if any endpoint ever accepts form
   encodings or safe-method side effects.
-- Authorization inside the API is membership-based only; it satisfies the
-  threat model's organization-membership check, not yet its role check.
+- Authorization beyond authentication exists only on enablement writes
+  (organization membership). Reads and task routes accept any signed-in
+  user, which falls short of the threat model's per-resource membership
+  check; tightening reads is future work alongside roles.
 - Enablement changes are audit-logged as structured events
   (`repository_enablement_changed` with actor and trace id), not yet
   written to a durable audit table.

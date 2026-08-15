@@ -48,7 +48,8 @@ type Config struct {
 	// GitHub OAuth user authorization backing dashboard sessions; both set
 	// together, or neither (the auth endpoints then answer 503 and the API
 	// stays open for localhost development). GitHubOAuthBaseURL overrides
-	// the github.com root in tests only (docs/adr/0013-dashboard-sessions.md).
+	// the github.com root for tests and GitHub Enterprise
+	// (docs/adr/0013-dashboard-sessions.md).
 	GitHubOAuthClientID     string
 	GitHubOAuthClientSecret string
 	GitHubOAuthBaseURL      string

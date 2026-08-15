@@ -133,17 +133,19 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	clearCookie(w, stateCookieName, s.authCookieSecure)
 
-	stateCookie, err := r.Cookie(stateCookieName)
 	query := r.URL.Query()
+	if query.Get("error") != "" {
+		// The user cancelled on GitHub, or GitHub rejected the request.
+		// Reported before the state check so a denial after the state
+		// cookie expired still reads as what it was.
+		s.redirectLoginError(w, r, "github_denied")
+		return
+	}
+	stateCookie, err := r.Cookie(stateCookieName)
 	if err != nil || stateCookie.Value == "" ||
 		subtle.ConstantTimeCompare([]byte(stateCookie.Value),
 			[]byte(query.Get("state"))) != 1 {
 		s.redirectLoginError(w, r, "state_mismatch")
-		return
-	}
-	if query.Get("error") != "" {
-		// The user cancelled on GitHub, or GitHub rejected the request.
-		s.redirectLoginError(w, r, "github_denied")
 		return
 	}
 	code := query.Get("code")
@@ -192,6 +194,11 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type meResponse struct {
+	User       auth.User `json:"user"`
+	InstallURL string    `json:"install_url,omitempty"`
+}
+
 // handleMe returns the session user; requireSession guards the route.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFrom(r.Context())
@@ -199,11 +206,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	body := map[string]any{"user": user}
-	if installURL := s.auth.InstallURL(); installURL != "" {
-		body["install_url"] = installURL
-	}
-	writeJSON(w, http.StatusOK, body)
+	writeJSON(w, http.StatusOK, meResponse{
+		User: user, InstallURL: s.auth.InstallURL(),
+	})
 }
 
 func (s *Server) redirectLoginError(w http.ResponseWriter, r *http.Request, code string) {

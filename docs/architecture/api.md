@@ -39,9 +39,10 @@ Session handling:
   `GITHUB_APP_SLUG` is set, the app installation URL; 401 without a live
   session.
 - Enforcement is config-gated: with `GITHUB_OAUTH_CLIENT_ID` and
-  `GITHUB_OAUTH_CLIENT_SECRET` set, every `/api/v1` route (tasks,
-  dashboard reads, enablement writes, the SSE stream) answers 401 without
-  a live session. Without them the auth routes answer 503 and the API
+  `GITHUB_OAUTH_CLIENT_SECRET` set (and a database configured - sessions
+  are rows, and without `DATABASE_URL` the whole `/api/v1` surface already
+  answers 503), every `/api/v1` route (tasks, dashboard reads, enablement
+  writes, the SSE stream) answers 401 without a live session. Without them the auth routes answer 503 and the API
   retains its localhost-development openness. `/healthz`, `/readyz`,
   `/metrics`, and `/webhooks/github` never require a session.
 

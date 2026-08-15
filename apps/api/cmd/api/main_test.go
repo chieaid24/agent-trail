@@ -13,6 +13,16 @@ func TestRunRejectsBadConfig(t *testing.T) {
 	}
 }
 
+func TestRunRejectsOAuthWithoutDatabase(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("GITHUB_OAUTH_CLIENT_ID", "Iv1client")
+	t.Setenv("GITHUB_OAUTH_CLIENT_SECRET", "secret")
+	if err := run(); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("err = %v, want DATABASE_URL error", err)
+	}
+}
+
 func TestRunReportsListenFailure(t *testing.T) {
 	// Occupy a port so ListenAndServe fails immediately.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
