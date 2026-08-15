@@ -51,6 +51,15 @@ func (f fakeDashboard) GetRepositorySettings(context.Context, string) (dashboard
 	return dashboard.RepositorySettings{DefaultPolicy: "platform default"}, f.err
 }
 
+func (f fakeDashboard) SetRepositoryEnabled(_ context.Context, id string, enabled bool) (dashboard.Repository, error) {
+	if f.err != nil {
+		return dashboard.Repository{}, f.err
+	}
+	return dashboard.Repository{
+		ID: id, FullName: "agent-trail/control-plane", IsEnabled: enabled,
+	}, nil
+}
+
 func (f fakeDashboard) ListRunners(context.Context) ([]dashboard.Runner, error) {
 	return []dashboard.Runner{{ID: runnerUUID, HostnameOrPod: "runner-1"}}, f.err
 }

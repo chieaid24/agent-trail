@@ -28,6 +28,11 @@ type Server struct {
 	conflicts   ConflictService   // nil when DATABASE_URL is not configured
 	webhook     http.Handler      // nil when the GitHub integration is not configured
 	metrics     http.Handler      // nil disables GET /metrics
+	auth        AuthService       // nil when OAuth credentials are not configured
+
+	// Auth cookie settings; meaningful only with auth set.
+	authPublicOrigin string
+	authCookieSecure bool
 
 	// SSE stream cadence; defaulted in New, shortened in tests.
 	streamPollInterval time.Duration
@@ -68,27 +73,49 @@ func New(logger *slog.Logger, db DBPinger, tasks TaskService,
 }
 
 // Handler returns the routed HTTP handler with observability middleware.
+// With auth configured, every /api/v1 route and /me require a session;
+// health, metrics, the webhook, and the auth flow itself stay open.
 func (s *Server) Handler() http.Handler {
+	api := http.NewServeMux()
+	api.HandleFunc("GET /api/v1/tasks", s.handleListTasks)
+	api.HandleFunc("POST /api/v1/tasks", s.handleCreateTask)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}", s.handleGetTask)
+	api.HandleFunc("POST /api/v1/tasks/{taskId}/cancel", s.handleCancelTask)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/events", s.handleTaskEvents)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/stream", s.handleTaskStream)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/conflicts", s.handleTaskConflicts)
+	api.HandleFunc("GET /api/v1/organizations", s.handleListOrganizations)
+	api.HandleFunc("GET /api/v1/organizations/{organizationId}", s.handleGetOrganization)
+	api.HandleFunc("GET /api/v1/organizations/{organizationId}/repositories", s.handleOrganizationRepositories)
+	api.HandleFunc("GET /api/v1/repositories", s.handleListRepositories)
+	api.HandleFunc("GET /api/v1/repositories/{repositoryId}", s.handleGetRepository)
+	api.HandleFunc("GET /api/v1/repositories/{repositoryId}/settings", s.handleRepositorySettings)
+	api.HandleFunc("POST /api/v1/repositories/{repositoryId}/enable", s.handleRepositoryEnable)
+	api.HandleFunc("POST /api/v1/repositories/{repositoryId}/disable", s.handleRepositoryDisable)
+	api.HandleFunc("GET /api/v1/runners", s.handleListRunners)
+	api.HandleFunc("GET /api/v1/runners/{runnerId}", s.handleGetRunner)
+
+	var apiHandler http.Handler = api
+	meHandler := http.Handler(http.HandlerFunc(s.handleMe))
+	if s.auth != nil {
+		apiHandler = s.requireSession(api)
+		meHandler = s.requireSession(meHandler)
+	} else {
+		meHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.authAvailable(w)
+		})
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
-	mux.HandleFunc("GET /api/v1/tasks", s.handleListTasks)
-	mux.HandleFunc("POST /api/v1/tasks", s.handleCreateTask)
-	mux.HandleFunc("GET /api/v1/tasks/{taskId}", s.handleGetTask)
-	mux.HandleFunc("POST /api/v1/tasks/{taskId}/cancel", s.handleCancelTask)
-	mux.HandleFunc("GET /api/v1/tasks/{taskId}/events", s.handleTaskEvents)
-	mux.HandleFunc("GET /api/v1/tasks/{taskId}/stream", s.handleTaskStream)
-	mux.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
-	mux.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
-	mux.HandleFunc("GET /api/v1/tasks/{taskId}/conflicts", s.handleTaskConflicts)
-	mux.HandleFunc("GET /api/v1/organizations", s.handleListOrganizations)
-	mux.HandleFunc("GET /api/v1/organizations/{organizationId}", s.handleGetOrganization)
-	mux.HandleFunc("GET /api/v1/organizations/{organizationId}/repositories", s.handleOrganizationRepositories)
-	mux.HandleFunc("GET /api/v1/repositories", s.handleListRepositories)
-	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}", s.handleGetRepository)
-	mux.HandleFunc("GET /api/v1/repositories/{repositoryId}/settings", s.handleRepositorySettings)
-	mux.HandleFunc("GET /api/v1/runners", s.handleListRunners)
-	mux.HandleFunc("GET /api/v1/runners/{runnerId}", s.handleGetRunner)
+	mux.Handle("/api/v1/", apiHandler)
+	mux.HandleFunc("GET /auth/github/start", s.handleAuthStart)
+	mux.HandleFunc("GET /auth/github/callback", s.handleAuthCallback)
+	mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
+	mux.Handle("GET /me", meHandler)
 	mux.HandleFunc("POST /webhooks/github", s.handleWebhook)
 	if s.metrics != nil {
 		mux.Handle("GET /metrics", s.metrics)

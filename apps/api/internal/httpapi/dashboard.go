@@ -18,6 +18,7 @@ type DashboardService interface {
 	ListRepositories(ctx context.Context, organizationID string, limit int) ([]dashboard.Repository, error)
 	GetRepository(ctx context.Context, id string) (dashboard.RepositoryDetail, error)
 	GetRepositorySettings(ctx context.Context, id string) (dashboard.RepositorySettings, error)
+	SetRepositoryEnabled(ctx context.Context, id string, enabled bool) (dashboard.Repository, error)
 	ListRunners(ctx context.Context) ([]dashboard.Runner, error)
 	GetRunner(ctx context.Context, id string) (dashboard.RunnerDetail, error)
 }
@@ -120,6 +121,60 @@ func (s *Server) handleRepositorySettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) handleRepositoryEnable(w http.ResponseWriter, r *http.Request) {
+	s.setRepositoryEnabled(w, r, true)
+}
+
+func (s *Server) handleRepositoryDisable(w http.ResponseWriter, r *http.Request) {
+	s.setRepositoryEnabled(w, r, false)
+}
+
+// setRepositoryEnabled flips repository enablement. With auth configured
+// the caller must belong to the repository's organization
+// (docs/security/threat-model.md); the structured log line is the audit
+// record the threat model requires for enablement changes.
+func (s *Server) setRepositoryEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	if !s.dashboardAvailable(w) {
+		return
+	}
+	id, ok := pathUUID(w, r, "repositoryId")
+	if !ok {
+		return
+	}
+	actor := "unauthenticated"
+	if s.auth != nil {
+		user, ok := userFrom(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		member, err := s.auth.MemberOfRepository(r.Context(), user.ID, id)
+		if err != nil {
+			s.writeDashboardError(w, r, err)
+			return
+		}
+		if !member {
+			writeError(w, http.StatusForbidden,
+				"not a member of this repository's organization")
+			return
+		}
+		actor = user.GitHubLogin
+	}
+	repository, err := s.dashboard.SetRepositoryEnabled(r.Context(), id, enabled)
+	if err != nil {
+		s.writeDashboardError(w, r, err)
+		return
+	}
+	s.logger.LogAttrs(r.Context(), slog.LevelInfo, "repository enablement changed",
+		slog.String("event", "repository_enablement_changed"),
+		slog.String("trace_id", observability.TraceIDFrom(r.Context())),
+		slog.String("repository_id", id),
+		slog.Bool("enabled", enabled),
+		slog.String("actor", actor),
+	)
+	writeJSON(w, http.StatusOK, repository)
 }
 
 func (s *Server) handleListRunners(w http.ResponseWriter, r *http.Request) {
