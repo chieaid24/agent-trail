@@ -14,6 +14,22 @@ Likely permissions:
 
 Avoid broad administration permissions.
 
+### User authorization (dashboard sign-in)
+
+The same app provides the dashboard's OAuth sign-in
+(docs/adr/0013-dashboard-sessions.md). On the app's settings page, under
+"Identifying and authorizing users":
+
+- Generate a client secret; it and the Client ID become
+  `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`.
+- Register one callback URL per dashboard origin, always
+  `<origin>/backend/auth/github/callback` (the dashboard proxies the API
+  under `/backend`), e.g. `http://localhost:3000/backend/auth/github/callback`
+  for local development.
+
+"Request user authorization (OAuth) during installation" stays off;
+sign-in is user-initiated from the login page.
+
 ### Webhook events
 
 Start with:

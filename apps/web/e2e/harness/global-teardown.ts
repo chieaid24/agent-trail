@@ -8,10 +8,12 @@ export default async function globalTeardown(): Promise<void> {
     const state = JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
       apiPid?: number;
       workerPid?: number;
+      fakeGithubPid?: number;
     };
     // Only pids this harness spawned and recorded; never kill by name.
     if (state.apiPid) await stopProcess(state.apiPid);
     if (state.workerPid) await stopProcess(state.workerPid);
+    if (state.fakeGithubPid) await stopProcess(state.fakeGithubPid);
   }
   execFileSync(
     "docker",

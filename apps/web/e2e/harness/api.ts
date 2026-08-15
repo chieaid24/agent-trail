@@ -1,7 +1,15 @@
 // Direct control-plane calls for specs: arranging fixtures through the real
-// API, never through the UI under test.
+// API, never through the UI under test. Every call carries the harness
+// session; the suite runs with the session layer on.
 
-import { apiBaseUrl } from "./env";
+import { apiBaseUrl, readState, sessionCookieName } from "./env";
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    cookie: `${sessionCookieName}=${readState().sessionCookie}`,
+    ...extra,
+  };
+}
 
 export interface ApiTask {
   id: string;
@@ -20,7 +28,9 @@ export interface ApiRunner {
 }
 
 export async function apiListTasks(): Promise<ApiTask[]> {
-  const res = await fetch(`${apiBaseUrl}/api/v1/tasks`);
+  const res = await fetch(`${apiBaseUrl}/api/v1/tasks`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`list tasks: ${res.status}`);
   const body = (await res.json()) as { tasks: ApiTask[] };
   return body.tasks;
@@ -38,7 +48,7 @@ export async function apiCreateTask(
 ): Promise<ApiTask> {
   const res = await fetch(`${apiBaseUrl}/api/v1/tasks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ title, instructions }),
   });
   if (!res.ok) throw new Error(`create task: ${res.status}`);
@@ -46,14 +56,18 @@ export async function apiCreateTask(
 }
 
 export async function apiListRepositories(): Promise<ApiRepository[]> {
-  const res = await fetch(`${apiBaseUrl}/api/v1/repositories`);
+  const res = await fetch(`${apiBaseUrl}/api/v1/repositories`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`list repositories: ${res.status}`);
   const body = (await res.json()) as { repositories: ApiRepository[] };
   return body.repositories;
 }
 
 export async function apiListRunners(): Promise<ApiRunner[]> {
-  const res = await fetch(`${apiBaseUrl}/api/v1/runners`);
+  const res = await fetch(`${apiBaseUrl}/api/v1/runners`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`list runners: ${res.status}`);
   const body = (await res.json()) as { runners: ApiRunner[] };
   return body.runners;
@@ -66,7 +80,9 @@ export async function apiWaitForStatus(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const res = await fetch(`${apiBaseUrl}/api/v1/tasks/${taskId}`);
+    const res = await fetch(`${apiBaseUrl}/api/v1/tasks/${taskId}`, {
+      headers: authHeaders(),
+    });
     if (res.ok) {
       const task = (await res.json()) as ApiTask;
       if (task.status === status) return;

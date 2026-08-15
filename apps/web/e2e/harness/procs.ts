@@ -10,9 +10,10 @@ export function spawnDaemon(
   bin: string,
   logName: string,
   env: Record<string, string>,
+  args: string[] = [],
 ): ChildProcess {
   const log = fs.openSync(path.join(artifactsDir, logName), "a");
-  const child = spawn(bin, [], {
+  const child = spawn(bin, args, {
     env: { ...process.env, ...env },
     stdio: ["ignore", log, log],
     detached: false,

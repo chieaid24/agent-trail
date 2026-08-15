@@ -27,10 +27,8 @@ test("the timeline stream survives an api restart", async ({ page }) => {
   });
   await shoot(page, "task-detail-reconnecting");
 
-  const api = spawnDaemon(state.apiBin, "api.log", {
-    API_ADDR: state.apiAddr,
-    DATABASE_URL: state.databaseUrl,
-  });
+  // The recorded env keeps the session layer configured across the restart.
+  const api = spawnDaemon(state.apiBin, "api.log", state.apiEnv);
   writeState({ ...state, apiPid: api.pid ?? 0 });
   await waitFor("api readiness after restart", 30_000, async () => {
     const res = await fetch(`${apiBaseUrl}/readyz`).catch(() => null);

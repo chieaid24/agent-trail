@@ -26,6 +26,9 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${webPort}`,
     viewport: { width: 1280, height: 800 },
     screenshot: "only-on-failure",
+    // Signed in by default; global-setup mints the session through the
+    // fake GitHub OAuth flow. Signed-out specs override storageState.
+    storageState: "./e2e/.artifacts/storage-state.json",
   },
   webServer: {
     command: `node -e "require('node:fs').rmSync('.next',{recursive:true,force:true})" && npm run dev -- -p ${webPort} -H 127.0.0.1`,

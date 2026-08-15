@@ -8,6 +8,9 @@ Base path:
 
 ### Authentication
 
+Implemented (docs/adr/0013-dashboard-sessions.md). These routes sit outside
+the `/api/v1` prefix, like `/healthz` and `/webhooks/github`.
+
 ```text
 GET  /auth/github/start
 GET  /auth/github/callback
@@ -15,10 +18,37 @@ POST /auth/logout
 GET  /me
 ```
 
+Session handling:
+
+- Sign-in is the GitHub App's OAuth user authorization. `start` binds a
+  random state to the browser in a short-lived HttpOnly cookie and
+  redirects to GitHub; `callback` verifies the state, exchanges the code,
+  upserts the user, resyncs organization memberships from
+  `GET /user/installations`, and redirects to the dashboard. Callback
+  failures redirect to `/login?error=<code>` with the detail only in the
+  server logs.
+- A session is a database row: 256-bit random token (only its SHA-256
+  stored), 30-day fixed expiry, no sliding refresh. The browser carries it
+  in the HttpOnly, SameSite=Lax `agent_trail_session` cookie, set Secure
+  under `AUTH_COOKIE_SECURE=true`. Cookies work because the browser
+  reaches the API through the dashboard's same-origin `/backend` proxy -
+  which is also what lets the SSE stream authenticate, since EventSource
+  cannot set headers.
+- `POST /auth/logout` deletes the session row and clears the cookie (204,
+  idempotent). `GET /me` returns the session user and, when
+  `GITHUB_APP_SLUG` is set, the app installation URL; 401 without a live
+  session.
+- Enforcement is config-gated: with `GITHUB_OAUTH_CLIENT_ID` and
+  `GITHUB_OAUTH_CLIENT_SECRET` set, every `/api/v1` route (tasks,
+  dashboard reads, enablement writes, the SSE stream) answers 401 without
+  a live session. Without them the auth routes answer 503 and the API
+  retains its localhost-development openness. `/healthz`, `/readyz`,
+  `/metrics`, and `/webhooks/github` never require a session.
+
 ### Organizations and repositories
 
-Implemented: organization and repository reads. Repository enablement and
-settings writes land with the authenticated installation flow.
+Implemented: organization and repository reads, and the enablement writes.
+The settings write lands later.
 
 ```text
 GET  /organizations
@@ -44,6 +74,11 @@ Read semantics:
 - Repository settings expose `default_policy` and `validation_file`.
   Missing overrides resolve to `platform default` and
   `.agent-trail/validation.yaml`.
+- `POST /repositories/{repoId}/enable` and `/disable` flip `is_enabled`
+  and return the updated repository read model. With the session layer on,
+  the caller must belong to the repository's organization (403 otherwise),
+  and the change is audit-logged with the acting user. `PUT
+  /repositories/{repoId}/settings` remains unimplemented.
 
 ### Runners
 
@@ -67,11 +102,14 @@ conflicts. The rest of the surface lands with its milestone (retry with the
 runner, commands with the real agent adapter, artifacts with GitHub
 publishing).
 
-Security limitation: the implemented task endpoints are currently
-unauthenticated - anyone who can reach the API can create and cancel tasks.
-Acceptable only while the API binds to localhost in development; the
-GitHub OAuth session layer above must land before any deployment exposes
-this surface.
+Security limitation: without OAuth credentials configured the task
+endpoints are unauthenticated - anyone who can reach the API can create
+and cancel tasks. Acceptable only while the API binds to localhost in
+development. Deployments must set `GITHUB_OAUTH_CLIENT_ID` and
+`GITHUB_OAUTH_CLIENT_SECRET`, which puts every task endpoint behind the
+session layer above. Authorization is membership-gated on enablement
+writes only; task routes require any signed-in user, not yet a role
+(docs/adr/0013-dashboard-sessions.md).
 
 ```text
 GET  /tasks
