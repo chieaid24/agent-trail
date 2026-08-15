@@ -16,6 +16,9 @@ func clearEnv(t *testing.T) {
 		"WORKSPACE_ROOT",
 		"AGENT_PROVIDER", "AGENT_CLI_PATH", "AGENT_MODEL",
 		"AGENT_PERMISSION_MODE", "AGENT_CLI_VERSION", "AGENT_TIMEOUT_SECONDS",
+		"GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET",
+		"GITHUB_OAUTH_BASE_URL", "GITHUB_APP_SLUG",
+		"AUTH_PUBLIC_ORIGIN", "AUTH_COOKIE_SECURE",
 	} {
 		t.Setenv(key, "")
 	}
@@ -160,6 +163,71 @@ func TestLoadAcceptsEphemeralPort(t *testing.T) {
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	if _, err := Load(); err != nil {
 		t.Fatalf("Load rejected 127.0.0.1:0: %v", err)
+	}
+}
+
+func TestLoadAuthDefaultsAndOverrides(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AuthEnabled() {
+		t.Error("AuthEnabled() = true without OAuth credentials")
+	}
+	if cfg.AuthPublicOrigin != "http://localhost:3000" {
+		t.Errorf("AuthPublicOrigin = %q, want http://localhost:3000", cfg.AuthPublicOrigin)
+	}
+	if cfg.AuthCookieSecure {
+		t.Error("AuthCookieSecure = true, want false default")
+	}
+
+	clearEnv(t)
+	t.Setenv("GITHUB_OAUTH_CLIENT_ID", "Iv1client")
+	t.Setenv("GITHUB_OAUTH_CLIENT_SECRET", "secret")
+	t.Setenv("AUTH_PUBLIC_ORIGIN", "https://trail.example.com")
+	t.Setenv("AUTH_COOKIE_SECURE", "true")
+	t.Setenv("GITHUB_APP_SLUG", "agent-trail")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.AuthEnabled() {
+		t.Error("AuthEnabled() = false with OAuth credentials")
+	}
+	if cfg.AuthPublicOrigin != "https://trail.example.com" ||
+		!cfg.AuthCookieSecure || cfg.GitHubAppSlug != "agent-trail" {
+		t.Errorf("auth overrides = %q/%v/%q", cfg.AuthPublicOrigin,
+			cfg.AuthCookieSecure, cfg.GitHubAppSlug)
+	}
+}
+
+func TestLoadRejectsPartialOAuthConfig(t *testing.T) {
+	for _, key := range []string{"GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"} {
+		clearEnv(t)
+		t.Setenv(key, "only-one")
+		if _, err := Load(); err == nil {
+			t.Errorf("Load accepted %s without its pair", key)
+		}
+	}
+}
+
+func TestLoadRejectsBadAuthOrigin(t *testing.T) {
+	for _, bad := range []string{"localhost:3000", "http://localhost:3000/app",
+		"http://localhost:3000?x=1", "://nope"} {
+		clearEnv(t)
+		t.Setenv("AUTH_PUBLIC_ORIGIN", bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load accepted AUTH_PUBLIC_ORIGIN %q", bad)
+		}
+	}
+}
+
+func TestLoadRejectsBadCookieSecure(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("AUTH_COOKIE_SECURE", "yes")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted AUTH_COOKIE_SECURE=yes")
 	}
 }
 
