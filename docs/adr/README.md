@@ -16,12 +16,13 @@ Create ADRs for:
 10. Log storage
 11. GitHub App permissions
 12. Runner authentication
-13. Secret lifecycle
-14. Network policy
-15. Task leases
-16. Evidence schema
-17. Data retention
-18. Conflict detection
+13. Dashboard sessions
+14. Secret lifecycle
+15. Network policy
+16. Task leases
+17. Evidence schema
+18. Data retention
+19. Conflict detection
 
 Each ADR should include:
 

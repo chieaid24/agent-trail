@@ -61,6 +61,17 @@ The worker also reads the agent adapter selection (`AGENT_PROVIDER` and the
 other `AGENT_*` variables) - see docs/architecture/agent-providers.md and
 `.env.example` for the list and defaults.
 
+## Dashboard sign-in
+
+Without OAuth credentials the API is open on localhost and the dashboard
+shows no user chip. To run with the session layer on, set
+`GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` in `.env` (from
+the GitHub App's settings page, docs/architecture/github-app.md) and
+register `http://localhost:3000/backend/auth/github/callback` as a
+callback URL on the app. Every `/api/v1` route then requires signing in at
+`http://localhost:3000/login`. Override `AUTH_PUBLIC_ORIGIN` when the web
+port is not 3000; set `AUTH_COOKIE_SECURE=true` only behind HTTPS.
+
 ## Pre-commit hook
 
 The committed hook in `.githooks/` runs `scripts/gate.sh` - the exact CI
@@ -74,17 +85,20 @@ make hooks             # git config core.hooksPath .githooks
 
 `make e2e` runs the Playwright suite in `apps/web/e2e/`. Its global setup
 boots a stack of its own - a dedicated postgres (compose project
-`agent-trail-e2e`), migrations, seed data, and freshly built api and worker
-binaries running the fake adapter - so it never touches the `make dev`
-infrastructure, and tears everything down afterwards. The suite exercises
-the dashboard against genuinely executed tasks, including an api restart
-under an open SSE stream.
+`agent-trail-e2e`), migrations, seed data, a fake GitHub (OAuth and user
+endpoints), and freshly built api and worker binaries running the fake
+adapter - so it never touches the `make dev` infrastructure, and tears
+everything down afterwards. The api runs with the session layer on: global
+setup signs in through the fake GitHub once and every spec reuses that
+session, so the suite exercises the dashboard as a signed-in user against
+genuinely executed tasks, including an api restart under an open SSE
+stream and the full sign-in round-trip.
 
 Parallel checkouts override the namespace and ports:
 
 ```bash
 E2E_PROJECT=agent-trail-e2e-lane E2E_POSTGRES_PORT=5468 \
-E2E_API_PORT=8108 E2E_WEB_PORT=3068 make e2e
+E2E_API_PORT=8108 E2E_WEB_PORT=3068 E2E_FAKE_GITHUB_PORT=7068 make e2e
 ```
 
 Audit screenshots land in `apps/web/e2e/screenshots/`. Curated evidence for

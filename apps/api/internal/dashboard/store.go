@@ -162,6 +162,45 @@ func (s *Store) GetRepository(ctx context.Context, id string) (RepositoryDetail,
 	}, nil
 }
 
+// SetRepositoryEnabled flips the enablement flag and returns the updated
+// read model. One transaction, so the returned row is the state this call
+// wrote even under concurrent toggles.
+func (s *Store) SetRepositoryEnabled(ctx context.Context, id string, enabled bool) (Repository, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Repository{}, fmt.Errorf("set repository enabled: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE repositories SET is_enabled = $2, updated_at = now()
+		WHERE id = $1`, id, enabled)
+	if err != nil {
+		return Repository{}, fmt.Errorf("set repository enabled: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Repository{}, fmt.Errorf("set repository enabled: %w", err)
+	}
+	if n == 0 {
+		return Repository{}, ErrRepositoryNotFound
+	}
+	row := tx.QueryRowContext(ctx, `
+		SELECT `+repositoryColumns+`
+		FROM repositories r
+		LEFT JOIN tasks t ON t.repository_id = r.id
+		WHERE r.id = $1
+		GROUP BY r.id`, id)
+	repository, err := scanRepository(row)
+	if err != nil {
+		return Repository{}, fmt.Errorf("set repository enabled: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Repository{}, fmt.Errorf("set repository enabled: %w", err)
+	}
+	return repository, nil
+}
+
 // GetRepositorySettings returns the interpreted repository settings.
 func (s *Store) GetRepositorySettings(ctx context.Context, id string) (RepositorySettings, error) {
 	var raw []byte

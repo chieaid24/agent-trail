@@ -4,6 +4,7 @@
 
 import type {
   ActivityEvent,
+  Me,
   Organization,
   Repository,
   RepositoryDetail,
@@ -17,7 +18,12 @@ import type {
   ValidationResult,
 } from "./types";
 
-export const API_PREFIX = "/backend/api/v1";
+export const BACKEND_PREFIX = "/backend";
+export const API_PREFIX = `${BACKEND_PREFIX}/api/v1`;
+
+// Signing in is a full-page navigation into the OAuth redirect chain, not
+// a fetch; render it as a link href.
+export const LOGIN_URL = `${BACKEND_PREFIX}/auth/github/start`;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -29,15 +35,24 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+// A 401 means the session expired or was revoked; every screen answers it
+// the same way, by starting over at the login page.
+function redirectToLogin() {
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.assign("/login");
+  }
+}
+
+async function backendRequest<T>(url: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_PREFIX}${path}`, init);
+    res = await fetch(url, init);
   } catch {
     throw new ApiError(0, "control plane unreachable");
   }
   const body: unknown = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status === 401) redirectToLogin();
     const message =
       body !== null &&
       typeof body === "object" &&
@@ -48,6 +63,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, message);
   }
   return body as T;
+}
+
+function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return backendRequest<T>(`${API_PREFIX}${path}`, init);
+}
+
+// The current session; 401 when signed out, 503 when the control plane
+// has no OAuth configuration (localhost development).
+export function getMe(): Promise<Me> {
+  return backendRequest<Me>(`${BACKEND_PREFIX}/me`);
+}
+
+export async function logout(): Promise<void> {
+  await backendRequest<null>(`${BACKEND_PREFIX}/auth/logout`, {
+    method: "POST",
+  });
+}
+
+export function setRepositoryEnabled(
+  repositoryId: string,
+  enabled: boolean,
+): Promise<Repository> {
+  const action = enabled ? "enable" : "disable";
+  return request<Repository>(
+    `/repositories/${encodeURIComponent(repositoryId)}/${action}`,
+    { method: "POST" },
+  );
 }
 
 export async function listTasks(options?: {

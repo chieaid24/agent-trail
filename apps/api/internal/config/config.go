@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,6 +45,25 @@ type Config struct {
 	GitHubAppID             string
 	GitHubAppPrivateKeyPath string
 	GitHubAPIBaseURL        string
+	// GitHub OAuth user authorization backing dashboard sessions; both set
+	// together, or neither (the auth endpoints then answer 503 and the API
+	// stays open for localhost development). GitHubOAuthBaseURL overrides
+	// the github.com root for tests and GitHub Enterprise
+	// (docs/adr/0013-dashboard-sessions.md).
+	GitHubOAuthClientID     string
+	GitHubOAuthClientSecret string
+	GitHubOAuthBaseURL      string
+	// GitHubAppSlug builds the GitHub App installation link the dashboard
+	// shows (GITHUB_APP_SLUG); optional.
+	GitHubAppSlug string
+	// AuthPublicOrigin is the browser-facing dashboard origin
+	// (AUTH_PUBLIC_ORIGIN). The OAuth redirect URI and post-login redirects
+	// derive from it; the API is reached through its /backend proxy
+	// (apps/web/next.config.ts).
+	AuthPublicOrigin string
+	// AuthCookieSecure marks auth cookies Secure (AUTH_COOKIE_SECURE,
+	// default false for plain-HTTP localhost development).
+	AuthCookieSecure bool
 	// AgentProvider selects the agent adapter: "fake" (default) or
 	// "claude-code" (AGENT_PROVIDER). The remaining Agent* settings apply only
 	// to the Claude Code CLI adapter (docs/architecture/agent-providers.md).
@@ -67,6 +87,9 @@ type Config struct {
 // GitHubEnabled reports whether the GitHub App integration is configured.
 func (c Config) GitHubEnabled() bool { return c.GitHubWebhookSecret != "" }
 
+// AuthEnabled reports whether the dashboard session layer is configured.
+func (c Config) AuthEnabled() bool { return c.GitHubOAuthClientID != "" }
+
 // Load reads configuration from the environment and validates it.
 func Load() (Config, error) {
 	cfg := Config{
@@ -76,6 +99,11 @@ func Load() (Config, error) {
 		GitHubAppID:             os.Getenv("GITHUB_APP_ID"),
 		GitHubAppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
 		GitHubAPIBaseURL:        os.Getenv("GITHUB_API_BASE_URL"),
+		GitHubOAuthClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
+		GitHubOAuthClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),
+		GitHubOAuthBaseURL:      os.Getenv("GITHUB_OAUTH_BASE_URL"),
+		GitHubAppSlug:           os.Getenv("GITHUB_APP_SLUG"),
+		AuthPublicOrigin:        envOr("AUTH_PUBLIC_ORIGIN", "http://localhost:3000"),
 		WorkspaceRoot:           envOr("WORKSPACE_ROOT", "/var/lib/agent-trail"),
 		AgentProvider:           envOr("AGENT_PROVIDER", "fake"),
 		AgentCLIPath:            envOr("AGENT_CLI_PATH", "claude"),
@@ -93,6 +121,14 @@ func Load() (Config, error) {
 	if err := validateGitHub(cfg); err != nil {
 		return Config{}, err
 	}
+	if err := validateAuth(cfg); err != nil {
+		return Config{}, err
+	}
+	secure, err := envBool("AUTH_COOKIE_SECURE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.AuthCookieSecure = secure
 	switch cfg.AgentProvider {
 	case "fake", "claude-code":
 	default:
@@ -165,6 +201,22 @@ func validateGitHub(cfg Config) error {
 	return nil
 }
 
+// validateAuth rejects a partial OAuth configuration and a malformed
+// dashboard origin: a login that can never complete is a deployment mistake.
+func validateAuth(cfg Config) error {
+	if (cfg.GitHubOAuthClientID != "") != (cfg.GitHubOAuthClientSecret != "") {
+		return fmt.Errorf("GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET " +
+			"must be set together")
+	}
+	origin, err := url.Parse(cfg.AuthPublicOrigin)
+	if err != nil || origin.Scheme == "" || origin.Host == "" ||
+		origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
+		return fmt.Errorf("AUTH_PUBLIC_ORIGIN %q: want scheme://host[:port] "+
+			"with no path", cfg.AuthPublicOrigin)
+	}
+	return nil
+}
+
 // validateAddr accepts host:port with a numeric port (host may be empty).
 func validateAddr(addr string) error {
 	_, port, err := net.SplitHostPort(addr)
@@ -176,6 +228,22 @@ func validateAddr(addr string) error {
 		return fmt.Errorf("API_ADDR %q: port must be 0-65535", addr)
 	}
 	return nil
+}
+
+// envBool reads a strict true/false from the environment.
+func envBool(key string, fallback bool) (bool, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	switch raw {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s %q: want true or false", key, raw)
+	}
 }
 
 func envOr(key, fallback string) string {

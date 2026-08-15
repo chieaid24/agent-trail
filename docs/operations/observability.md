@@ -14,6 +14,8 @@ agent_trail_task_duration_seconds
 agent_trail_task_failures_total
 agent_trail_github_api_requests_total
 agent_trail_github_api_errors_total
+agent_trail_auth_github_requests_total
+agent_trail_auth_github_errors_total
 agent_trail_runner_heartbeats_missed_total
 ```
 

@@ -261,3 +261,18 @@ export interface TaskConflict {
   detected_at: string;
   updated_at: string;
 }
+
+export interface CurrentUser {
+  id: string;
+  github_user_id: number;
+  github_login: string;
+  display_name: string;
+  avatar_url: string;
+  created_at: string;
+  last_login_at: string;
+}
+
+export interface Me {
+  user: CurrentUser;
+  install_url?: string;
+}

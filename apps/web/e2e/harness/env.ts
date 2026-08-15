@@ -26,17 +26,27 @@ export const E2E = {
   postgresPort: Number(process.env.E2E_POSTGRES_PORT ?? 5457),
   apiPort: Number(process.env.E2E_API_PORT ?? 8097),
   webPort: Number(process.env.E2E_WEB_PORT ?? 3057),
+  fakeGithubPort: Number(process.env.E2E_FAKE_GITHUB_PORT ?? 7057),
 };
 
 export const databaseUrl = `postgres://agent_trail:agent_trail@127.0.0.1:${E2E.postgresPort}/agent_trail?sslmode=disable`;
 export const apiBaseUrl = `http://127.0.0.1:${E2E.apiPort}`;
+export const storageStatePath = path.join(artifactsDir, "storage-state.json");
+
+// The one session cookie the whole suite runs under; global-setup mints it
+// through the fake GitHub OAuth flow.
+export const sessionCookieName = "agent_trail_session";
 
 export interface HarnessState {
   apiPid: number;
   workerPid: number;
+  fakeGithubPid: number;
   apiBin: string;
   apiAddr: string;
+  // Full daemon env, so a spec restarting the api keeps auth configured.
+  apiEnv: Record<string, string>;
   databaseUrl: string;
+  sessionCookie: string;
 }
 
 export function readState(): HarnessState {

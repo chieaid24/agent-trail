@@ -18,6 +18,9 @@ updated_at
 
 ### User
 
+Implemented (migration `00007_dashboard_auth.sql`). Upserted at every
+login from the GitHub user object.
+
 ```text
 id
 github_user_id
@@ -28,7 +31,28 @@ created_at
 last_login_at
 ```
 
+### Session
+
+Implemented (migration `00007_dashboard_auth.sql`). One row per live
+dashboard login; stores only the SHA-256 of the bearer token, expires
+hard after 30 days, reaped opportunistically
+(docs/adr/0013-dashboard-sessions.md).
+
+```text
+id
+user_id
+token_hash
+created_at
+expires_at
+```
+
 ### Membership
+
+Implemented (migration `00007_dashboard_auth.sql`). The pair
+(organization_id, user_id) is the identity; rows are replaced at every
+login from the user's accessible installations. Every synced row is
+written as `member` today - GitHub exposes no role on the installations
+read - so the finer roles below are schema, not yet behavior.
 
 ```text
 organization_id

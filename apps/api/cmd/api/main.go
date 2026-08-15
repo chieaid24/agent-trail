@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/chieaid24/agent-trail/apps/api/internal/auth"
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
 	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 	"github.com/chieaid24/agent-trail/apps/api/internal/dashboard"
@@ -49,6 +50,8 @@ func run() error {
 		defer db.Close()
 	}
 
+	metrics := observability.NewRegistry()
+
 	var pinger httpapi.DBPinger
 	var tasks httpapi.TaskService
 	var validations httpapi.ValidationService
@@ -66,7 +69,27 @@ func run() error {
 			httpapi.WithConflicts(conflict.NewStore(db)))
 	}
 
-	metrics := observability.NewRegistry()
+	// Sessions live in the database; refuse a half-configured session
+	// layer instead of silently serving without one.
+	if cfg.AuthEnabled() && db == nil {
+		return errors.New(
+			"GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET are set " +
+				"but DATABASE_URL is not; sessions need the database")
+	}
+	if cfg.AuthEnabled() {
+		oauthClient := auth.NewOAuthClient(cfg.GitHubOAuthClientID,
+			cfg.GitHubOAuthClientSecret, cfg.GitHubOAuthBaseURL,
+			cfg.GitHubAPIBaseURL, metrics)
+		installURL := ""
+		if cfg.GitHubAppSlug != "" {
+			installURL = "https://github.com/apps/" + cfg.GitHubAppSlug +
+				"/installations/new"
+		}
+		authService := auth.NewService(oauthClient, auth.NewStore(db), logger,
+			installURL)
+		apiOptions = append(apiOptions, httpapi.WithAuth(authService,
+			cfg.AuthPublicOrigin, cfg.AuthCookieSecure))
+	}
 	var webhook http.Handler
 	var processor *github.Processor
 	// The webhook needs both the GitHub credentials and the database.

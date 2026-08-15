@@ -29,11 +29,16 @@ func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	// Allowlist, never os.Environ(): under a git hook (the pre-commit gate)
+	// the parent exports GIT_DIR/GIT_INDEX_FILE, and inheriting them makes
+	// these commands operate on the invoking repository instead of dir.
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null", "LC_ALL=C",
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
-		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-	)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)

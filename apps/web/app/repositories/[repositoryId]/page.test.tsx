@@ -39,7 +39,10 @@ test("renders repository settings, metrics, and task sections", async () => {
     active_tasks: [],
     recent_tasks: [],
   } as RepositoryDetail;
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(repository)));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(repository))),
+  );
 
   await act(async () => {
     render(

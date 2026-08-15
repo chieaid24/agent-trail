@@ -32,7 +32,10 @@ test("renders runner capacity, resources, and task states", async () => {
     current_tasks: [],
     recent_failures: [],
   } as RunnerDetail;
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(runner)));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(runner))),
+  );
 
   await act(async () => {
     render(<RunnerPage params={Promise.resolve({ runnerId: runner.id })} />);
