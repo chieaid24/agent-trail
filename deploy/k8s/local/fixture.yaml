@@ -1,0 +1,84 @@
+# GitHub simulation for the local verification stack: fake REST API, the
+# sample repository over git smart HTTP, and /verify for the script's
+# assertions. Seeds one queued task at startup. envsubst variables:
+# TOOLS_IMAGE.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture
+  namespace: agent-trail-local
+  labels:
+    app.kubernetes.io/name: agent-trail-local-fixture
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-trail-local-fixture
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-trail-local-fixture
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fixture
+          image: ${TOOLS_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/fixture-github"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: local-database
+                  key: url
+            - name: FIXTURE_PUBLIC_URL
+              value: http://fixture.agent-trail-local.svc.cluster.local:8080
+            - name: FIXTURE_ADDR
+              value: ":8080"
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fixture
+  namespace: agent-trail-local
+  labels:
+    app.kubernetes.io/name: agent-trail-local-fixture
+spec:
+  selector:
+    app.kubernetes.io/name: agent-trail-local-fixture
+  ports:
+    - port: 8080
+      targetPort: 8080

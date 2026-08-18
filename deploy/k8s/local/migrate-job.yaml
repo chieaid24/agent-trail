@@ -1,0 +1,48 @@
+# Applies goose migrations to the local stack database. Retries cover the
+# window while postgres is still coming up. envsubst variables: TOOLS_IMAGE.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: agent-trail-local
+  labels:
+    app.kubernetes.io/name: agent-trail-local-migrate
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-trail-local-migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ${TOOLS_IMAGE}
+          imagePullPolicy: IfNotPresent
+          args: ["up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: local-database
+                  key: url
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

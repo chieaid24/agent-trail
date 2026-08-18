@@ -1,0 +1,10 @@
+# Runner namespace: Pod Security Admission enforces the restricted profile,
+# so a Job that drops the hardening in job.yaml is rejected at admission.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-trail-runners
+  labels:
+    app.kubernetes.io/name: agent-trail
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

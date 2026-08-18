@@ -1,0 +1,23 @@
+# Local overlay for the runner namespace: allow egress to the verification
+# stack only (database and fixture). Applied alongside
+# deploy/k8s/runner/networkpolicy.yaml, whose default-deny still blocks
+# everything else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-local-stack
+  namespace: agent-trail-runners
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agent-trail-local
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 8080
