@@ -24,7 +24,7 @@ Use disposable:
 - MinIO
 - Git repositories
 - Fake GitHub API
-- Docker runner
+- Kubernetes runner Jobs (kind, scripts/verify-k8s-runner.sh)
 
 Test:
 

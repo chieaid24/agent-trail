@@ -3,11 +3,6 @@ variable "name" {
   type        = string
 }
 
-variable "vpc_id" {
-  description = "VPC id."
-  type        = string
-}
-
 variable "private_subnet_ids" {
   description = "Private subnets for the EKS control plane ENIs and nodes."
   type        = list(string)

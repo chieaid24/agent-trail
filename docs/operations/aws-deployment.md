@@ -72,8 +72,11 @@ Environments (`deploy/terraform/envs`):
 
 - local - no Terraform: docker compose plus a kind cluster
   (`deploy/terraform/envs/local/README.md`)
-- dev - single-AZ-NAT, small instances, no deletion protection
+- dev - 2 AZs, small instances, no deletion protection
 - prod - 3 AZs, Multi-AZ RDS, deletion protection
+
+Both environments use a single NAT gateway by design (cost); private
+egress is not AZ-redundant.
 
 Provider versions are pinned by the committed `.terraform.lock.hcl` in
 each environment root.
@@ -107,7 +110,18 @@ based on the chosen agent CLI and package manager.
 
 Do not mount the Docker socket.
 
-Known limitation: network-policy egress enforcement depends on the
-cluster CNI. The kind verification proves the allowed paths work with the
-default-deny policies applied; it does not exhaustively prove every
-disallowed path is blocked.
+Known limitations:
+
+- Network-policy egress enforcement depends on the cluster CNI. The kind
+  verification proves the allowed paths work with the default-deny
+  policies applied; it does not exhaustively prove every disallowed path
+  is blocked.
+- The pull-model worker currently needs the GitHub App key to mint
+  installation tokens, so the local verification Job mounts a throwaway
+  key against a fake GitHub API. That contradicts the "runner must not
+  have the GitHub App private key" rule above, which stands as the
+  target: the Terraform runner roles already exclude the key
+  (`modules/secrets` `runner_secret_arns`), so the internal runner API
+  (docs/architecture/api.md) - where the control plane holds the key and
+  hands runners short-lived tokens - must land before the cloud dispatch
+  path goes live.

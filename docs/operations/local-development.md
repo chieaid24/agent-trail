@@ -74,9 +74,10 @@ stands up a disposable postgres and the GitHub fixture
 (deploy/k8s/runner/job.yaml), asserts the pod spec hardening, checks the
 task reached awaiting_review with a draft PR through the fixture's /verify
 endpoint, and confirms ttlSecondsAfterFinished removed the finished Job.
-Everything it creates is namespaced per run and deleted on exit
-(`KEEP_CLUSTER=1` keeps the cluster for debugging). Requires docker, kind,
-kubectl, openssl, and python3.
+Everything it creates is namespaced per run; on success it is all deleted,
+on failure the log and pod-spec artifacts are kept and their path printed
+(`KEEP_CLUSTER=1` also keeps the cluster for debugging). Requires docker,
+kind, kubectl, curl, openssl, and python3.
 
 ## Dashboard sign-in
 

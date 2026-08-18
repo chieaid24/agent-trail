@@ -106,7 +106,6 @@ module "runner_cluster" {
   source = "../../modules/runner_cluster"
 
   name               = local.name
-  vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
 
   node_instance_types = ["m7g.xlarge"]
@@ -128,8 +127,8 @@ module "observability" {
   alb_arn_suffix           = module.control_plane.alb_arn_suffix
   target_group_arn_suffix  = module.control_plane.target_group_arn_suffix
   db_instance_identifier   = module.database.identifier
-  task_dispatch_queue_name = "${local.name}-task-dispatch"
-  dead_letter_queue_name   = "${local.name}-task-dispatch-dlq"
+  task_dispatch_queue_name = module.queue.queue_name
+  dead_letter_queue_name   = module.queue.dead_letter_queue_name
 }
 
 module "github_oidc_ci" {

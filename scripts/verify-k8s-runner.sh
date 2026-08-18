@@ -20,10 +20,12 @@ KUBECTL=(kubectl --context "kind-${CLUSTER}")
 log() { printf '\n==> %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-for dep in docker kind kubectl openssl python3; do
+for dep in docker kind kubectl curl openssl python3; do
   command -v "$dep" >/dev/null || fail "$dep is required"
 done
 
+# On success everything this run created goes; on failure the artifacts
+# stay (path printed) so the run can be diagnosed.
 cleanup() {
   local status=$?
   if [ "${KEEP_CLUSTER:-0}" = "1" ]; then
@@ -31,8 +33,11 @@ cleanup() {
   else
     kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
   fi
+  docker rmi "$RUNNER_IMAGE" "$TOOLS_IMAGE" >/dev/null 2>&1 || true
   if [ $status -ne 0 ]; then
     printf 'artifacts (logs, pod spec): %s\n' "$ARTIFACTS"
+  else
+    rm -rf "$ARTIFACTS"
   fi
   exit $status
 }
@@ -124,29 +129,47 @@ for _ in $(seq 1 60); do
 done
 [ -n "${POD:-}" ] || fail "runner pod never appeared"
 "${KUBECTL[@]}" -n agent-trail-runners get pod "$POD" -o json > "$ARTIFACTS/runner-pod.json"
-python3 - "$ARTIFACTS/runner-pod.json" <<'PY'
+"${KUBECTL[@]}" -n agent-trail-runners get "job/$JOB_NAME" -o json > "$ARTIFACTS/runner-job.json"
+"${KUBECTL[@]}" get namespace agent-trail-runners -o json > "$ARTIFACTS/runner-namespace.json"
+python3 - "$ARTIFACTS/runner-pod.json" "$ARTIFACTS/runner-job.json" "$ARTIFACTS/runner-namespace.json" <<'PY'
 import json, sys
 pod = json.load(open(sys.argv[1]))
+job = json.load(open(sys.argv[2]))
+ns = json.load(open(sys.argv[3]))
 spec = pod["spec"]
 sec = spec["securityContext"]
 c = spec["containers"][0]
 csec = c["securityContext"]
+volumes = {v["name"]: v for v in spec.get("volumes", [])}
 checks = {
     "automountServiceAccountToken is false": spec.get("automountServiceAccountToken") is False,
+    "service account runner-task": spec.get("serviceAccountName") == "runner-task",
     "runAsNonRoot": sec.get("runAsNonRoot") is True,
+    "runAsUser 65532": sec.get("runAsUser") == 65532,
+    "fsGroup 65532": sec.get("fsGroup") == 65532,
     "seccomp RuntimeDefault": sec.get("seccompProfile", {}).get("type") == "RuntimeDefault",
     "readOnlyRootFilesystem": csec.get("readOnlyRootFilesystem") is True,
     "no privilege escalation": csec.get("allowPrivilegeEscalation") is False,
     "capabilities drop ALL": csec.get("capabilities", {}).get("drop") == ["ALL"],
     "restartPolicy Never": spec.get("restartPolicy") == "Never",
+    "activeDeadlineSeconds set": job["spec"].get("activeDeadlineSeconds", 0) > 0,
+    "backoffLimit 0": job["spec"].get("backoffLimit") == 0,
     "no docker socket": all(
-        (v.get("hostPath") or {}).get("path", "") == "" for v in spec.get("volumes", [])
+        (v.get("hostPath") or {}).get("path", "") == "" for v in volumes.values()
     ),
     "no service account token volume": all(
-        "kube-api-access" not in v["name"] for v in spec.get("volumes", [])
+        "kube-api-access" not in name for name in volumes
+    ),
+    "workspace emptyDir size-limited": bool(
+        (volumes.get("workspace", {}).get("emptyDir") or {}).get("sizeLimit")
+    ),
+    "tmp emptyDir size-limited": bool(
+        (volumes.get("tmp", {}).get("emptyDir") or {}).get("sizeLimit")
     ),
     "cpu limit": c["resources"]["limits"]["cpu"] == "2",
     "memory limit": c["resources"]["limits"]["memory"] == "4Gi",
+    "namespace enforces restricted PSA": ns["metadata"]["labels"].get(
+        "pod-security.kubernetes.io/enforce") == "restricted",
 }
 bad = [name for name, ok in checks.items() if not ok]
 for name in checks:

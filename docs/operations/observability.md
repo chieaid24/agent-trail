@@ -1,5 +1,10 @@
 # Observability
 
+Runtime wiring (OpenTelemetry export, histogram-capable metrics, the
+runner metric emission below, and provisioned Grafana dashboards and
+alerts) is tracked as issue #33; cloud-side alarms live in
+`deploy/terraform/modules/observability`.
+
 ### Metrics
 
 Control plane:
@@ -19,7 +24,8 @@ agent_trail_auth_github_errors_total
 agent_trail_runner_heartbeats_missed_total
 ```
 
-Runner (spec; the process runner does not emit these yet):
+Runner (spec; the worker does not emit these yet in either its process or
+kubernetes mode - issue #33):
 
 ```text
 agent_trail_runner_active_tasks

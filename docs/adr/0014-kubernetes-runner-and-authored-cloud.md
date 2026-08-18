@@ -33,8 +33,10 @@ Three linked choices:
    publishes it, and exits, so `ttlSecondsAfterFinished` reclaims it. The
    hardened spec lives in `deploy/k8s/runner/job.yaml` and is proven
    locally in kind by `scripts/verify-k8s-runner.sh` against the fixture
-   in `cmd/fixture-github`. ADR-0004's intermediate Docker-runner step is
-   dropped; this ADR supersedes it.
+   in `cmd/fixture-github`. Kubernetes objects are plain manifests under
+   `deploy/k8s` - a Helm chart adds templating this handful of resources
+   does not need. ADR-0004's intermediate Docker-runner step is dropped;
+   this ADR supersedes it.
 
 ## Alternatives
 
@@ -84,6 +86,12 @@ Three linked choices:
 - Direct database access from runner pods is a wider blast radius than
   the planned runner API; the lease arbiter and row-level claim scoping
   are the current mitigations.
+- The pull-model worker mints installation tokens itself, so the runner
+  pod currently carries the GitHub App private key (throwaway in the
+  local verification), violating the aws-deployment.md target that
+  runners never hold it. The Terraform runner IAM roles already exclude
+  the key; closing the gap is the runner internal API's job and blocks
+  the live cloud dispatch path.
 
 ## Revisit conditions
 
