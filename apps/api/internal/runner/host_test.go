@@ -114,3 +114,91 @@ func TestLostRunnerReportedOnTimeline(t *testing.T) {
 		t.Fatalf("runner.lost events = %d, want 1", n)
 	}
 }
+
+// TestHostExitsAfterMaxTasks: a capped host executes one attempt, exits on
+// its own without a context cancel, and leaves the runner offline -- the
+// contract a one-shot Kubernetes Job runner depends on.
+func TestHostExitsAfterMaxTasks(t *testing.T) {
+	db, s, ts := testStores(t)
+	tk := mustCreateTask(t, ts)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	host := &Host{
+		Store:         s,
+		Executor:      testExecutor(db, s, ts),
+		Logger:        logger,
+		RunnerType:    "kubernetes",
+		HostnameOrPod: "one-shot-test",
+		Lease:         time.Minute,
+		Heartbeat:     25 * time.Millisecond,
+		LostAfter:     10 * time.Minute,
+		Poll:          10 * time.Millisecond,
+		MaxTasks:      1,
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- host.Run(context.Background()) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("host.Run = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("capped host did not exit after its task")
+	}
+
+	got, err := ts.Get(context.Background(), tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != task.StatusCompleted {
+		t.Errorf("task status = %s, want completed", got.Status)
+	}
+
+	var status, runnerType string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT status, runner_type FROM runners
+		WHERE hostname_or_pod = 'one-shot-test'`).
+		Scan(&status, &runnerType); err != nil {
+		t.Fatal(err)
+	}
+	if status != "offline" {
+		t.Errorf("runner status after exit = %s, want offline", status)
+	}
+	if runnerType != "kubernetes" {
+		t.Errorf("runner_type = %s, want kubernetes", runnerType)
+	}
+}
+
+// TestHostIdleExit: with nothing to claim, an idle deadline ends the host
+// cleanly so an empty-queue Job completes instead of hanging.
+func TestHostIdleExit(t *testing.T) {
+	db, s, ts := testStores(t)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	host := &Host{
+		Store:         s,
+		Executor:      testExecutor(db, s, ts),
+		Logger:        logger,
+		RunnerType:    "kubernetes",
+		HostnameOrPod: "idle-exit-test",
+		Lease:         time.Minute,
+		Heartbeat:     25 * time.Millisecond,
+		LostAfter:     10 * time.Minute,
+		Poll:          10 * time.Millisecond,
+		IdleExit:      100 * time.Millisecond,
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- host.Run(context.Background()) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("host.Run = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("idle host did not exit")
+	}
+}

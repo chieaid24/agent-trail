@@ -13,6 +13,7 @@ func clearEnv(t *testing.T) {
 		"API_ADDR", "DATABASE_URL", "LOG_LEVEL",
 		"RUNNER_LEASE_SECONDS", "RUNNER_HEARTBEAT_SECONDS",
 		"RUNNER_LOST_AFTER_SECONDS", "WORKER_POLL_SECONDS",
+		"RUNNER_TYPE", "WORKER_MAX_TASKS", "WORKER_IDLE_EXIT_SECONDS",
 		"WORKSPACE_ROOT",
 		"AGENT_PROVIDER", "AGENT_CLI_PATH", "AGENT_MODEL",
 		"AGENT_PERMISSION_MODE", "AGENT_CLI_VERSION", "AGENT_TIMEOUT_SECONDS",
@@ -236,5 +237,53 @@ func TestLoadRejectsBadLogLevel(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "loud")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load accepted invalid LOG_LEVEL")
+	}
+}
+
+func TestLoadRunnerTypeAndWorkerCaps(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RunnerType != "process" {
+		t.Errorf("RunnerType = %q, want process", cfg.RunnerType)
+	}
+	if cfg.WorkerMaxTasks != 0 {
+		t.Errorf("WorkerMaxTasks = %d, want 0", cfg.WorkerMaxTasks)
+	}
+	if cfg.WorkerIdleExit != 0 {
+		t.Errorf("WorkerIdleExit = %v, want 0", cfg.WorkerIdleExit)
+	}
+
+	t.Setenv("RUNNER_TYPE", "kubernetes")
+	t.Setenv("WORKER_MAX_TASKS", "1")
+	t.Setenv("WORKER_IDLE_EXIT_SECONDS", "90")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RunnerType != "kubernetes" {
+		t.Errorf("RunnerType = %q, want kubernetes", cfg.RunnerType)
+	}
+	if cfg.WorkerMaxTasks != 1 {
+		t.Errorf("WorkerMaxTasks = %d, want 1", cfg.WorkerMaxTasks)
+	}
+	if cfg.WorkerIdleExit != 90*time.Second {
+		t.Errorf("WorkerIdleExit = %v, want 90s", cfg.WorkerIdleExit)
+	}
+
+	for key, bad := range map[string]string{
+		"RUNNER_TYPE":              "vm",
+		"WORKER_MAX_TASKS":         "-1",
+		"WORKER_IDLE_EXIT_SECONDS": "ten",
+	} {
+		t.Run(key, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv(key, bad)
+			if _, err := Load(); err == nil {
+				t.Errorf("Load accepted %s=%q", key, bad)
+			}
+		})
 	}
 }

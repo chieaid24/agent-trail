@@ -21,6 +21,15 @@ type Host struct {
 	Heartbeat time.Duration // registry heartbeat and reap cadence
 	LostAfter time.Duration // heartbeat staleness that marks a runner lost
 	Poll      time.Duration // idle claim-poll interval
+
+	// MaxTasks caps executed attempts; zero is unbounded. A capped host
+	// exits cleanly after its last attempt, so a Kubernetes Job completes
+	// and ttlSecondsAfterFinished can reclaim it
+	// (docs/operations/aws-deployment.md).
+	MaxTasks int
+	// IdleExit stops the host when no claim arrives for this long; zero
+	// never idles out. Keeps a one-shot Job from hanging on an empty queue.
+	IdleExit time.Duration
 }
 
 // Run registers the runner and works the queue until ctx ends, then marks
@@ -40,12 +49,18 @@ func (h *Host) Run(ctx context.Context) error {
 		slog.String("hostname", h.HostnameOrPod),
 	)
 
+	// A cap or idle exit ends the work loop without cancelling ctx; the
+	// heartbeat goroutine needs its own stop signal for that path.
+	beatCtx, stopBeats := context.WithCancel(ctx)
+	defer stopBeats()
 	beatsDone := make(chan struct{})
 	go func() {
 		defer close(beatsDone)
-		h.beatAndReap(ctx, log, self.ID)
+		h.beatAndReap(beatCtx, log, self.ID)
 	}()
 
+	executed := 0
+	idleSince := time.Now()
 	for ctx.Err() == nil {
 		claim, err := h.Store.Claim(ctx, self.ID, h.Lease)
 		if err != nil {
@@ -60,9 +75,17 @@ func (h *Host) Run(ctx context.Context) error {
 			continue
 		}
 		if claim == nil {
+			if h.IdleExit > 0 && time.Since(idleSince) >= h.IdleExit {
+				log.LogAttrs(ctx, slog.LevelInfo, "idle exit",
+					slog.String("event", "runner_idle_exit"),
+					slog.Duration("idle_exit", h.IdleExit),
+				)
+				break
+			}
 			sleep(ctx, h.Poll)
 			continue
 		}
+		idleSince = time.Now()
 		log.LogAttrs(ctx, slog.LevelInfo, "attempt claimed",
 			slog.String("event", "runner_attempt_claimed"),
 			slog.String("task_id", claim.TaskID),
@@ -79,7 +102,16 @@ func (h *Host) Run(ctx context.Context) error {
 				slog.String("error", err.Error()),
 			)
 		}
+		executed++
+		if h.MaxTasks > 0 && executed >= h.MaxTasks {
+			log.LogAttrs(ctx, slog.LevelInfo, "task cap reached",
+				slog.String("event", "runner_task_cap_reached"),
+				slog.Int("executed", executed),
+			)
+			break
+		}
 	}
+	stopBeats()
 	<-beatsDone
 
 	offCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

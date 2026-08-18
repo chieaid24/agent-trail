@@ -107,9 +107,10 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 	ws, err := e.Workspaces.CreateWorktree(ctx, params)
 	if err != nil {
 		// A dead previous owner on this host may have left the worktree or
-		// its branch behind; clear both and retry once.
+		// its branch behind; clear both and retry once. A cleanup failure
+		// must not mask the original error.
 		if cleanupErr := e.Workspaces.CleanupStale(ctx, repoRef, c.AttemptID, branch); cleanupErr != nil {
-			return gitworkspace.Workspace{}, cleanupErr
+			return gitworkspace.Workspace{}, errors.Join(err, cleanupErr)
 		}
 		ws, err = e.Workspaces.CreateWorktree(ctx, params)
 		if err != nil {

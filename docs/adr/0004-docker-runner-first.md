@@ -1,6 +1,6 @@
 # ADR-0004: Docker runner before Kubernetes Jobs
 
-- Status: accepted
+- Status: superseded by ADR-0014
 - Date: 2026-07-24
 
 ## Context

@@ -1,0 +1,89 @@
+# Throwaway database for the local verification stack. Data lives in an
+# emptyDir and dies with the pod; the Secret is generated per run by
+# scripts/verify-k8s-runner.sh.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: agent-trail-local
+  labels:
+    app.kubernetes.io/name: agent-trail-local-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-trail-local-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-trail-local-postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17.7-alpine
+          env:
+            - name: POSTGRES_USER
+              value: agent_trail
+            - name: POSTGRES_DB
+              value: agent_trail
+            # Subdirectory of the mount: initdb requires 0700 ownership the
+            # volume root cannot guarantee.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: local-postgres
+                  key: password
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "agent_trail"]
+            initialDelaySeconds: 2
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: agent-trail-local
+  labels:
+    app.kubernetes.io/name: agent-trail-local-postgres
+spec:
+  selector:
+    app.kubernetes.io/name: agent-trail-local-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

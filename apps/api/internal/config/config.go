@@ -35,6 +35,16 @@ type Config struct {
 	RunnerLostAfter time.Duration
 	// WorkerPoll is the idle claim-poll interval (WORKER_POLL_SECONDS).
 	WorkerPoll time.Duration
+	// RunnerType identifies how this worker is hosted in the runner
+	// registry: process, docker, or kubernetes (RUNNER_TYPE).
+	RunnerType string
+	// WorkerMaxTasks caps attempts executed before the worker exits; zero
+	// runs forever (WORKER_MAX_TASKS). A Kubernetes Job runner sets 1 so
+	// the Job completes and TTL cleanup applies.
+	WorkerMaxTasks int
+	// WorkerIdleExit stops the worker when no claim arrives for this long;
+	// zero never idles out (WORKER_IDLE_EXIT_SECONDS).
+	WorkerIdleExit time.Duration
 	// WorkspaceRoot is the base directory for the git mirror cache and task
 	// worktrees (WORKSPACE_ROOT); must be an absolute path.
 	WorkspaceRoot string
@@ -105,6 +115,7 @@ func Load() (Config, error) {
 		GitHubAppSlug:           os.Getenv("GITHUB_APP_SLUG"),
 		AuthPublicOrigin:        envOr("AUTH_PUBLIC_ORIGIN", "http://localhost:3000"),
 		WorkspaceRoot:           envOr("WORKSPACE_ROOT", "/var/lib/agent-trail"),
+		RunnerType:              envOr("RUNNER_TYPE", "process"),
 		AgentProvider:           envOr("AGENT_PROVIDER", "fake"),
 		AgentCLIPath:            envOr("AGENT_CLI_PATH", "claude"),
 		AgentModel:              os.Getenv("AGENT_MODEL"),
@@ -129,6 +140,22 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.AuthCookieSecure = secure
+	switch cfg.RunnerType {
+	case "process", "docker", "kubernetes":
+	default:
+		return Config{}, fmt.Errorf("RUNNER_TYPE %q: want process, docker, or kubernetes",
+			cfg.RunnerType)
+	}
+	maxTasks, err := envNonNegativeInt("WORKER_MAX_TASKS", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.WorkerMaxTasks = maxTasks
+	idleExit, err := envNonNegativeInt("WORKER_IDLE_EXIT_SECONDS", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.WorkerIdleExit = time.Duration(idleExit) * time.Second
 	switch cfg.AgentProvider {
 	case "fake", "claude-code":
 	default:
@@ -172,6 +199,16 @@ func Load() (Config, error) {
 			cfg.RunnerLostAfter, cfg.RunnerHeartbeat)
 	}
 	return cfg, nil
+}
+
+// envNonNegativeInt reads an integer >= 0 from the environment.
+func envNonNegativeInt(key string, fallback int) (int, error) {
+	raw := envOr(key, strconv.Itoa(fallback))
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s %q: want an integer >= 0", key, raw)
+	}
+	return n, nil
 }
 
 // envSeconds reads a positive whole-second duration from the environment.

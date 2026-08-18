@@ -1,7 +1,9 @@
-// Command worker is the runner host: it registers a process runner, claims
-// task attempts with expiring leases, executes them with the configured agent
+// Command worker is the runner host: it registers a runner (process by
+// default; RUNNER_TYPE selects docker or kubernetes hosting), claims task
+// attempts with expiring leases, executes them with the configured agent
 // adapter (fake by default, or the Claude Code CLI), heartbeats the registry,
-// and reaps lost runners. Spec: docs/architecture/runner.md and
+// and reaps lost runners. WORKER_MAX_TASKS=1 turns it into a one-shot
+// Kubernetes Job runner. Spec: docs/architecture/runner.md and
 // docs/architecture/agent-providers.md.
 package main
 
@@ -131,12 +133,14 @@ func run() error {
 			LeaseDuration: cfg.RunnerLease,
 		},
 		Logger:        logger,
-		RunnerType:    "process",
+		RunnerType:    cfg.RunnerType,
 		HostnameOrPod: hostname,
 		Lease:         cfg.RunnerLease,
 		Heartbeat:     cfg.RunnerHeartbeat,
 		LostAfter:     cfg.RunnerLostAfter,
 		Poll:          cfg.WorkerPoll,
+		MaxTasks:      cfg.WorkerMaxTasks,
+		IdleExit:      cfg.WorkerIdleExit,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
