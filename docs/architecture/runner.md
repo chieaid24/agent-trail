@@ -129,10 +129,18 @@ without emitting a plan still advances out of planning; the plan event is
 optional. Runner statuses are `online`, `lost`, and `offline` (deliberate
 shutdown; a heartbeat revives `lost` but never `offline`).
 
-Because the runner and control plane share one process and one database,
-claiming goes straight through PostgreSQL (ADR-0003); the internal runner
-HTTP API in docs/architecture/api.md lands when runners move out of
-process (runner isolation milestone). Trusted validation runs in the
+The same worker binary also runs as a **one-shot Kubernetes Job runner**
+(ADR-0014): `RUNNER_TYPE=kubernetes` registers it as a kubernetes runner,
+`WORKER_MAX_TASKS=1` makes it claim one attempt, execute it, and exit so
+the Job completes and `ttlSecondsAfterFinished` reclaims it, and
+`WORKER_IDLE_EXIT_SECONDS` keeps an empty-queue Job from hanging. The
+hardened Job spec lives in deploy/k8s/runner/job.yaml and
+`bash scripts/verify-k8s-runner.sh` proves the isolation criteria locally
+in kind (docs/operations/local-development.md).
+
+Claiming still goes straight through PostgreSQL (ADR-0003) in both modes;
+the internal runner HTTP API in docs/architecture/api.md lands when
+runners stop reaching the database directly. Trusted validation runs in the
 workspace after editing ends (docs/architecture/validation.md, ADR-0009).
 For repository-backed tasks with the GitHub App configured, the workspace
 is a real git worktree and publishing commits, pushes, and opens the

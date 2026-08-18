@@ -160,9 +160,9 @@ agent-trail/
 |   `-- contracts/
 |-- deploy/
 |   |-- dev/
-|   |-- terraform/
-|   |-- helm/
-|   `-- kubernetes/
+|   |-- docker/
+|   |-- k8s/
+|   `-- terraform/
 |-- examples/
 |   `-- demo-repository/
 |-- scripts/
