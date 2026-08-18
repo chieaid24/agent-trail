@@ -2,23 +2,15 @@
 // (VISION.md): a signed GitHub webhook creates a task, the fake agent edits
 // an isolated git worktree, trusted validation and evidence run, and
 // publishing commits, pushes, and opens one evidence-backed draft pull
-// request. GitHub itself is simulated by a local API server and a local
-// bare repository, so the demo needs only PostgreSQL (DATABASE_URL) and
-// git; every other component - webhook verification, the task store, the
-// runner, the GitHub client - is the production code path.
+// request. GitHub itself is simulated by internal/githubfixture - a local
+// API server and a local bare repository - so the demo needs only PostgreSQL
+// (DATABASE_URL) and git; every other component - webhook verification, the
+// task store, the runner, the GitHub client - is the production code path.
 package main
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -28,9 +20,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -38,6 +28,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/github"
+	"github.com/chieaid24/agent-trail/apps/api/internal/githubfixture"
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/runner"
@@ -80,23 +71,27 @@ func run(databaseURL string) error {
 	}
 
 	step("Preparing a sample repository (local bare origin with one commit)")
-	origin, baseSHA, cleanupRepo, err := buildOrigin()
+	dir, err := os.MkdirTemp("", "agent-trail-demo-repo-")
 	if err != nil {
 		return err
 	}
-	defer cleanupRepo()
+	defer os.RemoveAll(dir)
+	origin, baseSHA, err := githubfixture.BuildOrigin(dir)
+	if err != nil {
+		return err
+	}
 	fmt.Println("   origin:", origin)
 	fmt.Println("   main at:", baseSHA)
 
 	step("Starting a simulated GitHub API")
-	gh := newFakeGitHub(origin)
-	server, err := gh.serve()
+	gh := githubfixture.NewServer(origin)
+	server, err := serve(gh)
 	if err != nil {
 		return err
 	}
 	defer server.Close()
 
-	keyPEM, err := throwawayKey()
+	keyPEM, err := githubfixture.ThrowawayKey()
 	if err != nil {
 		return err
 	}
@@ -187,14 +182,11 @@ func run(databaseURL string) error {
 	if final.WorkingBranch != nil {
 		fmt.Println("   branch pushed:", *final.WorkingBranch)
 	}
-	gh.mu.Lock()
-	prBody := gh.prBody
-	comments := len(gh.comments)
-	gh.mu.Unlock()
+	prBody := gh.PRBody()
 	if prBody == "" {
 		return errors.New("no draft pull request was created")
 	}
-	fmt.Printf("   draft PR #1 opened, %d issue comment(s) posted\n", comments)
+	fmt.Printf("   draft PR #1 opened, %d issue comment(s) posted\n", gh.CommentCount())
 
 	step("Timeline")
 	events, err := tasks.Events(ctx, created.ID, 0)
@@ -272,60 +264,17 @@ func seedRepository(ctx context.Context, s *github.Store, origin string) error {
 // deliverRunCommand posts a signed /agent-trail run issue comment to the
 // webhook handler, exactly as GitHub would.
 func deliverRunCommand(webhook http.Handler) error {
-	payload := map[string]any{
-		"action": "created",
-		"comment": map[string]any{
-			"id":   1,
-			"body": "/agent-trail run",
-			"user": map[string]any{"id": 9, "login": "demo-user", "type": "User"},
-		},
-		"issue": map[string]any{
-			"number": demoIssueNumber,
-			"title":  "Demo: record the run in the fixture file",
-			"body":   "Scripted demo issue driving the full vertical slice.",
-		},
-		"repository": map[string]any{
-			"id": demoRepositoryID,
-			"owner": map[string]any{
-				"id": demoInstallationID, "login": "acme", "type": "Organization",
-			},
-		},
-		"installation": map[string]any{"id": demoInstallationID},
-	}
-	body, err := json.Marshal(payload)
+	req, err := githubfixture.RunCommandRequest([]byte(webhookSecret),
+		demoInstallationID, demoRepositoryID, demoIssueNumber)
 	if err != nil {
 		return err
 	}
-	mac := hmac.New(sha256.New, []byte(webhookSecret))
-	mac.Write(body)
-	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Event", "issue_comment")
-	req.Header.Set("X-GitHub-Delivery", fmt.Sprintf("demo-%d", time.Now().UnixNano()))
-	req.Header.Set("X-Hub-Signature-256", sig)
 	rec := httptest.NewRecorder()
 	webhook.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
 		return fmt.Errorf("webhook rejected the delivery: %d %s", rec.Code, rec.Body.String())
 	}
 	return nil
-}
-
-// fakeGitHub simulates the handful of REST endpoints publishing calls.
-type fakeGitHub struct {
-	origin string
-
-	mu       sync.Mutex
-	prBody   string
-	prOpen   bool
-	checks   []map[string]any
-	comments []string
-}
-
-func newFakeGitHub(origin string) *fakeGitHub {
-	return &fakeGitHub{origin: origin}
 }
 
 type demoServer struct {
@@ -337,163 +286,13 @@ func (d *demoServer) Close() {
 	_ = d.server.Close()
 }
 
-func (g *fakeGitHub) serve() (*demoServer, error) {
+// serve exposes the fixture on a loopback port for the GitHub client.
+func serve(h http.Handler) (*demoServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
-	srv := &http.Server{Handler: g, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	return &demoServer{URL: "http://" + ln.Addr().String(), server: srv}, nil
-}
-
-func (g *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	path, method := r.URL.Path, r.Method
-	switch {
-	case method == http.MethodPost && strings.HasPrefix(path, "/app/installations/"):
-		writeJSON(w, map[string]any{
-			"token":      "demo-token",
-			"expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-		})
-	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/demo/branches/"):
-		sha, err := gitOut(g.origin, "rev-parse", "refs/heads/"+strings.TrimPrefix(path, "/repos/acme/demo/branches/"))
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		writeJSON(w, map[string]any{"commit": map[string]any{"sha": sha}})
-	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/demo/collaborators/"):
-		writeJSON(w, map[string]any{"permission": "admin"})
-	case method == http.MethodPost && strings.HasPrefix(path, "/repos/acme/demo/issues/"):
-		var body struct {
-			Body string `json:"body"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		g.comments = append(g.comments, body.Body)
-		writeJSON(w, map[string]any{"id": len(g.comments)})
-	case method == http.MethodGet && path == "/repos/acme/demo/pulls":
-		if g.prOpen {
-			writeJSON(w, []map[string]any{{
-				"number": 1, "state": "open", "draft": true,
-				"html_url": "https://github.example/acme/demo/pull/1",
-			}})
-			return
-		}
-		writeJSON(w, []map[string]any{})
-	case method == http.MethodPost && path == "/repos/acme/demo/pulls":
-		var body struct {
-			Body string `json:"body"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		g.prOpen = true
-		g.prBody = body.Body
-		writeJSON(w, map[string]any{
-			"number": 1, "state": "open", "draft": true,
-			"html_url": "https://github.example/acme/demo/pull/1",
-		})
-	case method == http.MethodPatch && strings.HasPrefix(path, "/repos/acme/demo/pulls/"):
-		var body struct {
-			Body string `json:"body"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Body != "" {
-			g.prBody = body.Body
-		}
-		writeJSON(w, map[string]any{})
-	case method == http.MethodGet && strings.HasSuffix(path, "/check-runs"):
-		writeJSON(w, map[string]any{"check_runs": g.checks})
-	case method == http.MethodPost && path == "/repos/acme/demo/check-runs":
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		body["id"] = len(g.checks) + 1
-		g.checks = append(g.checks, body)
-		writeJSON(w, map[string]any{"id": len(g.checks)})
-	case method == http.MethodPatch && strings.HasPrefix(path, "/repos/acme/demo/check-runs/"):
-		writeJSON(w, map[string]any{})
-	default:
-		http.NotFound(w, r)
-	}
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-// buildOrigin creates the sample repository: a bare origin with one commit.
-func buildOrigin() (origin, baseSHA string, cleanup func(), err error) {
-	dir, err := os.MkdirTemp("", "agent-trail-demo-repo-")
-	if err != nil {
-		return "", "", nil, err
-	}
-	cleanup = func() { _ = os.RemoveAll(dir) }
-	src := filepath.Join(dir, "src")
-	if err := os.MkdirAll(src, 0o750); err != nil {
-		cleanup()
-		return "", "", nil, err
-	}
-	readme := "# Demo repository\n\nThe fake agent records its run here.\n"
-	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte(readme), 0o644); err != nil {
-		cleanup()
-		return "", "", nil, err
-	}
-	steps := [][]string{
-		{"init", "-q", "-b", "main"},
-		{"add", "-A"},
-		{"commit", "-q", "-m", "initial"},
-	}
-	for _, args := range steps {
-		if _, err := gitIn(src, args...); err != nil {
-			cleanup()
-			return "", "", nil, err
-		}
-	}
-	baseSHA, err = gitIn(src, "rev-parse", "HEAD")
-	if err != nil {
-		cleanup()
-		return "", "", nil, err
-	}
-	origin = filepath.Join(dir, "origin.git")
-	if _, err := gitIn(dir, "clone", "-q", "--bare", src, "origin.git"); err != nil {
-		cleanup()
-		return "", "", nil, err
-	}
-	return origin, baseSHA, cleanup, nil
-}
-
-func gitIn(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	// Allowlist, never os.Environ(): under a git hook (the pre-commit gate)
-	// the parent exports GIT_DIR/GIT_INDEX_FILE, and inheriting them makes
-	// these commands operate on the invoking repository instead of dir.
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
-		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null", "LC_ALL=C",
-		"GIT_AUTHOR_NAME=Agent Trail Demo", "GIT_AUTHOR_EMAIL=demo@example.invalid",
-		"GIT_COMMITTER_NAME=Agent Trail Demo", "GIT_COMMITTER_EMAIL=demo@example.invalid",
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func gitOut(dir string, args ...string) (string, error) {
-	return gitIn(dir, args...)
-}
-
-// throwawayKey generates a single-run RSA key for the app JWT.
-func throwawayKey() ([]byte, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, err
-	}
-	return pem.EncodeToMemory(&pem.Block{
-		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key),
-	}), nil
 }
