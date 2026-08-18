@@ -54,6 +54,25 @@ done < <(find . -name go.mod \
   -not -path './.git/*' -not -path '*/node_modules/*' -not -path './.worktrees/*')
 [ "$found_go" = 1 ] || skip "go: format/vet/test/build" "no go.mod"
 
+# --- terraform: fmt and validate (authored, never applied) -------------------
+tf_validate_gate() {
+  (cd "$1" && terraform init -backend=false -input=false -no-color >/dev/null &&
+    terraform validate -no-color)
+}
+if command -v terraform >/dev/null 2>&1; then
+  if [ -d deploy/terraform ]; then
+    gate "terraform: fmt" terraform -chdir=deploy/terraform fmt -recursive -check
+    for envdir in deploy/terraform/envs/*/; do
+      [ -f "$envdir/main.tf" ] || continue
+      gate "terraform: validate ($envdir)" tf_validate_gate "$envdir"
+    done
+  else
+    skip "terraform: fmt/validate" "no deploy/terraform"
+  fi
+else
+  skip "terraform: fmt/validate" "terraform not installed"
+fi
+
 # --- node: format-check, lint, test, build (per app) -------------------------
 npm_script() { # npm_script <dir> <script>
   (cd "$1" && node -e "process.exit(require('./package.json').scripts?.['$2']?0:1)" 2>/dev/null)
