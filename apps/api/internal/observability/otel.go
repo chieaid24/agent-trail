@@ -21,19 +21,13 @@ import (
 // TracerName scopes every span the control plane emits.
 const TracerName = "agent-trail"
 
-// Telemetry is the wired-up observability stack of one binary: a metrics
-// Registry (serving /metrics and pushing OTLP) and a global tracer provider
-// exporting OTLP. Shutdown flushes both.
+// Telemetry owns one process's metrics and trace exporters.
 type Telemetry struct {
 	Metrics   *Registry
 	shutdowns []func(context.Context) error
 }
 
-// Setup wires metrics and tracing for a binary. endpoint is the OTLP/gRPC
-// collector address (host:port, plaintext); empty or "off" disables export,
-// leaving /metrics and no-op tracing so the binary runs without a collector.
-// Export failures are logged, never fatal: telemetry loss must not take the
-// control plane down with it.
+// Setup wires Prometheus plus optional plaintext OTLP/gRPC export.
 func Setup(service, endpoint string, logger *slog.Logger) (*Telemetry, error) {
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
 		logger.LogAttrs(context.Background(), slog.LevelWarn, "telemetry export error",
@@ -104,16 +98,13 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 // Tracer returns the control-plane tracer; a no-op unless Setup ran.
 func Tracer() trace.Tracer { return otel.Tracer(TracerName) }
 
-// WithTraceParent binds ctx to the 32-hex correlation id already used in
-// logs, so spans started under it share the log line's trace_id. An id that
-// does not parse leaves ctx unchanged (spans then mint their own trace).
+// WithTraceParent binds ctx to an existing 32-hex correlation ID.
 func WithTraceParent(ctx context.Context, traceID string) context.Context {
 	tid, err := trace.TraceIDFromHex(traceID)
 	if err != nil {
 		return ctx
 	}
-	// A deterministic parent span id derived from the trace id; only the
-	// trace id carries meaning, but the parent must be non-zero to be valid.
+	// A valid remote parent also needs a non-zero span ID.
 	var sid trace.SpanID
 	binary.BigEndian.PutUint64(sid[:], binary.BigEndian.Uint64(tid[8:])|1)
 	return trace.ContextWithSpanContext(ctx, trace.NewSpanContext(trace.SpanContextConfig{

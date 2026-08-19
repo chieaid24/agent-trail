@@ -7,16 +7,7 @@ import (
 	"time"
 )
 
-// RegisterRunnerResources registers the runner resource gauges from
-// docs/operations/observability.md, sampled at each collection:
-//
-//	agent_trail_runner_cpu_usage    fraction of one core this process used
-//	agent_trail_runner_memory_usage resident set size in bytes
-//	agent_trail_runner_disk_usage   used fraction of the workspace filesystem
-//
-// workspaceRoot locates the filesystem measured for disk usage; when it does
-// not exist the temp dir stands in. On platforms without the /proc samplers
-// the gauges are skipped and a log line says so.
+// RegisterRunnerResources samples process CPU, RSS, and workspace disk usage.
 func RegisterRunnerResources(reg *Registry, workspaceRoot string, logger *slog.Logger) {
 	if !resourceSamplingSupported {
 		logger.Warn("runner resource gauges unsupported on this platform",
@@ -28,8 +19,7 @@ func RegisterRunnerResources(reg *Registry, workspaceRoot string, logger *slog.L
 		diskPath = os.TempDir()
 	}
 
-	// CPU usage is the delta of process CPU time over the delta of wall
-	// time between collections; the first collection reports zero.
+	// The first CPU sample establishes the baseline and reports zero.
 	var mu sync.Mutex
 	lastWall := time.Now()
 	lastCPU, _ := processCPUSeconds()

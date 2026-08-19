@@ -17,6 +17,7 @@ func clearEnv(t *testing.T) {
 		"WORKSPACE_ROOT",
 		"AGENT_PROVIDER", "AGENT_CLI_PATH", "AGENT_MODEL",
 		"AGENT_PERMISSION_MODE", "AGENT_CLI_VERSION", "AGENT_TIMEOUT_SECONDS",
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
 		"GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET",
 		"GITHUB_OAUTH_BASE_URL", "GITHUB_APP_SLUG",
 		"AUTH_PUBLIC_ORIGIN", "AUTH_COOKIE_SECURE",
@@ -58,6 +59,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.AgentTimeout != 2700*time.Second {
 		t.Errorf("AgentTimeout = %v, want 2700s", cfg.AgentTimeout)
+	}
+	if cfg.OTLPEndpoint != "localhost:4317" {
+		t.Errorf("OTLPEndpoint = %q, want localhost:4317", cfg.OTLPEndpoint)
 	}
 }
 

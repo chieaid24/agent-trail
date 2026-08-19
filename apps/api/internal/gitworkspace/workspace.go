@@ -112,8 +112,10 @@ func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, bra
 		_, _ = m.git.run(ctx, mirror, "branch", "-D", branch)
 	}
 	if _, err := m.git.run(ctx, mirror, "worktree", "prune"); err != nil {
+		m.cleanups.Inc(observability.Label{Key: "outcome", Value: "failed"})
 		return fmt.Errorf("gitworkspace: prune worktrees: %w", err)
 	}
+	m.cleanups.Inc(observability.Label{Key: "outcome", Value: "removed"})
 	return nil
 }
 

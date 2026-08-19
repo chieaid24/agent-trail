@@ -22,6 +22,10 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // gitRun runs git for test fixtures with a fixed identity.
@@ -385,6 +389,60 @@ func TestPublishOpensOneDraftPR(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("workspaces not cleaned: %v", entries)
+	}
+}
+
+func TestPublishEmitsRequiredSpans(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	f := newPublishFixture(t)
+	if err := f.exec.Execute(context.Background(), f.runner.ID, f.claim(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]bool{}
+	for _, span := range exporter.GetSpans() {
+		got[span.Name] = true
+	}
+	for _, name := range []string{
+		"runner.attempt", "runner.provisioning", "github.token_exchange",
+		"git.fetch", "agent.session", "validation.run", "git.push",
+		"github.pr_create",
+	} {
+		if !got[name] {
+			t.Errorf("missing span %q; got %v", name, got)
+		}
+	}
+}
+
+func TestEndSpanRecordsErrors(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	_, span := startSpan(t.Context(), "failed.operation", &Claim{
+		TaskID: "task-1", AttemptID: "attempt-1",
+	})
+	endSpan(span, errors.New("failed"))
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 || spans[0].Status.Code.String() != "Error" {
+		t.Fatalf("span status = %+v", spans)
+	}
+	if spans[0].SpanKind != trace.SpanKindInternal {
+		t.Fatalf("span kind = %s", spans[0].SpanKind)
 	}
 }
 

@@ -94,8 +94,7 @@ func (p *Processor) Dispatch(d Delivery, payload []byte) {
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), processTimeout)
 		defer cancel()
-		// The span shares the delivery's correlation id, so log lines and
-		// the webhook-to-task-creation trace join on one trace_id.
+		// Reuse the delivery correlation ID for logs and traces.
 		pctx := observability.WithTraceParent(
 			observability.WithTraceID(ctx, d.TraceID), d.TraceID)
 		pctx, span := observability.Tracer().Start(pctx, "webhook.process",
@@ -103,8 +102,8 @@ func (p *Processor) Dispatch(d Delivery, payload []byte) {
 				attribute.String("github.delivery_id", d.ID),
 				attribute.String("github.event", d.EventType),
 			))
+		defer span.End()
 		p.process(pctx, d, payload)
-		span.End()
 	}()
 }
 

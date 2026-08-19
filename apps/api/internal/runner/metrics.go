@@ -1,6 +1,4 @@
-// Runner metric emission per docs/operations/observability.md. Every method
-// is nil-receiver safe: hosts and executors built without metrics (tests)
-// skip emission instead of guarding at each call site.
+// Package runner emits the metrics specified in docs/operations/observability.md.
 package runner
 
 import (
@@ -23,6 +21,7 @@ type Metrics struct {
 	commandExit        *observability.Counter
 	validationDuration *observability.Histogram
 	logBytes           *observability.Counter
+	workspaceCleanup   *observability.Counter
 }
 
 // NewMetrics registers the runner instruments on reg.
@@ -52,6 +51,8 @@ func NewMetrics(reg *observability.Registry) *Metrics {
 			1, 5, 15, 30, 60, 120, 300, 600, 1200),
 		logBytes: reg.Counter("agent_trail_log_bytes_total",
 			"Agent event payload bytes streamed into the timeline."),
+		workspaceCleanup: reg.Counter("agent_trail_workspace_cleanup_total",
+			"Workspace cleanup attempts, labelled by outcome."),
 	}
 }
 
@@ -76,11 +77,7 @@ func (m *Metrics) observeQueueWait(d time.Duration) {
 	m.queueWait.Observe(d.Seconds())
 }
 
-// observeTransition counts every runner-driven transition and closes the
-// task duration histogram at the resting states: awaiting_review is where
-// agent work ends (published tasks rest there for a human; fake-flow tasks
-// pass through on their way to auto-complete), failed is terminal. completed
-// is not observed again to keep one duration sample per task.
+// observeTransition records duration once at awaiting_review or failed.
 func (m *Metrics) observeTransition(to task.Status, createdAt time.Time) {
 	if m == nil {
 		return
@@ -129,4 +126,11 @@ func (m *Metrics) observeLogBytes(n int) {
 		return
 	}
 	m.logBytes.Add(int64(n))
+}
+
+func (m *Metrics) observeCleanup(outcome string) {
+	if m == nil {
+		return
+	}
+	m.workspaceCleanup.Inc(observability.Label{Key: "outcome", Value: outcome})
 }

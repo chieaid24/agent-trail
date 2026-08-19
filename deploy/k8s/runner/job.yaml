@@ -4,7 +4,7 @@
 # reclaims the Job and its pod. envsubst variables: JOB_NAME,
 # TASK_ATTEMPT_ID (label only in the pull model), RUNNER_IMAGE,
 # TTL_SECONDS, ACTIVE_DEADLINE_SECONDS, GITHUB_API_BASE_URL,
-# WORKER_IDLE_EXIT_SECONDS, AGENT_PROVIDER.
+# WORKER_IDLE_EXIT_SECONDS, AGENT_PROVIDER, OTEL_EXPORTER_OTLP_ENDPOINT.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -53,6 +53,8 @@ spec:
               value: /workspace
             - name: AGENT_PROVIDER
               value: ${AGENT_PROVIDER}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: ${OTEL_EXPORTER_OTLP_ENDPOINT}
             - name: GITHUB_API_BASE_URL
               value: ${GITHUB_API_BASE_URL}
             - name: GITHUB_APP_ID

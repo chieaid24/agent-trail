@@ -16,12 +16,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
-// Registry is the metrics facade for the control plane, backed by the
-// OpenTelemetry SDK. Metric names follow docs/operations/observability.md
-// exactly: instruments carry no OTel unit and the Prometheus exporter adds
-// no suffixes, so the exposition names equal the instrument names. Every
-// Registry serves /metrics via Handler(); Setup (otel.go) additionally
-// attaches an OTLP push reader.
+// Registry exposes OTel metrics through Prometheus and optional OTLP readers.
 type Registry struct {
 	meter    metric.Meter
 	provider *sdkmetric.MeterProvider
@@ -48,13 +43,11 @@ func attrs(labels []Label) metric.MeasurementOption {
 	return metric.WithAttributes(kvs...)
 }
 
-// NewRegistry returns a standalone registry: /metrics only, no OTLP export.
-// Binaries wire export through Setup; tests and tools use this directly.
+// NewRegistry returns a Prometheus-only registry.
 func NewRegistry() *Registry {
 	r, err := newRegistry(nil, nil)
 	if err != nil {
-		// Construction only fails on exporter misconfiguration, which is
-		// impossible with the fixed options below; degrade loudly.
+		// Fixed exporter options make this a programmer error.
 		panic(err)
 	}
 	return r
@@ -140,8 +133,7 @@ type Histogram struct {
 	h metric.Float64Histogram
 }
 
-// Histogram returns the named histogram, creating it on first use with the
-// given bucket boundaries (the unit is part of the name, per the doc).
+// Histogram returns the named histogram with explicit bucket boundaries.
 func (r *Registry) Histogram(name, help string, boundaries ...float64) *Histogram {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -197,8 +189,7 @@ func (u *UpDownCounter) Add(delta int64, labels ...Label) {
 	u.c.Add(context.Background(), delta, attrs(labels))
 }
 
-// Gauge registers an observable gauge sampled by observe at collection time.
-// Registering the same name twice keeps the first registration.
+// Gauge registers a callback sampled at collection time.
 func (r *Registry) Gauge(name, help string, observe func() float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

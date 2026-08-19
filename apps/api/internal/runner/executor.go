@@ -239,8 +239,10 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	}
 	var ws gitworkspace.Workspace
 	var workspace string
+	provisionCtx, provisionSpan := startSpan(ctx, "runner.provisioning", c)
 	if pub != nil {
-		created, err := e.provisionWorkspace(ctx, c, t, pub)
+		created, err := e.provisionWorkspace(provisionCtx, c, t, pub)
+		endSpan(provisionSpan, err)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
@@ -251,6 +253,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		workspace = ws.Path
 	} else {
 		dir, err := os.MkdirTemp("", "agent-trail-attempt-")
+		endSpan(provisionSpan, err)
 		if err != nil {
 			return "", e.failTask(ctx, c, "workspace_failed", err.Error())
 		}
@@ -272,12 +275,16 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 				)
 				return
 			}
-		} else if err := os.RemoveAll(workspace); err != nil {
-			log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
-				slog.String("event", "runner_workspace_cleanup_failed"),
-				slog.String("error", err.Error()),
-			)
-			return
+		} else {
+			if err := os.RemoveAll(workspace); err != nil {
+				e.Metrics.observeCleanup("failed")
+				log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
+					slog.String("event", "runner_workspace_cleanup_failed"),
+					slog.String("error", err.Error()),
+				)
+				return
+			}
+			e.Metrics.observeCleanup("removed")
 		}
 		// Best effort; a failed append must not fail a finished attempt.
 		_ = e.Tasks.AppendAttemptEvent(cleanupCtx, c.AttemptID,

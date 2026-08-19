@@ -92,10 +92,7 @@ type Config struct {
 	// AgentTimeout is the hard per-attempt agent runtime cap
 	// (AGENT_TIMEOUT_SECONDS).
 	AgentTimeout time.Duration
-	// OTLPEndpoint is the OTLP/gRPC collector address for metric and trace
-	// export (OTEL_EXPORTER_OTLP_ENDPOINT, host:port, plaintext). Defaults
-	// to the compose dev collector; "off" disables export while keeping
-	// /metrics (docs/operations/observability.md).
+	// OTLPEndpoint is the plaintext OTLP/gRPC target; "off" disables export.
 	OTLPEndpoint string
 }
 
