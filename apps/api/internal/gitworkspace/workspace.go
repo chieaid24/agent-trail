@@ -92,8 +92,8 @@ func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace
 
 // CleanupStale clears whatever a dead owner left for this attempt: the
 // worktree directory, the working branch, and stale administrative entries.
-// Every step is best-effort except the final prune; a fresh CreateWorktree
-// for the same attempt must succeed afterwards.
+// Git steps are best-effort; directory removal and the final prune report
+// failure so a fresh CreateWorktree for the same attempt can succeed.
 func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, branch string) error {
 	if !validComponent(repo.ID) {
 		return fmt.Errorf("gitworkspace: repository id %q is not a safe path component", repo.ID)
