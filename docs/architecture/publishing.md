@@ -12,7 +12,8 @@
 8. Create or update one draft pull request.
 9. Create or update one GitHub Check.
 10. Post an issue comment.
-11. Mark the attempt `AWAITING_REVIEW`.
+11. Remove the worktree.
+12. Mark the attempt `AWAITING_REVIEW`.
 
 Idempotency keys:
 
@@ -62,7 +63,9 @@ The issue comment is at-least-once: an owner that dies between the
 comment and the final transition leaves a duplicate comment on retry,
 matching the timeline's at-least-once delivery. `AWAITING_REVIEW` is the
 resting state - runners do not claim a published task there, and the
-human review gate on the draft PR closes the loop.
+human review gate on the draft PR closes the loop. The worktree is removed
+before that transition. A cleanup failure leaves the task in `PUBLISHING`, so
+a recovered owner can retry cleanup before closing the runner lifecycle.
 
 
 ## Revision Workflow

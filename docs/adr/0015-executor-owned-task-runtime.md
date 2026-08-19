@@ -51,12 +51,15 @@ fence fails, the stale owner performs neither operation.
   `task_runtime_exceeded`.
 - Cancellation is detected on the next successful task-state poll, scheduled
   every 100ms, then waits for adapter shutdown.
-- Terminal timeout and cancellation remove workspaces and release leases;
-  cleanup failures remain observable executor errors.
+- Terminal timeout and cancellation remove workspaces and release leases after
+  a successful final ownership fence; cleanup failures remain observable
+  executor errors.
 - Until provider termination is proven, the executor keeps extending the lease
   and preserves the workspace so another owner cannot overlap the session.
 - Terminal writes and repository cleanup require a final lease fence whose
-  database work is bounded to less than the renewed lease.
+  database work is bounded to less than the renewed lease. Transient fence
+  failures retry within that window; publishing remains recoverable until its
+  worktree has been removed.
 - Every executing attempt adds one small task-state query per polling interval.
 
 ## Security implications
@@ -64,9 +67,11 @@ fence fails, the stale owner performs neither operation.
 The executor requests provider shutdown and proves termination before it
 releases the workspace and lease. The Claude Code adapter kills the full
 process group so child tool processes do not survive the session. If shutdown
-exceeds five seconds, the executor keeps the lease alive and waits; after the
-provider eventually stops, it cleans up and returns `ErrSessionStopFailed` to
-record that the shutdown contract was breached.
+exceeds five seconds, the executor keeps renewing the lease while ownership
+remains and waits. After the provider eventually stops, the current owner
+cleans up and returns `ErrSessionStopFailed` to record that the shutdown
+contract was breached. A stale owner preserves repository state for the
+current owner or operator recovery.
 
 ## Revisit conditions
 

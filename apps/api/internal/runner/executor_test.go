@@ -721,6 +721,33 @@ func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {
 	assertWorkspaceRemoved(t, <-adapter.started)
 }
 
+func TestFinalLeaseFenceRetriesTransientFailure(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	_ = mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	exec := testExecutor(db, s, ts)
+	exec.LeaseDuration = 900 * time.Millisecond
+	var calls atomic.Int32
+	exec.fenceLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		if calls.Add(1) == 1 {
+			return errors.New("temporary final fence failure")
+		}
+		return s.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
+	leaseCtx := context.WithValue(ctx, attemptLeaseStateKey{}, &attemptLeaseState{runnerID: r.ID})
+	if err := exec.fenceLeaseOwnership(leaseCtx, c); err != nil {
+		t.Fatalf("fenceLeaseOwnership = %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("final fence calls = %d, want 2", got)
+	}
+}
+
 func TestExecuteLeaseLossDuringDeadlineSkipsTimeoutSettlement(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -745,8 +772,18 @@ func TestExecuteLeaseLossDuringDeadlineSkipsTimeoutSettlement(t *testing.T) {
 		return s.ExtendLease(context.Background(), attemptID, runnerID, lease)
 	}
 	done := make(chan error, 1)
-	go func() { done <- exec.Execute(ctx, r.ID, c) }()
-	t.Cleanup(func() { allowOnce.Do(func() { close(allowExtension) }) })
+	finished := make(chan struct{})
+	go func() {
+		done <- exec.Execute(ctx, r.ID, c)
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		allowOnce.Do(func() { close(allowExtension) })
+		select {
+		case <-finished:
+		case <-time.After(3 * time.Second):
+		}
+	})
 
 	select {
 	case <-extensionStarted:

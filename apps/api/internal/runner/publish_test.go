@@ -390,7 +390,7 @@ func TestPublishOpensOneDraftPR(t *testing.T) {
 	assertSubsequence(t, timelineTypes(t, f.tasks, f.task.ID), []string{
 		"task.publishing", "commit.created", "branch.pushed",
 		"pull_request.created", "github.check_run.created",
-		"github.comment.posted", "task.awaiting_review", "cleanup.completed",
+		"github.comment.posted", "cleanup.completed", "task.awaiting_review",
 	})
 	for _, ev := range timelineTypes(t, f.tasks, f.task.ID) {
 		if ev == "task.completed" {
@@ -625,6 +625,51 @@ func TestPublishRetryCreatesNoSecondPR(t *testing.T) {
 	pushed := gitRun(t, f.origin, "rev-parse", "refs/heads/"+*after.WorkingBranch)
 	if pushed != secondFinal.String {
 		t.Fatalf("origin branch at %s, want %s", pushed, secondFinal.String)
+	}
+}
+
+func TestPublishCleanupFailureRemainsRecoverable(t *testing.T) {
+	f := newPublishFixture(t)
+	f.exec.LeaseDuration = 300 * time.Millisecond
+	f.exec.fenceLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		current, err := f.tasks.Get(ctx, f.task.ID)
+		if err != nil {
+			return err
+		}
+		if current.Status == task.StatusPublishing {
+			return errors.New("temporary final fence failure")
+		}
+		return f.store.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
+	c := f.claim(t)
+	if err := f.exec.Execute(context.Background(), f.runner.ID, c); err == nil {
+		t.Fatal("publish cleanup failure reported success")
+	}
+	mid, err := f.tasks.Get(context.Background(), f.task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mid.Status != task.StatusPublishing {
+		t.Fatalf("task status = %s, want recoverable publishing", mid.Status)
+	}
+	if !f.exec.Workspaces.WorkspaceExists(c.AttemptID) {
+		t.Fatal("failed cleanup did not preserve worktree")
+	}
+
+	f.exec.fenceLeaseHook = nil
+	c2 := f.claim(t)
+	if err := f.exec.Execute(context.Background(), f.runner.ID, c2); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.tasks.Get(context.Background(), f.task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != task.StatusAwaitingReview {
+		t.Fatalf("task status = %s, want awaiting_review", after.Status)
+	}
+	if f.exec.Workspaces.WorkspaceExists(c.AttemptID) {
+		t.Fatal("recovered publish left worktree")
 	}
 }
 

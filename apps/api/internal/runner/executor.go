@@ -68,6 +68,7 @@ type Executor struct {
 	// SessionStopTimeout marks adapter shutdowns that exceed the safe window.
 	SessionStopTimeout  time.Duration
 	extendLeaseHook     func(context.Context, string, string, time.Duration) error
+	fenceLeaseHook      func(context.Context, string, string, time.Duration) error
 	leaseLostHook       func()
 	runtimeDeadlineHook func(context.Context, *Claim) (time.Duration, time.Time, error)
 }
@@ -270,13 +271,34 @@ func (e *Executor) fenceLeaseOwnership(ctx context.Context, c *Claim) error {
 	}
 	fenceCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.leaseOperationTimeout())
 	defer cancel()
-	if err := e.Store.ExtendLease(fenceCtx, c.AttemptID, state.runnerID, e.LeaseDuration); err != nil {
+	retryDelay := e.LeaseDuration / 9
+	if retryDelay <= 0 || retryDelay > 100*time.Millisecond {
+		retryDelay = 100 * time.Millisecond
+	}
+	for {
+		err := e.fenceLease(fenceCtx, c.AttemptID, state.runnerID)
+		if err == nil {
+			return nil
+		}
 		if errors.Is(err, ErrLeaseLost) {
 			e.markLeaseLost(state)
+			return err
 		}
-		return err
+		retry := time.NewTimer(retryDelay)
+		select {
+		case <-fenceCtx.Done():
+			retry.Stop()
+			return errors.Join(err, fenceCtx.Err())
+		case <-retry.C:
+		}
 	}
-	return nil
+}
+
+func (e *Executor) fenceLease(ctx context.Context, attemptID, runnerID string) error {
+	if e.fenceLeaseHook != nil {
+		return e.fenceLeaseHook(ctx, attemptID, runnerID, e.LeaseDuration)
+	}
+	return e.Store.ExtendLease(ctx, attemptID, runnerID, e.LeaseDuration)
 }
 
 func (e *Executor) cleanupTerminalRecovery(ctx context.Context, log *slog.Logger, c *Claim, retErr error) error {
@@ -518,6 +540,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	}
 	var ws gitworkspace.Workspace
 	var workspace string
+	workspaceCleaned := false
 	provisionCtx, provisionSpan := startSpan(ctx, "runner.provisioning", c)
 	if pub != nil {
 		created, err := e.provisionWorkspace(provisionCtx, c, t, pub)
@@ -542,7 +565,9 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
 		defer cleanupCancel()
 		if pub != nil {
-			retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
+			if !workspaceCleaned {
+				retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
+			}
 			return
 		} else if err := os.RemoveAll(workspace); err != nil {
 			e.Metrics.observeCleanup("failed")
@@ -672,7 +697,14 @@ sessionEnded:
 	if pub == nil {
 		return next, nil
 	}
-	return e.publishFromWorkspace(ctx, log, c, t, pub, ws, result.Summary)
+	if _, err := e.publishFromWorkspace(ctx, log, c, t, pub, ws, result.Summary); err != nil {
+		return "", err
+	}
+	if err := e.cleanupGitWorkspace(ctx, log, c, ws, nil); err != nil {
+		return "", err
+	}
+	workspaceCleaned = true
+	return e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
 }
 
 func (e *Executor) cleanupGitWorkspace(ctx context.Context, log *slog.Logger, c *Claim, ws gitworkspace.Workspace, retErr error) error {
