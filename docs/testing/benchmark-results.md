@@ -19,8 +19,8 @@ below names its recorded run; nothing is estimated or extrapolated.
 
 The Agent hang row was rerun after runtime enforcement changed:
 
-- Date: 2026-08-19 (UTC), run log `bench-20260819T213525Z.log`
-- Commit: `58dde4e`
+- Date: 2026-08-19 (UTC), run log `bench-20260819T214609Z.log`
+- Commit: `fb25ae9`
 - Scope: `BENCH_RUN=TestInjectAgentHang`
 - Stack and host: same environment as the full recorded run above
 
@@ -129,7 +129,7 @@ destruction.
 | Network interruption | GitHub stub drops every connection mid-request | Webhook still acked in 5.5ms (processing is async); delivery settled `failed` with the error recorded; no task created; next delivery after recovery processed normally |
 | GitHub rate limit | Stub answers 429 to every call | Delivery settled `failed` with the 429 recorded; no task; recovered on the next delivery. The client has no retry/backoff by design (ADR-0006), so one 429 fails that delivery's processing |
 | S3 timeout | Not applicable | No object-storage code path exists; logs, evidence, and validation results live in Postgres. Skip is recorded in the suite; add the injection when log offload lands |
-| Agent hang | Session emits one event, then nothing, until cancelled | A 1s task limit ended `timed_out` with `task_runtime_exceeded`; API cancellation stopped a second hung session and released its lease in 113ms; both workspaces were removed and no lease remained (supplemental run above) |
+| Agent hang | Session emits one event, then nothing, until cancelled | A 1s task limit ended `timed_out` with `task_runtime_exceeded`; API cancellation stopped a second hung session and released its lease in 130ms; both workspaces were removed and no lease remained (supplemental run above) |
 | Full disk | 1 MiB tmpfs filled to ENOSPC as TMPDIR | Skipped in the recorded run: the mount needs passwordless sudo, which this host does not grant. The harness (`TestInjectFullDisk`) asserts a terminal `failed` task with the ENOSPC recorded when `BENCH_FULL_DISK_DIR` is provided |
 
 ## Defect found and fixed by this suite
