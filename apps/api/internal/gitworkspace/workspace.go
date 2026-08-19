@@ -2,6 +2,7 @@ package gitworkspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -108,15 +109,34 @@ func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, bra
 	defer lock.Unlock()
 
 	_, _ = m.git.run(ctx, mirror, "worktree", "remove", "--force", path)
+	removeErr := os.RemoveAll(path)
 	if validBranch(branch) {
 		_, _ = m.git.run(ctx, mirror, "branch", "-D", branch)
 	}
-	if _, err := m.git.run(ctx, mirror, "worktree", "prune"); err != nil {
+	_, pruneErr := m.git.run(ctx, mirror, "worktree", "prune")
+	if removeErr != nil || pruneErr != nil {
 		m.cleanups.Inc(observability.Label{Key: "outcome", Value: "failed"})
-		return fmt.Errorf("gitworkspace: prune worktrees: %w", err)
+		var err error
+		if removeErr != nil {
+			err = fmt.Errorf("gitworkspace: remove stale workspace: %w", removeErr)
+		}
+		if pruneErr != nil {
+			err = errors.Join(err, fmt.Errorf("gitworkspace: prune worktrees: %w", pruneErr))
+		}
+		return err
 	}
 	m.cleanups.Inc(observability.Label{Key: "outcome", Value: "removed"})
 	return nil
+}
+
+// WorkspaceExists reports whether an attempt left any on-disk workspace,
+// including a partial directory that is not a registered git worktree.
+func (m *Manager) WorkspaceExists(attemptID string) bool {
+	if !validComponent(attemptID) {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(m.workDir, attemptID))
+	return err == nil
 }
 
 // Lookup rebuilds the workspace for an attempt whose worktree still exists

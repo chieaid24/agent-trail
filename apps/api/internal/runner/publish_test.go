@@ -85,6 +85,7 @@ type fakePublish struct {
 	createErr   error
 	commentSeen chan struct{}
 	commentDone chan struct{}
+	tokenErr    error
 	// cancelOnComment, when set, makes the next CreateIssueComment cancel
 	// the run and fail once: the "owner died mid-publish" simulation.
 	cancelOnComment context.CancelFunc
@@ -99,6 +100,9 @@ func newFakePublish() *fakePublish {
 }
 
 func (f *fakePublish) InstallationToken(context.Context, int64) (string, error) {
+	if f.tokenErr != nil {
+		return "", f.tokenErr
+	}
 	return "test-token", nil
 }
 
@@ -668,7 +672,11 @@ func TestValidatingRecoveryTimeoutRemovesWorktree(t *testing.T) {
 	if err != nil || pub == nil {
 		t.Fatalf("publish target = %+v, %v", pub, err)
 	}
-	if _, err := f.exec.provisionWorkspace(ctx, c, f.task, pub); err != nil {
+	ws, err := f.exec.provisionWorkspace(ctx, c, f.task, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(ws.Path, ".git")); err != nil {
 		t.Fatal(err)
 	}
 	for _, to := range []task.Status{
@@ -692,6 +700,7 @@ func TestValidatingRecoveryTimeoutRemovesWorktree(t *testing.T) {
 	}
 
 	c2 := f.claim(t)
+	f.fake.tokenErr = errors.New("token service unavailable")
 	if err := f.exec.Execute(ctx, f.runner.ID, c2); !errors.Is(err, ErrAttemptFailed) {
 		t.Fatalf("recovered Execute = %v, want ErrAttemptFailed", err)
 	}

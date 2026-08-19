@@ -348,6 +348,65 @@ type hangingSession struct {
 	stopOnce  sync.Once
 }
 
+type resistantAdapter struct {
+	started   chan string
+	forceStop chan struct{}
+	finished  chan struct{}
+}
+
+func newResistantAdapter() *resistantAdapter {
+	return &resistantAdapter{
+		started:   make(chan string, 1),
+		forceStop: make(chan struct{}),
+		finished:  make(chan struct{}),
+	}
+}
+
+func (a *resistantAdapter) Name() string { return "resistant" }
+
+func (a *resistantAdapter) ValidateConfiguration(context.Context) error { return nil }
+
+func (a *resistantAdapter) Start(_ context.Context, req agent.Request) (agent.Session, error) {
+	a.started <- req.WorkspaceDir
+	s := &resistantSession{
+		events:    make(chan agent.Event),
+		forceStop: a.forceStop,
+		finished:  a.finished,
+	}
+	go s.run()
+	return s, nil
+}
+
+type resistantSession struct {
+	events    chan agent.Event
+	forceStop chan struct{}
+	finished  chan struct{}
+}
+
+func (s *resistantSession) Events() <-chan agent.Event { return s.events }
+
+func (s *resistantSession) Send(context.Context, string) error {
+	return errors.New("resistant session takes no input")
+}
+
+func (s *resistantSession) Cancel(context.Context) error { return nil }
+
+func (s *resistantSession) Wait(ctx context.Context) (agent.Result, error) {
+	select {
+	case <-ctx.Done():
+		return agent.Result{}, ctx.Err()
+	case <-s.finished:
+		return agent.Result{}, errors.New("resistant session force-stopped")
+	}
+}
+
+func (s *resistantSession) run() {
+	defer close(s.finished)
+	defer close(s.events)
+	s.events <- agent.Event{Type: agent.EventSessionStarted}
+	<-s.forceStop
+}
+
 func (s *hangingSession) Events() <-chan agent.Event { return s.events }
 
 func (s *hangingSession) Send(context.Context, string) error {
@@ -615,6 +674,57 @@ func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {
 	}
 	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
 	assertWorkspaceRemoved(t, <-adapter.started)
+}
+
+func TestExecutePreservesResourcesWhenSessionDoesNotStop(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	tk := mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newResistantAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.DefaultRuntime = time.Second
+	exec.SessionStopTimeout = 100 * time.Millisecond
+	done := make(chan error, 1)
+	go func() { done <- exec.Execute(ctx, r.ID, c) }()
+	workspace := <-adapter.started
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrSessionStopFailed) || !errors.Is(err, ErrAttemptFailed) {
+			t.Fatalf("Execute = %v, want ErrSessionStopFailed and ErrAttemptFailed", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("executor did not report the failed session stop")
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("workspace was removed before provider termination: %v", err)
+	}
+	var leaseOwner *string
+	if err := db.QueryRowContext(ctx, `
+		SELECT lease_owner FROM task_attempts WHERE id = $1`, c.AttemptID).
+		Scan(&leaseOwner); err != nil {
+		t.Fatal(err)
+	}
+	if leaseOwner == nil || *leaseOwner != r.ID {
+		t.Fatalf("lease_owner = %v, want %s", leaseOwner, r.ID)
+	}
+
+	close(adapter.forceStop)
+	select {
+	case <-adapter.finished:
+	case <-time.After(time.Second):
+		t.Fatal("resistant session did not finish after forced stop")
+	}
 }
 
 func TestExecuteRecoveryKeepsOriginalRuntimeDeadline(t *testing.T) {
