@@ -123,6 +123,27 @@ heartbeat_at      -- last lease extension, for diagnostics
 
 `runner_id` records which runner ran the attempt and survives release.
 
+## Runtime limits and cancellation
+
+The executor owns the attempt deadline, independent of the selected agent
+adapter. `tasks.max_runtime_seconds` is authoritative when present;
+`AGENT_TIMEOUT_SECONDS` supplies the 2700-second default when it is absent.
+Recovery preserves the original attempt deadline by computing it from the
+stored `task_attempts.started_at` value rather than granting a fresh runtime.
+
+When the deadline expires, the executor cancels the session and its context,
+removes the workspace, transitions the task and attempt to `timed_out` with
+failure code `task_runtime_exceeded`, and releases the lease. The adapter's
+`Session.Cancel` contract is what lets provider-specific implementations stop
+their own processes; the Claude Code adapter kills the CLI process group.
+
+The task store records API cancellation immediately. While an attempt runs,
+the executor checks that terminal state every 100ms. Observing cancellation
+cancels the live session and execution context; because the task is already
+terminal, cleanup removes the workspace and lease without another state
+transition. Shutdown and lease loss remain recoverable interruptions: their
+non-terminal workspaces are retained for the next owner.
+
 ## Status
 
 The runner currently lives inside `cmd/worker` as a `process` runner: it
