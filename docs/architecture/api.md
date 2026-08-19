@@ -196,9 +196,10 @@ Implemented.
 GET /metrics
 ```
 
-Prometheus text exposition of the counters listed in
-docs/operations/observability.md. No authentication; deploy behind the
-internal network boundary.
+Prometheus text exposition of the metrics registered by the API process. Worker
+histograms and gauges reach Prometheus through OTLP instead; see
+docs/operations/observability.md. No authentication; deploy behind the internal
+network boundary.
 
 ### Runner internal API
 

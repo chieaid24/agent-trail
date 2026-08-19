@@ -92,6 +92,8 @@ type Config struct {
 	// AgentTimeout is the hard per-attempt agent runtime cap
 	// (AGENT_TIMEOUT_SECONDS).
 	AgentTimeout time.Duration
+	// OTLPEndpoint is the plaintext OTLP/gRPC target; "off" disables export.
+	OTLPEndpoint string
 }
 
 // GitHubEnabled reports whether the GitHub App integration is configured.
@@ -121,6 +123,7 @@ func Load() (Config, error) {
 		AgentModel:              os.Getenv("AGENT_MODEL"),
 		AgentPermissionMode:     envOr("AGENT_PERMISSION_MODE", "acceptEdits"),
 		AgentCLIVersion:         os.Getenv("AGENT_CLI_VERSION"),
+		OTLPEndpoint:            envOr("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
 	}
 
 	if err := validateAddr(cfg.APIAddr); err != nil {

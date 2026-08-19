@@ -74,6 +74,7 @@ type Manager struct {
 	git      runner
 	logger   *slog.Logger
 	cleanups *observability.Counter
+	denials  *observability.Counter
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex // per-repository fetch/worktree lock
@@ -93,7 +94,9 @@ func New(root string, logger *slog.Logger, metrics *observability.Registry) (*Ma
 		workDir:  filepath.Join(root, "workspaces"),
 		logger:   logger,
 		cleanups: metrics.Counter("agent_trail_workspace_cleanup_total",
-			"Workspaces cleaned up."),
+			"Workspace cleanups, labelled by outcome (removed or failed)."),
+		denials: metrics.Counter("agent_trail_policy_denials_total",
+			"Push policy violations refused in code, labelled by policy."),
 		locks: map[string]*sync.Mutex{},
 	}
 	for _, d := range []string{m.reposDir, m.workDir} {

@@ -1,4 +1,5 @@
-# Dev Prometheus: scrape itself and the OTel collector's exported metrics.
+# Dev Prometheus: scrape itself, the OTel collector's exported app metrics,
+# and the infra exporters backing the database/object-storage alerts.
 global:
   scrape_interval: 15s
 
@@ -9,3 +10,10 @@ scrape_configs:
   - job_name: otel-collector
     static_configs:
       - targets: ["otel-collector:8889"]
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ["minio:9000"]

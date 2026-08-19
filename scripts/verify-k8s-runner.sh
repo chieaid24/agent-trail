@@ -117,6 +117,7 @@ render deploy/k8s/runner/job.yaml \
   "ACTIVE_DEADLINE_SECONDS=600" \
   "WORKER_IDLE_EXIT_SECONDS=120" \
   "AGENT_PROVIDER=fake" \
+  "OTEL_EXPORTER_OTLP_ENDPOINT=off" \
   "GITHUB_API_BASE_URL=http://fixture.agent-trail-local.svc.cluster.local:8080" \
   | "${KUBECTL[@]}" apply -f - >/dev/null
 
@@ -140,6 +141,7 @@ spec = pod["spec"]
 sec = spec["securityContext"]
 c = spec["containers"][0]
 csec = c["securityContext"]
+env = {item["name"]: item.get("value") for item in c.get("env", [])}
 volumes = {v["name"]: v for v in spec.get("volumes", [])}
 checks = {
     "automountServiceAccountToken is false": spec.get("automountServiceAccountToken") is False,
@@ -151,6 +153,7 @@ checks = {
     "readOnlyRootFilesystem": csec.get("readOnlyRootFilesystem") is True,
     "no privilege escalation": csec.get("allowPrivilegeEscalation") is False,
     "capabilities drop ALL": csec.get("capabilities", {}).get("drop") == ["ALL"],
+    "OTLP endpoint is explicit": env.get("OTEL_EXPORTER_OTLP_ENDPOINT") == "off",
     "restartPolicy Never": spec.get("restartPolicy") == "Never",
     "activeDeadlineSeconds set": job["spec"].get("activeDeadlineSeconds", 0) > 0,
     "backoffLimit 0": job["spec"].get("backoffLimit") == 0,

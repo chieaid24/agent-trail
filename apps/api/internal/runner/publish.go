@@ -94,7 +94,7 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 		return gitworkspace.Workspace{}, err
 	}
 
-	repoRef, err := e.repoRef(ctx, rc)
+	repoRef, err := e.repoRef(ctx, c, rc)
 	if err != nil {
 		return gitworkspace.Workspace{}, err
 	}
@@ -104,7 +104,7 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 		BaseSHA:     base,
 		BranchLabel: strings.TrimPrefix(branch, gitworkspace.BranchPrefix),
 	}
-	ws, err := e.Workspaces.CreateWorktree(ctx, params)
+	ws, err := e.createWorktree(ctx, c, params)
 	if err != nil {
 		// A dead previous owner on this host may have left the worktree or
 		// its branch behind; clear both and retry once. A cleanup failure
@@ -112,7 +112,7 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 		if cleanupErr := e.Workspaces.CleanupStale(ctx, repoRef, c.AttemptID, branch); cleanupErr != nil {
 			return gitworkspace.Workspace{}, errors.Join(err, cleanupErr)
 		}
-		ws, err = e.Workspaces.CreateWorktree(ctx, params)
+		ws, err = e.createWorktree(ctx, c, params)
 		if err != nil {
 			return gitworkspace.Workspace{}, err
 		}
@@ -123,8 +123,10 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 // repoRef builds the mirror reference with a fresh installation token
 // embedded in the clone URL. The URL is never logged; gitworkspace redacts
 // it from errors.
-func (e *Executor) repoRef(ctx context.Context, rc github.RepositoryContext) (gitworkspace.RepoRef, error) {
-	token, err := e.GitHub.InstallationToken(ctx, rc.InstallationID)
+func (e *Executor) repoRef(ctx context.Context, c *Claim, rc github.RepositoryContext) (gitworkspace.RepoRef, error) {
+	tokenCtx, span := startSpan(ctx, "github.token_exchange", c)
+	token, err := e.GitHub.InstallationToken(tokenCtx, rc.InstallationID)
+	endSpan(span, err)
 	if err != nil {
 		return gitworkspace.RepoRef{}, fmt.Errorf("mint installation token: %w", err)
 	}
@@ -133,6 +135,13 @@ func (e *Executor) repoRef(ctx context.Context, rc github.RepositoryContext) (gi
 		return gitworkspace.RepoRef{}, err
 	}
 	return gitworkspace.RepoRef{ID: rc.ID, CloneURL: cloneURL}, nil
+}
+
+func (e *Executor) createWorktree(ctx context.Context, c *Claim, p gitworkspace.CreateParams) (gitworkspace.Workspace, error) {
+	fetchCtx, span := startSpan(ctx, "git.fetch", c)
+	ws, err := e.Workspaces.CreateWorktree(fetchCtx, p)
+	endSpan(span, err)
+	return ws, err
 }
 
 // credentialedCloneURL embeds an installation token into an https clone
@@ -215,7 +224,10 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 		return "", err
 	}
 
-	if err := e.Workspaces.Push(ctx, ws, gitworkspace.PushParams{}); err != nil {
+	pushCtx, pushSpan := startSpan(ctx, "git.push", c)
+	err = e.Workspaces.Push(pushCtx, ws, gitworkspace.PushParams{})
+	endSpan(pushSpan, err)
+	if err != nil {
 		return "", e.publishFailure(ctx, c, "push", err)
 	}
 	if err := e.append(ctx, c, "branch.pushed", "runner", map[string]any{
@@ -237,13 +249,16 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 	branch, base := *t.WorkingBranch, *t.BaseCommitSHA
 	rc := pub.repo
 
-	repoRef, err := e.repoRef(ctx, rc)
+	repoRef, err := e.repoRef(ctx, c, rc)
 	if err != nil {
 		return "", err
 	}
 	if ws, ok := e.Workspaces.Lookup(c.AttemptID, repoRef, branch, base); ok {
 		// Refresh the mirror's stored credential before reusing its remote.
-		if _, err := e.Workspaces.EnsureMirror(ctx, repoRef); err != nil {
+		fetchCtx, span := startSpan(ctx, "git.fetch", c)
+		_, err := e.Workspaces.EnsureMirror(fetchCtx, repoRef)
+		endSpan(span, err)
+		if err != nil {
 			return "", err
 		}
 		return e.publishFromWorkspace(ctx, log, c, t, pub, ws, "")
@@ -279,30 +294,39 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 	}
 	body := evidence.PRBody(report, finalSHA)
 
-	pr, err := e.GitHub.FindPullRequestByHead(ctx, rc.InstallationID, rc.Owner,
+	prCtx, prSpan := startSpan(ctx, "github.pr_create", c)
+	pr, err := e.GitHub.FindPullRequestByHead(prCtx, rc.InstallationID, rc.Owner,
 		rc.Name, rc.Owner, branch)
 	if err != nil {
+		endSpan(prSpan, err)
 		return "", e.publishFailure(ctx, c, "find pull request", err)
 	}
+	wasCreated := pr == nil
 	if pr == nil {
-		created, err := e.GitHub.CreateDraftPullRequest(ctx, rc.InstallationID,
+		created, err := e.GitHub.CreateDraftPullRequest(prCtx, rc.InstallationID,
 			rc.Owner, rc.Name, github.PullRequestParams{
 				Title: t.Title, Head: branch, Base: t.BaseBranch, Body: body,
 			})
 		if err != nil {
+			endSpan(prSpan, err)
 			return "", e.publishFailure(ctx, c, "create pull request", err)
 		}
 		pr = &created
+	} else {
+		if err := e.GitHub.UpdatePullRequestBody(prCtx, rc.InstallationID,
+			rc.Owner, rc.Name, pr.Number, body); err != nil {
+			endSpan(prSpan, err)
+			return "", e.publishFailure(ctx, c, "update pull request", err)
+		}
+	}
+	endSpan(prSpan, nil)
+	if wasCreated {
 		if err := e.append(ctx, c, "pull_request.created", "runner", map[string]any{
 			"number": pr.Number, "url": pr.HTMLURL, "draft": true,
 		}); err != nil {
 			return "", err
 		}
 	} else {
-		if err := e.GitHub.UpdatePullRequestBody(ctx, rc.InstallationID,
-			rc.Owner, rc.Name, pr.Number, body); err != nil {
-			return "", e.publishFailure(ctx, c, "update pull request", err)
-		}
 		if err := e.append(ctx, c, "pull_request.updated", "runner", map[string]any{
 			"number": pr.Number, "url": pr.HTMLURL,
 		}); err != nil {
@@ -391,7 +415,7 @@ func (e *Executor) detectConflicts(ctx context.Context, log *slog.Logger, c *Cla
 	if e.Conflicts == nil || t.RepositoryID == nil {
 		return nil
 	}
-	repo, err := e.repoRef(ctx, rc)
+	repo, err := e.repoRef(ctx, c, rc)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

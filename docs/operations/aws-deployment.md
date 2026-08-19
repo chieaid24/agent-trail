@@ -108,6 +108,11 @@ claims through PostgreSQL (ADR-0003); Job creation and scaling on EKS is
 the runner-controller's job and has not landed. Adjust image contents
 based on the chosen agent CLI and package manager.
 
+The Job template also requires `OTEL_EXPORTER_OTLP_ENDPOINT`. The local kind
+verification renders it as `off`; a cloud runner-controller must inject the
+reachable collector service address and allow that egress before enabling
+runtime export.
+
 Do not mount the Docker socket.
 
 Known limitations:

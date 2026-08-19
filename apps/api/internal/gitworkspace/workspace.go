@@ -112,8 +112,10 @@ func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, bra
 		_, _ = m.git.run(ctx, mirror, "branch", "-D", branch)
 	}
 	if _, err := m.git.run(ctx, mirror, "worktree", "prune"); err != nil {
+		m.cleanups.Inc(observability.Label{Key: "outcome", Value: "failed"})
 		return fmt.Errorf("gitworkspace: prune worktrees: %w", err)
 	}
+	m.cleanups.Inc(observability.Label{Key: "outcome", Value: "removed"})
 	return nil
 }
 
@@ -161,15 +163,17 @@ func (m *Manager) Remove(ctx context.Context, w Workspace) error {
 	defer lock.Unlock()
 
 	if _, err := m.git.run(ctx, mirror, "worktree", "remove", "--force", w.Path); err != nil {
+		m.cleanups.Inc(observability.Label{Key: "outcome", Value: "failed"})
 		return fmt.Errorf("gitworkspace: remove worktree: %w", err)
 	}
 	// Idempotent: ignore a missing branch so a retried cleanup still succeeds.
 	_, _ = m.git.run(ctx, mirror, "branch", "-D", w.Branch)
 	if _, err := m.git.run(ctx, mirror, "worktree", "prune"); err != nil {
+		m.cleanups.Inc(observability.Label{Key: "outcome", Value: "failed"})
 		return fmt.Errorf("gitworkspace: prune worktrees: %w", err)
 	}
 
-	m.cleanups.Inc()
+	m.cleanups.Inc(observability.Label{Key: "outcome", Value: "removed"})
 	m.logger.LogAttrs(ctx, slog.LevelInfo, "workspace removed",
 		slog.String("event", "workspace_removed"),
 		slog.String("trace_id", observability.TraceIDFrom(ctx)),
