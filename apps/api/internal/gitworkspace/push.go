@@ -41,12 +41,15 @@ func (m *Manager) Push(ctx context.Context, w Workspace, p PushParams) error {
 		remote = allowedRemote
 	}
 	if remote != allowedRemote {
+		m.denials.Inc(observability.Label{Key: "policy", Value: "forbidden_remote"})
 		return fmt.Errorf("%w: %q", ErrForbiddenRemote, remote)
 	}
 	if !validBranch(w.Branch) {
+		m.denials.Inc(observability.Label{Key: "policy", Value: "forbidden_branch"})
 		return fmt.Errorf("%w: %q", ErrForbiddenBranch, w.Branch)
 	}
 	if p.Force {
+		m.denials.Inc(observability.Label{Key: "policy", Value: "force_push"})
 		return ErrForcePushDenied
 	}
 

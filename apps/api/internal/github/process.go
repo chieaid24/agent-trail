@@ -11,6 +11,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
@@ -91,7 +94,17 @@ func (p *Processor) Dispatch(d Delivery, payload []byte) {
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), processTimeout)
 		defer cancel()
-		p.process(observability.WithTraceID(ctx, d.TraceID), d, payload)
+		// The span shares the delivery's correlation id, so log lines and
+		// the webhook-to-task-creation trace join on one trace_id.
+		pctx := observability.WithTraceParent(
+			observability.WithTraceID(ctx, d.TraceID), d.TraceID)
+		pctx, span := observability.Tracer().Start(pctx, "webhook.process",
+			trace.WithAttributes(
+				attribute.String("github.delivery_id", d.ID),
+				attribute.String("github.event", d.EventType),
+			))
+		p.process(pctx, d, payload)
+		span.End()
 	}()
 }
 

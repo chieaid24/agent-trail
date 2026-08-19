@@ -16,6 +16,7 @@ func TestRunRejectsBadConfig(t *testing.T) {
 func TestRunRejectsOAuthWithoutDatabase(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "off")
 	t.Setenv("GITHUB_OAUTH_CLIENT_ID", "Iv1client")
 	t.Setenv("GITHUB_OAUTH_CLIENT_SECRET", "secret")
 	if err := run(); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
@@ -34,6 +35,7 @@ func TestRunReportsListenFailure(t *testing.T) {
 	t.Setenv("API_ADDR", ln.Addr().String())
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "off")
 	if err := run(); err == nil {
 		t.Fatal("run succeeded on an occupied port")
 	}

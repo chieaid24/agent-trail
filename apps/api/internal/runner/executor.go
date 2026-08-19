@@ -57,6 +57,8 @@ type Executor struct {
 	Repos      RepositoryResolver
 	// Conflicts records active-task overlap; nil disables detection.
 	Conflicts *conflict.Detector
+	// Metrics emits the runner instruments; nil skips emission.
+	Metrics *Metrics
 	// LeaseDuration is the claim lease; the executor extends it at a third
 	// of this interval while it works.
 	LeaseDuration time.Duration
@@ -104,7 +106,9 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 			}
 		}
 	}()
-	err := e.drive(execCtx, log, c)
+	spanCtx, span := startSpan(execCtx, "runner.attempt", c)
+	err := e.drive(spanCtx, log, c)
+	endSpan(span, err)
 	// Stop extending before releasing, or the last extension races the
 	// release and logs a spurious loss.
 	cancel()
@@ -290,17 +294,20 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		status = task.StatusPlanning
 	}
 
-	session, err := e.Adapter.Start(ctx, agent.Request{
+	sessionCtx, sessionSpan := startSpan(ctx, "agent.session", c)
+	session, err := e.Adapter.Start(sessionCtx, agent.Request{
 		WorkspaceDir: workspace,
 		Instructions: c.Instructions,
 	})
 	if err != nil {
+		endSpan(sessionSpan, err)
 		return "", e.failTask(ctx, c, "agent_start_failed", err.Error())
 	}
 
 	// On an error mid-stream the session must still be drained: the event
 	// channel is unbuffered, so an abandoned producer would block forever.
 	abort := func(err error) error {
+		endSpan(sessionSpan, err)
 		_ = session.Cancel(ctx)
 		go func() {
 			for range session.Events() {
@@ -309,6 +316,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		return err
 	}
 	for ev := range session.Events() {
+		e.Metrics.observeLogBytes(len(ev.Payload))
 		eventType, ok := agentEventTypes[ev.Type]
 		if !ok {
 			eventType = "agent." + string(ev.Type)
@@ -327,6 +335,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	}
 
 	result, err := session.Wait(ctx)
+	endSpan(sessionSpan, err)
 	if err != nil {
 		if ctx.Err() != nil {
 			// Shutdown or lease loss: leave the task mid-flight for recovery.
@@ -359,7 +368,11 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	// The workspace dies with this function (deferred cleanup above), so
 	// everything that needs it on disk - validation, evidence, commit, and
 	// push - happens before returning.
-	note, err := e.runTrustedValidation(ctx, log, c, workspace)
+	valCtx, valSpan := startSpan(ctx, "validation.run", c)
+	valStart := time.Now()
+	note, err := e.runTrustedValidation(valCtx, log, c, workspace)
+	e.Metrics.observeValidation(time.Since(valStart))
+	endSpan(valSpan, err)
 	if err != nil {
 		return "", err
 	}
@@ -419,6 +432,9 @@ func (e *Executor) runTrustedValidation(ctx context.Context, log *slog.Logger, c
 	runner := &validation.Runner{Logger: log}
 	var insertErr, eventErr error
 	results := runner.Run(ctx, workspace, file, func(r validation.Result) {
+		// Measured for every completed check, even when persistence of an
+		// earlier result already failed: the command did run.
+		e.Metrics.observeCheck(r)
 		if insertErr != nil || eventErr != nil {
 			return
 		}
@@ -615,6 +631,7 @@ func (e *Executor) transition(ctx context.Context, c *Claim, to task.Status, sou
 	if err != nil {
 		return "", fmt.Errorf("transition to %s: %w", to, err)
 	}
+	e.Metrics.observeTransition(to, c.TaskCreatedAt)
 	return to, nil
 }
 
@@ -639,5 +656,7 @@ func (e *Executor) failTask(ctx context.Context, c *Claim, code, message string)
 	if err != nil {
 		return fmt.Errorf("fail task (%s): %w", code, err)
 	}
+	e.Metrics.observeFailure(code)
+	e.Metrics.observeTransition(task.StatusFailed, c.TaskCreatedAt)
 	return fmt.Errorf("%w: %s: %s", ErrAttemptFailed, code, message)
 }

@@ -50,7 +50,21 @@ func run() error {
 		defer db.Close()
 	}
 
-	metrics := observability.NewRegistry()
+	telemetry, err := observability.Setup("api", cfg.OTLPEndpoint, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdownCtx); err != nil {
+			logger.LogAttrs(shutdownCtx, slog.LevelWarn, "telemetry shutdown failed",
+				slog.String("event", "otel_shutdown_failed"),
+				slog.String("error", err.Error()),
+			)
+		}
+	}()
+	metrics := telemetry.Metrics
 
 	var pinger httpapi.DBPinger
 	var tasks httpapi.TaskService

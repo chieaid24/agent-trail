@@ -215,7 +215,10 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 		return "", err
 	}
 
-	if err := e.Workspaces.Push(ctx, ws, gitworkspace.PushParams{}); err != nil {
+	pushCtx, pushSpan := startSpan(ctx, "git.push", c)
+	err = e.Workspaces.Push(pushCtx, ws, gitworkspace.PushParams{})
+	endSpan(pushSpan, err)
+	if err != nil {
 		return "", e.publishFailure(ctx, c, "push", err)
 	}
 	if err := e.append(ctx, c, "branch.pushed", "runner", map[string]any{
@@ -279,17 +282,21 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 	}
 	body := evidence.PRBody(report, finalSHA)
 
-	pr, err := e.GitHub.FindPullRequestByHead(ctx, rc.InstallationID, rc.Owner,
+	prCtx, prSpan := startSpan(ctx, "github.pr_create", c)
+	defer prSpan.End()
+	pr, err := e.GitHub.FindPullRequestByHead(prCtx, rc.InstallationID, rc.Owner,
 		rc.Name, rc.Owner, branch)
 	if err != nil {
+		endSpan(prSpan, err)
 		return "", e.publishFailure(ctx, c, "find pull request", err)
 	}
 	if pr == nil {
-		created, err := e.GitHub.CreateDraftPullRequest(ctx, rc.InstallationID,
+		created, err := e.GitHub.CreateDraftPullRequest(prCtx, rc.InstallationID,
 			rc.Owner, rc.Name, github.PullRequestParams{
 				Title: t.Title, Head: branch, Base: t.BaseBranch, Body: body,
 			})
 		if err != nil {
+			endSpan(prSpan, err)
 			return "", e.publishFailure(ctx, c, "create pull request", err)
 		}
 		pr = &created
@@ -299,8 +306,9 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 			return "", err
 		}
 	} else {
-		if err := e.GitHub.UpdatePullRequestBody(ctx, rc.InstallationID,
+		if err := e.GitHub.UpdatePullRequestBody(prCtx, rc.InstallationID,
 			rc.Owner, rc.Name, pr.Number, body); err != nil {
+			endSpan(prSpan, err)
 			return "", e.publishFailure(ctx, c, "update pull request", err)
 		}
 		if err := e.append(ctx, c, "pull_request.updated", "runner", map[string]any{
@@ -309,6 +317,8 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 			return "", err
 		}
 	}
+	// End is idempotent; the deferred End only catches early returns above.
+	prSpan.End()
 	if err := e.Store.RecordPullRequest(ctx, c.AttemptID, pr.Number); err != nil {
 		return "", err
 	}

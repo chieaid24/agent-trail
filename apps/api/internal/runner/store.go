@@ -55,6 +55,7 @@ type Claim struct {
 	TaskStatus     task.Status
 	Title          string
 	Instructions   string
+	TaskCreatedAt  time.Time
 	LeaseExpiresAt time.Time
 }
 
@@ -227,7 +228,8 @@ func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.D
 	var c Claim
 	var status string
 	err = tx.QueryRowContext(ctx, `
-		SELECT a.id, a.attempt_number, t.id, t.status, t.title, t.instructions
+		SELECT a.id, a.attempt_number, t.id, t.status, t.title, t.instructions,
+			t.created_at
 		FROM task_attempts a
 		JOIN tasks t ON t.id = a.task_id
 		WHERE a.status = 'active'
@@ -237,7 +239,7 @@ func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.D
 		FOR UPDATE OF a SKIP LOCKED
 		LIMIT 1`).
 		Scan(&c.AttemptID, &c.AttemptNumber, &c.TaskID, &status,
-			&c.Title, &c.Instructions)
+			&c.Title, &c.Instructions, &c.TaskCreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

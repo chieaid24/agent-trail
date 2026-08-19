@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 // Host is one runner process: it registers itself, heartbeats, reaps lost
@@ -12,6 +14,8 @@ type Host struct {
 	Store    *Store
 	Executor *Executor
 	Logger   *slog.Logger
+	// Metrics emits the runner instruments; nil skips emission.
+	Metrics *Metrics
 
 	// RunnerType and HostnameOrPod identify this runner in the registry.
 	RunnerType    string
@@ -92,6 +96,13 @@ func (h *Host) Run(ctx context.Context) error {
 			slog.String("task_attempt_id", claim.AttemptID),
 			slog.String("task_status", string(claim.TaskStatus)),
 		)
+		// Queue wait is creation to first claim; a recovered claim at a
+		// later status already waited once and is not re-counted.
+		if claim.TaskStatus == task.StatusQueued {
+			h.Metrics.observeQueueWait(time.Since(claim.TaskCreatedAt))
+			recordQueueWaitSpan(ctx, claim)
+		}
+		h.Metrics.taskStarted()
 		if err := h.Executor.Execute(ctx, self.ID, claim); err != nil {
 			// The failure is already recorded on the task or the attempt is
 			// recoverable; either way this runner moves on.
@@ -102,6 +113,7 @@ func (h *Host) Run(ctx context.Context) error {
 				slog.String("error", err.Error()),
 			)
 		}
+		h.Metrics.taskFinished()
 		executed++
 		if h.MaxTasks > 0 && executed >= h.MaxTasks {
 			log.LogAttrs(ctx, slog.LevelInfo, "task cap reached",
@@ -152,6 +164,7 @@ func (h *Host) beatAndReap(ctx context.Context, log *slog.Logger, runnerID strin
 			}
 			continue
 		}
+		h.Metrics.observeLostRunners(len(lost))
 		for _, r := range lost {
 			log.LogAttrs(ctx, slog.LevelWarn, "runner lost",
 				slog.String("event", "runner_lost"),
