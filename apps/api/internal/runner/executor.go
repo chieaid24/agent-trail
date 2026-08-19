@@ -723,14 +723,12 @@ func (e *Executor) cleanupGitWorkspace(ctx context.Context, log *slog.Logger, c 
 		}
 	}
 	if err := e.Workspaces.Remove(cleanupCtx, ws); err != nil {
-		e.Metrics.observeCleanup("failed")
 		log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
 			slog.String("event", "runner_workspace_cleanup_failed"),
 			slog.String("error", err.Error()),
 		)
 		return errors.Join(retErr, fmt.Errorf("workspace cleanup: %w", err))
 	}
-	e.Metrics.observeCleanup("removed")
 	if err := e.Tasks.AppendAttemptEvent(cleanupCtx, c.AttemptID,
 		"cleanup.completed", "runner", map[string]any{"workspace": "removed"}); err != nil {
 		return errors.Join(retErr, fmt.Errorf("record workspace cleanup: %w", err))
