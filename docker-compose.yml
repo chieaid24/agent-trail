@@ -37,6 +37,9 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      # Dev-only: expose /minio/v2/metrics without auth so Prometheus can
+      # scrape object-storage health for the alert rules.
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     ports:
       - "127.0.0.1:${MINIO_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -63,6 +66,16 @@ services:
       - ./deploy/dev/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+
+  # Database health for the saturation dashboard and alert; scraped by
+  # Prometheus in-network, no host port.
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://agent_trail:agent_trail@postgres:5432/agent_trail?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   grafana:
     image: grafana/grafana:12.0.2
