@@ -144,6 +144,11 @@ hardened Job spec lives in deploy/k8s/runner/job.yaml and
 `bash scripts/verify-k8s-runner.sh` proves the isolation criteria locally
 in kind (docs/operations/local-development.md).
 
+Process and Kubernetes runners share the same OpenTelemetry instrumentation.
+The Job requires an explicit `OTEL_EXPORTER_OTLP_ENDPOINT`; the kind verifier
+uses `off`, while a deployed Job must target a collector reachable under its
+network policy.
+
 Claiming still goes straight through PostgreSQL (ADR-0003) in both modes;
 the internal runner HTTP API in docs/architecture/api.md lands when
 runners stop reaching the database directly. Trusted validation runs in the

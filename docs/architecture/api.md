@@ -196,7 +196,7 @@ Implemented.
 GET /metrics
 ```
 
-Prometheus text exposition of the counters listed in
+Prometheus text exposition of the counters, histograms, and gauges listed in
 docs/operations/observability.md. No authentication; deploy behind the
 internal network boundary.
 

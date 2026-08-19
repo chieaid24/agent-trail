@@ -20,6 +20,7 @@ Docker Compose provides the infrastructure only:
 - otel-collector (4317 gRPC, 4318 HTTP)
 - prometheus (9090)
 - grafana (3300)
+- postgres-exporter (Compose network only)
 
 The apps run natively for fast iteration - `go run` for api and worker,
 `next dev` for web. All compose ports bind to localhost and every one is
@@ -28,6 +29,15 @@ coexist: set `COMPOSE_PROJECT_NAME` and the port variables per checkout.
 
 Compose credentials (postgres, minio, grafana) are throwaway dev-only
 values; nothing outside `docker-compose.yml` uses them.
+
+The native API and worker export metrics and traces to
+`localhost:${OTLP_GRPC_PORT:-4317}`. The collector exposes app metrics inside
+Compose, Prometheus scrapes the collector plus the PostgreSQL and MinIO
+exporters, and Grafana reads Prometheus. Open Grafana at
+`http://localhost:${GRAFANA_PORT:-3300}` with `admin` / `admin`; the seven
+dashboards are in the `Agent Trail` folder and the nine rules are under Alerting.
+If `OTLP_GRPC_PORT` changes, set `OTEL_EXPORTER_OTLP_ENDPOINT` to the same host
+port. Set it to `off` when no collector is available.
 
 ## Commands
 
@@ -64,6 +74,10 @@ other `AGENT_*` variables) - see docs/architecture/agent-providers.md and
 docker, or kubernetes) and the one-shot controls `WORKER_MAX_TASKS` and
 `WORKER_IDLE_EXIT_SECONDS` that a Kubernetes Job runner sets so the Job
 completes and TTL cleanup applies.
+
+The Kubernetes Job template requires an explicit
+`OTEL_EXPORTER_OTLP_ENDPOINT`. The local kind verifier sets it to `off`; a live
+deployment must provide a reachable collector service address.
 
 ## Kubernetes runner verification
 
