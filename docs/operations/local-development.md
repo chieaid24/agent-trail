@@ -39,6 +39,7 @@ make seed              # demo tasks and repositories (skips when tasks exist)
 make test              # unit tests, both apps
 make integration-test  # adds the suites that need a real database
 make e2e               # browser suite against its own disposable stack
+make bench             # benchmarks + failure injection, disposable database
 make demo              # scripted issue-to-PR demo against a simulated GitHub
 make clean             # stop infra, drop volumes, remove build artifacts
 make hooks             # activate the pre-commit hook (once per clone)
@@ -121,6 +122,23 @@ E2E_API_PORT=8108 E2E_WEB_PORT=3068 E2E_FAKE_GITHUB_PORT=7068 make e2e
 
 Audit screenshots land in `apps/web/e2e/screenshots/`. Curated evidence for
 each dashboard change lives under `docs/screenshots/`.
+
+## Benchmarks
+
+`make bench` (or `scripts/bench.sh`) boots a dedicated postgres (compose
+project `agent-trail-bench`, port 5493 by default), migrates it, and runs
+the gated benchmark and failure-injection suite in
+`apps/api/internal/bench/`. The tests skip without `AGENT_TRAIL_BENCH=1`,
+so plain `go test ./...` and the CI gate never run them. The full-disk
+injection needs passwordless sudo for a tmpfs mount and skips without it.
+Parallel lanes override the namespace and port:
+
+```bash
+BENCH_PROJECT=agent-trail-bench-lane BENCH_POSTGRES_PORT=5494 make bench
+```
+
+Run output lands in `apps/api/internal/bench/.artifacts/`; the committed
+methodology and measured numbers are `docs/testing/benchmark-results.md`.
 
 ## Demo repository
 
