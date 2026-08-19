@@ -350,16 +350,18 @@ type hangingSession struct {
 }
 
 type resistantAdapter struct {
-	started   chan string
-	forceStop chan struct{}
-	finished  chan struct{}
+	started    chan string
+	cancelling chan struct{}
+	forceStop  chan struct{}
+	finished   chan struct{}
 }
 
 func newResistantAdapter() *resistantAdapter {
 	return &resistantAdapter{
-		started:   make(chan string, 1),
-		forceStop: make(chan struct{}),
-		finished:  make(chan struct{}),
+		started:    make(chan string, 1),
+		cancelling: make(chan struct{}),
+		forceStop:  make(chan struct{}),
+		finished:   make(chan struct{}),
 	}
 }
 
@@ -370,18 +372,20 @@ func (a *resistantAdapter) ValidateConfiguration(context.Context) error { return
 func (a *resistantAdapter) Start(_ context.Context, req agent.Request) (agent.Session, error) {
 	a.started <- req.WorkspaceDir
 	s := &resistantSession{
-		events:    make(chan agent.Event),
-		forceStop: a.forceStop,
-		finished:  a.finished,
+		events:     make(chan agent.Event),
+		cancelling: a.cancelling,
+		forceStop:  a.forceStop,
+		finished:   a.finished,
 	}
 	go s.run()
 	return s, nil
 }
 
 type resistantSession struct {
-	events    chan agent.Event
-	forceStop chan struct{}
-	finished  chan struct{}
+	events     chan agent.Event
+	cancelling chan struct{}
+	forceStop  chan struct{}
+	finished   chan struct{}
 }
 
 var errResistantCancel = errors.New("resistant cancel blocked until forced stop")
@@ -393,6 +397,7 @@ func (s *resistantSession) Send(context.Context, string) error {
 }
 
 func (s *resistantSession) Cancel(context.Context) error {
+	close(s.cancelling)
 	<-s.forceStop
 	return errResistantCancel
 }
@@ -654,6 +659,40 @@ func TestExecuteTimesOutHangingSession(t *testing.T) {
 	}
 	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
 	assertWorkspaceRemoved(t, <-adapter.started)
+}
+
+func TestExecuteBoundsStartupReadsWithinLease(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, 3*time.Second)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.LeaseDuration = 3 * time.Second
+	exec.runtimeDeadlineHook = func(ctx context.Context, _ *Claim) (time.Duration, time.Time, error) {
+		<-ctx.Done()
+		return 0, time.Time{}, ctx.Err()
+	}
+
+	started := time.Now()
+	err = exec.Execute(ctx, r.ID, c)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Execute = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("bounded startup took %s", elapsed)
+	}
+	select {
+	case workspace := <-adapter.started:
+		t.Fatalf("adapter started in %q after startup fence expired", workspace)
+	default:
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "active")
 }
 
 func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {

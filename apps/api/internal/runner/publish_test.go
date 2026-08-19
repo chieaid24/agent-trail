@@ -714,6 +714,68 @@ func TestValidatingRecoveryTimeoutRemovesWorktree(t *testing.T) {
 	}
 }
 
+func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
+	f := newPublishFixture(t)
+	ctx := context.Background()
+	c := f.claim(t)
+	adapter := newResistantAdapter()
+	f.exec.Adapter = adapter
+	f.exec.DefaultRuntime = time.Minute
+	f.exec.LeaseDuration = 300 * time.Millisecond
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		done <- f.exec.Execute(ctx, f.runner.ID, c)
+		close(finished)
+	}()
+	workspace := <-adapter.started
+	var forceOnce sync.Once
+	forceStop := func() { forceOnce.Do(func() { close(adapter.forceStop) }) }
+	t.Cleanup(func() {
+		forceStop()
+		select {
+		case <-finished:
+		case <-time.After(3 * time.Second):
+		}
+		current, err := f.tasks.Get(ctx, f.task.ID)
+		if err == nil && current.WorkingBranch != nil {
+			_ = f.exec.Workspaces.CleanupStale(ctx,
+				gitworkspace.RepoRef{ID: *current.RepositoryID}, c.AttemptID, *current.WorkingBranch)
+		}
+	})
+
+	successor := mustRegister(t, f.store)
+	if _, err := f.db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET lease_owner = $1, lease_expires_at = now() + interval '1 minute'
+		WHERE id = $2`, successor.ID, c.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-adapter.cancelling:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stale owner did not detect lease transfer")
+	}
+	if _, err := f.tasks.Transition(ctx, f.task.ID, task.TransitionParams{
+		To: task.StatusTimedOut, Source: "runner", FailureCode: "successor_timeout",
+		FailureMessage: "successor settled transferred attempt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	forceStop()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrLeaseLost) {
+			t.Fatalf("Execute = %v, want ErrLeaseLost", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale executor did not finish")
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("stale owner removed successor workspace: %v", err)
+	}
+}
+
 // TestPublishNoChangeCreatesNoPR is the empty-diff acceptance: a session
 // that changes nothing opens no PR, resolves the check neutral on the base
 // commit, explains itself on the issue, and fails the task as no_change.
