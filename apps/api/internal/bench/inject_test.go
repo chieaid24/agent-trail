@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -437,57 +438,75 @@ func TestInjectS3Timeout(t *testing.T) {
 		"log offload to object storage lands")
 }
 
-// TestInjectAgentHang runs a session that never emits another event and
-// never ends. This documents the measured limitation: cancellation marks
-// the task terminal but neither stops the hung session nor frees the lease
-// (the executor keeps extending it), and max_runtime_seconds is stored but
-// not enforced - only stopping the runner process bounds a hung agent.
+// TestInjectAgentHang proves timeout and API cancellation both stop a session
+// that emits one event and then hangs.
 func TestInjectAgentHang(t *testing.T) {
 	db := openDB(t)
-	t.Setenv("TMPDIR", t.TempDir())
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 	s := runner.NewStore(db)
 	ts := task.NewStore(db)
 	ctx := context.Background()
-
-	tk, err := ts.Create(ctx, task.CreateParams{
-		Title:        "bench agent-hang task",
-		Instructions: modeHang,
+	maxRuntime := 1
+	timed, err := ts.Create(ctx, task.CreateParams{
+		Title:             "bench timed agent-hang task",
+		Instructions:      modeHang,
+		MaxRuntimeSeconds: &maxRuntime,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	const lease = 3 * time.Second // extended every second by the executor
+	const lease = 3 * time.Second
 	f := startFleet(db, s, ts, 1, &scriptAdapter{}, lease, "bench-hang")
+	defer f.stop(t)
 	waitInt(t, db, `
-		SELECT count(*) FROM activity_events
-		WHERE event_type = 'agent.started'`, 1, time.Minute, "session start")
-
-	if _, err := ts.Cancel(ctx, tk.ID, "benchmark cancel during hang"); err != nil {
+		SELECT count(*) FROM tasks t
+		JOIN task_attempts a ON a.task_id = t.id
+		WHERE t.id = $1 AND t.status = 'timed_out' AND a.lease_owner IS NULL`,
+		1, 5*time.Second, "runtime timeout", timed.ID)
+	timed, err = ts.Get(ctx, timed.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Give the lease time to expire if cancellation were to stop the
-	// executor; it does not, so the extension heartbeat keeps it alive.
-	time.Sleep(lease + 2*time.Second)
-
-	got, err := ts.Get(ctx, tk.ID)
-	if err != nil || got.Status != task.StatusCancelled {
-		t.Fatalf("task = %v, %v; want cancelled", got.Status, err)
+	if timed.FailureCode == nil || *timed.FailureCode != "task_runtime_exceeded" ||
+		timed.FailureMessage == nil {
+		t.Fatalf("timed task failure = %v/%v", timed.FailureCode, timed.FailureMessage)
 	}
-	if held := queryInt(t, db, `
-		SELECT count(*) FROM task_attempts
-		WHERE lease_owner IS NOT NULL AND lease_expires_at > now()`); held != 1 {
-		t.Errorf("live leases during hang = %d, want 1 (hung session keeps its lease)", held)
-	}
-
-	// Only stopping the runner process ends the hang.
-	stopAt := time.Now()
-	f.stop(t)
-	stopTook := time.Since(stopAt)
 	assertLeasesReleased(t, db)
 
-	t.Logf("bench inject agent-hang: cancel_stops_session=false lease_held_through_cancel=true runner_stop_released_lease_in=%s",
-		stopTook.Round(time.Millisecond))
+	cancelled, err := ts.Create(ctx, task.CreateParams{
+		Title:        "bench cancelled agent-hang task",
+		Instructions: modeHang,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitInt(t, db, `
+		SELECT count(*) FROM activity_events e
+		JOIN task_attempts a ON a.id = e.task_attempt_id
+		WHERE a.task_id = $1 AND e.event_type = 'agent.started'`,
+		1, 5*time.Second, "cancelled session start", cancelled.ID)
+	cancelledAt := time.Now()
+	if _, err := ts.Cancel(ctx, cancelled.ID, "benchmark cancel during hang"); err != nil {
+		t.Fatal(err)
+	}
+	waitInt(t, db, `
+		SELECT count(*) FROM task_attempts
+		WHERE task_id = $1 AND status = 'cancelled' AND lease_owner IS NULL`,
+		1, 2*time.Second, "cancelled session release", cancelled.ID)
+	cancelTook := time.Since(cancelledAt)
+	assertLeasesReleased(t, db)
+
+	leftovers, err := filepath.Glob(filepath.Join(tmp, "agent-trail-attempt-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("workspaces after timeout and cancellation = %d, want 0", len(leftovers))
+	}
+	t.Logf("bench inject agent-hang: timeout_status=%s failure_code=%s cancel_released_lease_in=%s workspaces_left=%d",
+		timed.Status, *timed.FailureCode, cancelTook.Round(time.Millisecond), len(leftovers))
 }
 
 // TestInjectFullDisk points the workspace root at a full filesystem (a

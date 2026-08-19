@@ -20,6 +20,11 @@ type Session interface {
 }
 ```
 
+`Cancel` must return no later than its context deadline. The `Events` channel
+closes only after provider termination; after it closes, `Wait` returns the
+terminal result. The executor drains that channel while cancellation runs,
+then waits for both operations before releasing the workspace and lease.
+
 Normalized events:
 
 - session_started
@@ -71,7 +76,6 @@ task is future work.
 | `AGENT_MODEL` | (CLI default) | provider model |
 | `AGENT_PERMISSION_MODE` | `acceptEdits` | one of `default`, `acceptEdits`, `plan`, `bypassPermissions` |
 | `AGENT_CLI_VERSION` | (unset) | required whole version token of `claude --version`; unset skips the check |
-| `AGENT_TIMEOUT_SECONDS` | `2700` | hard per-attempt runtime cap |
 
 The worker calls `ValidateConfiguration` once at startup and refuses to start
 if the selected provider is misconfigured (CLI missing, or a pinned version
@@ -129,13 +133,14 @@ executing at session end rather than stranding it in planning.
 
 ### Timeout and cancellation
 
-`AGENT_TIMEOUT_SECONDS` and the caller's context both back the subprocess
-through `exec.CommandContext`: whichever fires first kills the CLI's whole
-process group, so tool subprocesses the CLI spawned die with it instead of
-surviving to hold the output pipe open. A timeout ends the session as
-`session_failed` with reason `timeout` and a `DeadlineExceeded` error; a
-`Cancel` ends it with reason `cancelled`. Either way the processes are
-stopped, not left running.
+The executor derives the caller context deadline from the task's
+`max_runtime_seconds`, falling back to `AGENT_TIMEOUT_SECONDS`. That context
+backs the subprocess through `exec.CommandContext`, so expiry kills the CLI's
+whole process group and the executor records the task as `timed_out`. An API
+cancellation is detected by the executor and calls `Session.Cancel`, which
+kills the same process group. Tool subprocesses therefore do not survive to
+hold the output pipe open. Runner configuration and policy live in
+[runner.md](runner.md) and [ADR-0016](../adr/0016-executor-owned-task-runtime.md).
 
 ### Guarding against CLI changes
 

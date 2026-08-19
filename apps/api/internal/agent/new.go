@@ -3,7 +3,6 @@ package agent
 import (
 	"fmt"
 	"log/slog"
-	"time"
 )
 
 // Provider names selectable through configuration (AGENT_PROVIDER).
@@ -22,7 +21,6 @@ type Options struct {
 	Model          string
 	PermissionMode string
 	PinnedVersion  string
-	Timeout        time.Duration
 	Logger         *slog.Logger
 }
 
@@ -38,7 +36,6 @@ func New(opts Options) (Adapter, error) {
 			Model:          opts.Model,
 			PermissionMode: opts.PermissionMode,
 			PinnedVersion:  opts.PinnedVersion,
-			Timeout:        opts.Timeout,
 			Logger:         opts.Logger,
 		}), nil
 	default:

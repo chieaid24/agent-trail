@@ -140,13 +140,14 @@ printf '%s\n' '{"type":"result","subtype":"error_max_turns","is_error":true,"res
 	}
 }
 
-// TestClaudeCodeTimeout proves the adapter's hard timeout stops the process.
-func TestClaudeCodeTimeout(t *testing.T) {
+// TestClaudeCodeDeadline proves the caller's deadline stops the process.
+func TestClaudeCodeDeadline(t *testing.T) {
 	requireSh(t)
+	runCtx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
 	sess, err := NewClaudeCode(ClaudeCodeOptions{
 		CLIPath: stubCLI(t, "exec sleep 30\n"),
-		Timeout: 150 * time.Millisecond,
-	}).Start(context.Background(), Request{WorkspaceDir: t.TempDir(), Instructions: "x"})
+	}).Start(runCtx, Request{WorkspaceDir: t.TempDir(), Instructions: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,18 +166,18 @@ func TestClaudeCodeTimeout(t *testing.T) {
 	}
 }
 
-// TestClaudeCodeTimeoutKillsToolSubprocesses proves the whole process group
-// dies on timeout: a tool subprocess inheriting stdout must not outlive the
-// CLI and hold the session open.
-func TestClaudeCodeTimeoutKillsToolSubprocesses(t *testing.T) {
+// TestClaudeCodeDeadlineKillsToolSubprocesses proves the caller deadline kills
+// the process group, including tool subprocesses that inherit stdout.
+func TestClaudeCodeDeadlineKillsToolSubprocesses(t *testing.T) {
 	requireSh(t)
+	runCtx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
 	stub := `sleep 30 &
 exec sleep 30
 `
 	sess, err := NewClaudeCode(ClaudeCodeOptions{
 		CLIPath: stubCLI(t, stub),
-		Timeout: 150 * time.Millisecond,
-	}).Start(context.Background(), Request{WorkspaceDir: t.TempDir(), Instructions: "x"})
+	}).Start(runCtx, Request{WorkspaceDir: t.TempDir(), Instructions: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}

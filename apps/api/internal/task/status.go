@@ -95,8 +95,8 @@ var happyPath = map[Status][]Status{
 }
 
 // CanTransition reports whether from -> to is a legal transition:
-// the happy-path edges, cancellation from any non-terminal status, and
-// failed/timed_out from any running status (safe failure).
+// the happy-path edges, cancellation from any non-terminal status, safe
+// failure from running states, and timeout during awaiting-review recovery.
 func CanTransition(from, to Status) bool {
 	if !from.Valid() || !to.Valid() || from.Terminal() {
 		return false
@@ -104,8 +104,11 @@ func CanTransition(from, to Status) bool {
 	if to == StatusCancelled {
 		return true
 	}
-	if to == StatusFailed || to == StatusTimedOut {
+	if to == StatusFailed {
 		return from.Phase() == PhaseRunning
+	}
+	if to == StatusTimedOut {
+		return from.Phase() == PhaseRunning || from == StatusAwaitingReview
 	}
 	for _, next := range happyPath[from] {
 		if next == to {

@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -309,6 +311,152 @@ type scriptedSession struct {
 	err    error
 }
 
+type hangingAdapter struct {
+	started   chan string
+	cancelled chan struct{}
+	finished  chan struct{}
+}
+
+func newHangingAdapter() *hangingAdapter {
+	return &hangingAdapter{
+		started:   make(chan string, 1),
+		cancelled: make(chan struct{}),
+		finished:  make(chan struct{}),
+	}
+}
+
+func (a *hangingAdapter) Name() string { return "hanging" }
+
+func (a *hangingAdapter) ValidateConfiguration(context.Context) error { return nil }
+
+func (a *hangingAdapter) Start(ctx context.Context, req agent.Request) (agent.Session, error) {
+	a.started <- req.WorkspaceDir
+	s := &hangingSession{
+		events:    make(chan agent.Event),
+		done:      a.finished,
+		stop:      make(chan struct{}),
+		cancelled: a.cancelled,
+	}
+	go s.run(ctx)
+	return s, nil
+}
+
+type hangingSession struct {
+	events    chan agent.Event
+	done      chan struct{}
+	stop      chan struct{}
+	cancelled chan struct{}
+	stopOnce  sync.Once
+}
+
+type resistantAdapter struct {
+	started    chan string
+	cancelling chan struct{}
+	forceStop  chan struct{}
+	finished   chan struct{}
+}
+
+func newResistantAdapter() *resistantAdapter {
+	return &resistantAdapter{
+		started:    make(chan string, 1),
+		cancelling: make(chan struct{}),
+		forceStop:  make(chan struct{}),
+		finished:   make(chan struct{}),
+	}
+}
+
+func (a *resistantAdapter) Name() string { return "resistant" }
+
+func (a *resistantAdapter) ValidateConfiguration(context.Context) error { return nil }
+
+func (a *resistantAdapter) Start(_ context.Context, req agent.Request) (agent.Session, error) {
+	a.started <- req.WorkspaceDir
+	s := &resistantSession{
+		events:     make(chan agent.Event),
+		cancelling: a.cancelling,
+		forceStop:  a.forceStop,
+		finished:   a.finished,
+	}
+	go s.run()
+	return s, nil
+}
+
+type resistantSession struct {
+	events     chan agent.Event
+	cancelling chan struct{}
+	forceStop  chan struct{}
+	finished   chan struct{}
+}
+
+var errResistantCancel = errors.New("resistant cancel blocked until forced stop")
+
+func (s *resistantSession) Events() <-chan agent.Event { return s.events }
+
+func (s *resistantSession) Send(context.Context, string) error {
+	return errors.New("resistant session takes no input")
+}
+
+func (s *resistantSession) Cancel(context.Context) error {
+	close(s.cancelling)
+	<-s.forceStop
+	return errResistantCancel
+}
+
+func (s *resistantSession) Wait(ctx context.Context) (agent.Result, error) {
+	select {
+	case <-ctx.Done():
+		return agent.Result{}, ctx.Err()
+	case <-s.finished:
+		return agent.Result{}, errors.New("resistant session force-stopped")
+	}
+}
+
+func (s *resistantSession) run() {
+	defer close(s.finished)
+	defer close(s.events)
+	s.events <- agent.Event{Type: agent.EventSessionStarted}
+	<-s.forceStop
+}
+
+func (s *hangingSession) Events() <-chan agent.Event { return s.events }
+
+func (s *hangingSession) Send(context.Context, string) error {
+	return errors.New("hanging session takes no input")
+}
+
+func (s *hangingSession) Cancel(context.Context) error {
+	s.stopOnce.Do(func() {
+		close(s.cancelled)
+		close(s.stop)
+	})
+	return nil
+}
+
+func (s *hangingSession) Wait(ctx context.Context) (agent.Result, error) {
+	select {
+	case <-ctx.Done():
+		return agent.Result{}, ctx.Err()
+	case <-s.done:
+		return agent.Result{}, errors.New("hanging session interrupted")
+	}
+}
+
+func (s *hangingSession) run(ctx context.Context) {
+	defer close(s.done)
+	defer close(s.events)
+	select {
+	case s.events <- agent.Event{Type: agent.EventSessionStarted}:
+	case <-ctx.Done():
+		return
+	case <-s.stop:
+		return
+	}
+	select {
+	case <-ctx.Done():
+	case <-s.stop:
+	}
+}
+
 func (s *scriptedSession) Events() <-chan agent.Event { return s.events }
 
 func (s *scriptedSession) Send(ctx context.Context, message string) error {
@@ -461,5 +609,515 @@ func TestExecuteStopsOnCancelledTask(t *testing.T) {
 	}
 	if leaseOwner != nil {
 		t.Errorf("lease_owner = %v, want released", *leaseOwner)
+	}
+}
+
+func TestExecuteTimesOutHangingSession(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	maxRuntime := 1
+	tk, err := ts.Create(ctx, task.CreateParams{
+		Title:             "timeout task",
+		Instructions:      "hang",
+		MaxRuntimeSeconds: &maxRuntime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.DefaultRuntime = time.Hour
+
+	started := time.Now()
+	err = exec.Execute(ctx, r.ID, c)
+	if !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
+	}
+	if elapsed := time.Since(started); elapsed < 900*time.Millisecond || elapsed > 3*time.Second {
+		t.Fatalf("timeout elapsed = %s, want about 1s", elapsed)
+	}
+	select {
+	case <-adapter.cancelled:
+	default:
+		t.Fatal("session was not cancelled")
+	}
+	assertSessionStopped(t, adapter)
+
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != task.StatusTimedOut || got.FailureCode == nil ||
+		*got.FailureCode != "task_runtime_exceeded" || got.FailureMessage == nil {
+		t.Fatalf("timed-out task = %+v", got)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+	assertWorkspaceRemoved(t, <-adapter.started)
+}
+
+func TestExecuteBoundsStartupReadsWithinLease(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, 3*time.Second)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.LeaseDuration = 3 * time.Second
+	exec.runtimeDeadlineHook = func(ctx context.Context, _ *Claim) (time.Duration, time.Time, error) {
+		<-ctx.Done()
+		return 0, time.Time{}, ctx.Err()
+	}
+
+	started := time.Now()
+	err = exec.Execute(ctx, r.ID, c)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Execute = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("bounded startup took %s", elapsed)
+	}
+	select {
+	case workspace := <-adapter.started:
+		t.Fatalf("adapter started in %q after startup fence expired", workspace)
+	default:
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "active")
+}
+
+func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	tk := mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.DefaultRuntime = time.Second
+
+	if err := exec.Execute(ctx, r.ID, c); !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
+	}
+	assertSessionStopped(t, adapter)
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+	assertWorkspaceRemoved(t, <-adapter.started)
+}
+
+func TestFinalLeaseFenceRetriesTransientFailure(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	_ = mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	exec := testExecutor(db, s, ts)
+	exec.LeaseDuration = 900 * time.Millisecond
+	var calls atomic.Int32
+	exec.fenceLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		if calls.Add(1) == 1 {
+			return errors.New("temporary final fence failure")
+		}
+		return s.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
+	leaseCtx := context.WithValue(ctx, attemptLeaseStateKey{}, &attemptLeaseState{runnerID: r.ID})
+	if err := exec.fenceLeaseOwnership(leaseCtx, c); err != nil {
+		t.Fatalf("fenceLeaseOwnership = %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("final fence calls = %d, want 2", got)
+	}
+}
+
+func TestExecuteLeaseLossDuringDeadlineSkipsTimeoutSettlement(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	successor := mustRegister(t, s)
+	tk := mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, time.Second)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.DefaultRuntime = time.Second
+	exec.LeaseDuration = 600 * time.Millisecond
+	extensionStarted := make(chan struct{})
+	allowExtension := make(chan struct{})
+	var allowOnce sync.Once
+	exec.extendLeaseHook = func(_ context.Context, attemptID, runnerID string, lease time.Duration) error {
+		close(extensionStarted)
+		<-allowExtension
+		return s.ExtendLease(context.Background(), attemptID, runnerID, lease)
+	}
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		done <- exec.Execute(ctx, r.ID, c)
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		allowOnce.Do(func() { close(allowExtension) })
+		select {
+		case <-finished:
+		case <-time.After(3 * time.Second):
+		}
+	})
+
+	select {
+	case <-extensionStarted:
+	case <-time.After(time.Second):
+		t.Fatal("lease extension did not start")
+	}
+	select {
+	case <-adapter.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime deadline did not cancel session")
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET lease_owner = $1, lease_expires_at = now() + interval '1 minute'
+		WHERE id = $2`, successor.ID, c.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	allowOnce.Do(func() { close(allowExtension) })
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrLeaseLost) {
+			t.Fatalf("Execute = %v, want ErrLeaseLost", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executor did not finish after lease loss")
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status == task.StatusTimedOut || got.Status.Terminal() {
+		t.Fatalf("task status = %s, want recoverable non-terminal status", got.Status)
+	}
+}
+
+func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	tk := mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, 5*time.Second)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newResistantAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.DefaultRuntime = time.Second
+	exec.SessionStopTimeout = 100 * time.Millisecond
+	exec.LeaseDuration = 5 * time.Second
+	var extendCalls atomic.Int32
+	exec.extendLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		if extendCalls.Add(1) == 1 {
+			return errors.New("temporary lease extension failure")
+		}
+		return s.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
+	done := make(chan error, 1)
+	var executeFinished atomic.Bool
+	go func() {
+		err := exec.Execute(ctx, r.ID, c)
+		executeFinished.Store(true)
+		done <- err
+	}()
+	workspace := <-adapter.started
+	var forceOnce sync.Once
+	forceStop := func() { forceOnce.Do(func() { close(adapter.forceStop) }) }
+	t.Cleanup(func() {
+		forceStop()
+		deadline := time.NewTimer(3 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for !executeFinished.Load() {
+			select {
+			case <-deadline.C:
+				return
+			case <-ticker.C:
+			}
+		}
+	})
+
+	var initialHeartbeat time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT heartbeat_at FROM task_attempts WHERE id = $1`, c.AttemptID).
+		Scan(&initialHeartbeat); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.NewTimer(6 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(50 * time.Millisecond)
+	defer poll.Stop()
+	lastHeartbeat := initialHeartbeat
+	heartbeatAdvances := 0
+	for heartbeatAdvances < 2 || extendCalls.Load() < 3 {
+		select {
+		case err := <-done:
+			t.Fatalf("Execute returned while provider was running: %v", err)
+		case <-deadline.C:
+			t.Fatalf("lease heartbeat did not recover: advances=%d calls=%d",
+				heartbeatAdvances, extendCalls.Load())
+		case <-poll.C:
+			var heartbeat time.Time
+			if err := db.QueryRowContext(ctx, `
+				SELECT heartbeat_at FROM task_attempts WHERE id = $1`, c.AttemptID).
+				Scan(&heartbeat); err != nil {
+				t.Fatal(err)
+			}
+			if heartbeat.After(lastHeartbeat) {
+				heartbeatAdvances++
+				lastHeartbeat = heartbeat
+			}
+		}
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("workspace was removed before provider termination: %v", err)
+	}
+	var leaseOwner *string
+	var leaseExpiresAt time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT lease_owner, lease_expires_at FROM task_attempts WHERE id = $1`, c.AttemptID).
+		Scan(&leaseOwner, &leaseExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if leaseOwner == nil || *leaseOwner != r.ID {
+		t.Fatalf("lease_owner = %v, want %s", leaseOwner, r.ID)
+	}
+	if !leaseExpiresAt.After(time.Now()) {
+		t.Fatalf("lease expired while provider was running: %s", leaseExpiresAt)
+	}
+
+	forceStop()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrSessionStopFailed) || !errors.Is(err, ErrAttemptFailed) ||
+			!errors.Is(err, errResistantCancel) {
+			t.Fatalf("Execute = %v, want shutdown, attempt, and cancel errors", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executor did not finish after provider termination")
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+	assertWorkspaceRemoved(t, workspace)
+}
+
+func TestExecuteRecoveryKeepsOriginalRuntimeDeadline(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	dead := mustRegister(t, s)
+	successor := mustRegister(t, s)
+	maxRuntime := 1
+	tk, err := ts.Create(ctx, task.CreateParams{
+		Title:             "recovered timeout task",
+		Instructions:      "hang",
+		MaxRuntimeSeconds: &maxRuntime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Claim(ctx, dead.ID, time.Minute)
+	if err != nil || first == nil {
+		t.Fatalf("first claim = %+v, %v", first, err)
+	}
+	for _, to := range []task.Status{
+		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
+	} {
+		if _, err := ts.Transition(ctx, tk.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET started_at = now() - interval '2 seconds',
+			lease_expires_at = now() - interval '1 second'
+		WHERE id = $1`, first.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Claim(ctx, successor.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("recovery claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+
+	started := time.Now()
+	if err := exec.Execute(ctx, successor.ID, c); !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("recovered expired deadline took %s", elapsed)
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+	select {
+	case workspace := <-adapter.started:
+		t.Fatalf("expired recovery started adapter in %q", workspace)
+	default:
+	}
+	leftovers, err := filepath.Glob(filepath.Join(tmp, "agent-trail-attempt-*"))
+	if err != nil || len(leftovers) != 0 {
+		t.Fatalf("recovery workspaces = %v, %v; want none", leftovers, err)
+	}
+}
+
+func TestExecuteTimesOutRecoveredRepositorylessReview(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	dead := mustRegister(t, s)
+	successor := mustRegister(t, s)
+	maxRuntime := 1
+	tk, err := ts.Create(ctx, task.CreateParams{
+		Title:             "recovered review timeout task",
+		Instructions:      "already executed",
+		MaxRuntimeSeconds: &maxRuntime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Claim(ctx, dead.ID, time.Minute)
+	if err != nil || first == nil {
+		t.Fatalf("first claim = %+v, %v", first, err)
+	}
+	for _, to := range []task.Status{
+		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
+		task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview,
+	} {
+		if _, err := ts.Transition(ctx, tk.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET started_at = now() - interval '2 seconds',
+			lease_expires_at = now() - interval '1 second'
+		WHERE id = $1`, first.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Claim(ctx, successor.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("recovery claim = %+v, %v", c, err)
+	}
+
+	if err := testExecutor(db, s, ts).Execute(ctx, successor.ID, c); !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+}
+
+func TestExecuteCancellationInterruptsHangingSession(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	tk := mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.DefaultRuntime = time.Minute
+	done := make(chan error, 1)
+	go func() { done <- exec.Execute(ctx, r.ID, c) }()
+	workspace := <-adapter.started
+
+	cancelledAt := time.Now()
+	if _, err := ts.Cancel(ctx, tk.ID, "operator cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Execute = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not stop promptly")
+	}
+	if elapsed := time.Since(cancelledAt); elapsed > time.Second {
+		t.Fatalf("cancellation took %s, want under 1s", elapsed)
+	}
+	select {
+	case <-adapter.cancelled:
+	default:
+		t.Fatal("session was not cancelled")
+	}
+	assertSessionStopped(t, adapter)
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusCancelled {
+		t.Fatalf("task = %+v, %v; want cancelled", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "cancelled")
+	assertWorkspaceRemoved(t, workspace)
+}
+
+func assertAttemptSettled(t *testing.T, db *sql.DB, attemptID, wantStatus string) {
+	t.Helper()
+	var status string
+	var leaseOwner *string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT status, lease_owner FROM task_attempts WHERE id = $1`, attemptID).
+		Scan(&status, &leaseOwner); err != nil {
+		t.Fatal(err)
+	}
+	if status != wantStatus || leaseOwner != nil {
+		t.Fatalf("attempt status/lease = %s/%v, want %s/nil", status, leaseOwner, wantStatus)
+	}
+}
+
+func assertWorkspaceRemoved(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("workspace %q still exists: %v", path, err)
+	}
+}
+
+func assertSessionStopped(t *testing.T, adapter *hangingAdapter) {
+	t.Helper()
+	select {
+	case <-adapter.finished:
+	case <-time.After(time.Second):
+		t.Fatal("session did not finish")
 	}
 }

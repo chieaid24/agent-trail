@@ -57,8 +57,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AgentModel != "" || cfg.AgentCLIVersion != "" {
 		t.Errorf("agent model/version = %q/%q, want empty", cfg.AgentModel, cfg.AgentCLIVersion)
 	}
-	if cfg.AgentTimeout != 2700*time.Second {
-		t.Errorf("AgentTimeout = %v, want 2700s", cfg.AgentTimeout)
+	if cfg.DefaultTaskRuntime != 2700*time.Second {
+		t.Errorf("DefaultTaskRuntime = %v, want 2700s", cfg.DefaultTaskRuntime)
 	}
 	if cfg.OTLPEndpoint != "localhost:4317" {
 		t.Errorf("OTLPEndpoint = %q, want localhost:4317", cfg.OTLPEndpoint)
@@ -76,9 +76,9 @@ func TestLoadAgentProviderOverrideAndValidation(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.AgentProvider != "claude-code" || cfg.AgentCLIPath != "/usr/local/bin/claude" ||
-		cfg.AgentModel != "claude-sonnet-5" || cfg.AgentTimeout != 600*time.Second {
+		cfg.AgentModel != "claude-sonnet-5" || cfg.DefaultTaskRuntime != 600*time.Second {
 		t.Errorf("agent overrides = %q/%q/%q/%v", cfg.AgentProvider,
-			cfg.AgentCLIPath, cfg.AgentModel, cfg.AgentTimeout)
+			cfg.AgentCLIPath, cfg.AgentModel, cfg.DefaultTaskRuntime)
 	}
 
 	clearEnv(t)

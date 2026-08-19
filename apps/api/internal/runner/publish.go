@@ -109,7 +109,13 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 		// A dead previous owner on this host may have left the worktree or
 		// its branch behind; clear both and retry once. A cleanup failure
 		// must not mask the original error.
-		if cleanupErr := e.Workspaces.CleanupStale(ctx, repoRef, c.AttemptID, branch); cleanupErr != nil {
+		if fenceErr := e.fenceLeaseOwnership(ctx, c); fenceErr != nil {
+			return gitworkspace.Workspace{}, errors.Join(err,
+				fmt.Errorf("fence stale workspace cleanup: %w", fenceErr))
+		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), e.leaseOperationTimeout())
+		defer cleanupCancel()
+		if cleanupErr := e.Workspaces.CleanupStale(cleanupCtx, repoRef, c.AttemptID, branch); cleanupErr != nil {
 			return gitworkspace.Workspace{}, errors.Join(err, cleanupErr)
 		}
 		ws, err = e.createWorktree(ctx, c, params)
@@ -241,7 +247,7 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 // publishRecovered resumes publishing for an attempt claimed at status
 // publishing: reattach the surviving worktree when it exists, otherwise
 // publish from the already-pushed branch, otherwise the work is gone.
-func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget) (task.Status, error) {
+func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget) (st task.Status, retErr error) {
 	if t.WorkingBranch == nil || t.BaseCommitSHA == nil {
 		return "", e.failTask(ctx, c, "publish_state_missing",
 			"task reached publishing without a recorded branch and base commit")
@@ -254,6 +260,12 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 		return "", err
 	}
 	if ws, ok := e.Workspaces.Lookup(c.AttemptID, repoRef, branch, base); ok {
+		workspaceCleaned := false
+		defer func() {
+			if !workspaceCleaned {
+				retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
+			}
+		}()
 		// Refresh the mirror's stored credential before reusing its remote.
 		fetchCtx, span := startSpan(ctx, "git.fetch", c)
 		_, err := e.Workspaces.EnsureMirror(fetchCtx, repoRef)
@@ -261,7 +273,14 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 		if err != nil {
 			return "", err
 		}
-		return e.publishFromWorkspace(ctx, log, c, t, pub, ws, "")
+		if _, err := e.publishFromWorkspace(ctx, log, c, t, pub, ws, ""); err != nil {
+			return "", err
+		}
+		if err := e.cleanupGitWorkspace(ctx, log, c, ws, nil); err != nil {
+			return "", err
+		}
+		workspaceCleaned = true
+		return e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
 	}
 
 	head, err := e.GitHub.BranchHeadSHA(ctx, rc.InstallationID, rc.Owner, rc.Name, branch)
@@ -276,13 +295,15 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 	if err := e.Store.RecordFinalCommit(ctx, c.AttemptID, head); err != nil {
 		return "", err
 	}
-	return e.publishToGitHub(ctx, log, c, t, pub, branch, base, head)
+	if _, err := e.publishToGitHub(ctx, log, c, t, pub, branch, base, head); err != nil {
+		return "", err
+	}
+	return e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
 }
 
 // publishToGitHub drives the GitHub surface from a pushed branch: one draft
 // PR (found or created by head branch), one check run (found or created by
-// external id), the issue comment, then awaiting_review. Every step is safe
-// to replay.
+// external id), and the issue comment. Every step is safe to replay.
 func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, branch, baseSHA, finalSHA string) (task.Status, error) {
 	if err := e.detectConflicts(ctx, log, c, t, pub.repo, baseSHA, finalSHA); err != nil {
 		return "", err
@@ -365,7 +386,7 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 		}
 	}
 
-	return e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
+	return task.StatusPublishing, nil
 }
 
 // publishNoChange settles a clean worktree: no PR, a neutral check on the

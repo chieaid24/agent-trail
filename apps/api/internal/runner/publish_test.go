@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,6 +86,7 @@ type fakePublish struct {
 	createErr   error
 	commentSeen chan struct{}
 	commentDone chan struct{}
+	tokenErr    error
 	// cancelOnComment, when set, makes the next CreateIssueComment cancel
 	// the run and fail once: the "owner died mid-publish" simulation.
 	cancelOnComment context.CancelFunc
@@ -99,6 +101,9 @@ func newFakePublish() *fakePublish {
 }
 
 func (f *fakePublish) InstallationToken(context.Context, int64) (string, error) {
+	if f.tokenErr != nil {
+		return "", f.tokenErr
+	}
 	return "test-token", nil
 }
 
@@ -385,7 +390,7 @@ func TestPublishOpensOneDraftPR(t *testing.T) {
 	assertSubsequence(t, timelineTypes(t, f.tasks, f.task.ID), []string{
 		"task.publishing", "commit.created", "branch.pushed",
 		"pull_request.created", "github.check_run.created",
-		"github.comment.posted", "task.awaiting_review", "cleanup.completed",
+		"github.comment.posted", "cleanup.completed", "task.awaiting_review",
 	})
 	for _, ev := range timelineTypes(t, f.tasks, f.task.ID) {
 		if ev == "task.completed" {
@@ -620,6 +625,224 @@ func TestPublishRetryCreatesNoSecondPR(t *testing.T) {
 	pushed := gitRun(t, f.origin, "rev-parse", "refs/heads/"+*after.WorkingBranch)
 	if pushed != secondFinal.String {
 		t.Fatalf("origin branch at %s, want %s", pushed, secondFinal.String)
+	}
+}
+
+func TestPublishCleanupFailureRemainsRecoverable(t *testing.T) {
+	f := newPublishFixture(t)
+	f.exec.LeaseDuration = 300 * time.Millisecond
+	f.exec.fenceLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		current, err := f.tasks.Get(ctx, f.task.ID)
+		if err != nil {
+			return err
+		}
+		if current.Status == task.StatusPublishing {
+			return errors.New("temporary final fence failure")
+		}
+		return f.store.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
+	c := f.claim(t)
+	if err := f.exec.Execute(context.Background(), f.runner.ID, c); err == nil {
+		t.Fatal("publish cleanup failure reported success")
+	}
+	mid, err := f.tasks.Get(context.Background(), f.task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mid.Status != task.StatusPublishing {
+		t.Fatalf("task status = %s, want recoverable publishing", mid.Status)
+	}
+	if !f.exec.Workspaces.WorkspaceExists(c.AttemptID) {
+		t.Fatal("failed cleanup did not preserve worktree")
+	}
+
+	f.exec.fenceLeaseHook = nil
+	c2 := f.claim(t)
+	if err := f.exec.Execute(context.Background(), f.runner.ID, c2); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.tasks.Get(context.Background(), f.task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != task.StatusAwaitingReview {
+		t.Fatalf("task status = %s, want awaiting_review", after.Status)
+	}
+	if f.exec.Workspaces.WorkspaceExists(c.AttemptID) {
+		t.Fatal("recovered publish left worktree")
+	}
+}
+
+func TestPublishRecoveryTimeoutRemovesWorktree(t *testing.T) {
+	f := newPublishFixture(t)
+	c := f.claim(t)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	f.fake.cancelOnComment = cancel
+	if err := f.exec.Execute(runCtx, f.runner.ID, c); err == nil {
+		t.Fatal("interrupted run reported success")
+	}
+	entries, err := os.ReadDir(filepath.Join(f.wsRoot, "workspaces"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("retained worktrees = %v, %v; want one", entries, err)
+	}
+	if _, err := f.db.Exec(`UPDATE tasks SET max_runtime_seconds = 1 WHERE id = $1`,
+		f.task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`
+		UPDATE task_attempts SET started_at = now() - interval '2 seconds'
+		WHERE id = $1`, c.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+
+	c2 := f.claim(t)
+	if err := f.exec.Execute(context.Background(), f.runner.ID, c2); !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("recovered Execute = %v, want ErrAttemptFailed", err)
+	}
+	got, err := f.tasks.Get(context.Background(), f.task.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	entries, err = os.ReadDir(filepath.Join(f.wsRoot, "workspaces"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("worktrees after timeout = %v, %v; want none", entries, err)
+	}
+}
+
+func TestValidatingRecoveryTimeoutRemovesWorktree(t *testing.T) {
+	f := newPublishFixture(t)
+	ctx := context.Background()
+	c := f.claim(t)
+	pub, err := f.exec.publishTarget(ctx, c, f.task)
+	if err != nil || pub == nil {
+		t.Fatalf("publish target = %+v, %v", pub, err)
+	}
+	ws, err := f.exec.provisionWorkspace(ctx, c, f.task, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(ws.Path, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []task.Status{
+		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
+		task.StatusValidating,
+	} {
+		if _, err := f.tasks.Transition(ctx, f.task.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.db.Exec(`UPDATE tasks SET max_runtime_seconds = 1 WHERE id = $1`,
+		f.task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`
+		UPDATE task_attempts
+		SET started_at = now() - interval '2 seconds',
+			lease_expires_at = now() - interval '1 second'
+		WHERE id = $1`, c.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+
+	c2 := f.claim(t)
+	f.fake.tokenErr = errors.New("token service unavailable")
+	if err := f.exec.Execute(ctx, f.runner.ID, c2); !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("recovered Execute = %v, want ErrAttemptFailed", err)
+	}
+	got, err := f.tasks.Get(ctx, f.task.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(f.wsRoot, "workspaces"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("worktrees after timeout = %v, %v; want none", entries, err)
+	}
+}
+
+func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
+	f := newPublishFixture(t)
+	ctx := context.Background()
+	c := f.claim(t)
+	adapter := newResistantAdapter()
+	f.exec.Adapter = adapter
+	f.exec.DefaultRuntime = time.Minute
+	f.exec.LeaseDuration = 3 * time.Second
+	transientSeen := make(chan struct{})
+	allowRetry := make(chan struct{})
+	leaseLost := make(chan struct{})
+	var extendCalls atomic.Int32
+	f.exec.extendLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		switch extendCalls.Add(1) {
+		case 1:
+			close(transientSeen)
+			return errors.New("temporary lease extension failure")
+		case 2:
+			<-allowRetry
+		}
+		return f.store.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
+	f.exec.leaseLostHook = func() { close(leaseLost) }
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		done <- f.exec.Execute(ctx, f.runner.ID, c)
+		close(finished)
+	}()
+	workspace := <-adapter.started
+	var forceOnce sync.Once
+	forceStop := func() { forceOnce.Do(func() { close(adapter.forceStop) }) }
+	var allowOnce sync.Once
+	allowLeaseRetry := func() { allowOnce.Do(func() { close(allowRetry) }) }
+	t.Cleanup(func() {
+		allowLeaseRetry()
+		forceStop()
+		select {
+		case <-finished:
+		case <-time.After(3 * time.Second):
+		}
+		current, err := f.tasks.Get(ctx, f.task.ID)
+		if err == nil && current.WorkingBranch != nil {
+			_ = f.exec.Workspaces.CleanupStale(ctx,
+				gitworkspace.RepoRef{ID: *current.RepositoryID}, c.AttemptID, *current.WorkingBranch)
+		}
+	})
+
+	select {
+	case <-transientSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("heartbeat did not encounter transient failure")
+	}
+	successor := mustRegister(t, f.store)
+	if _, err := f.db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET lease_owner = $1, lease_expires_at = now() + interval '1 minute'
+		WHERE id = $2`, successor.ID, c.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.tasks.Transition(ctx, f.task.ID, task.TransitionParams{
+		To: task.StatusTimedOut, Source: "runner", FailureCode: "successor_timeout",
+		FailureMessage: "successor settled transferred attempt",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	forceStop()
+	select {
+	case <-leaseLost:
+	case <-time.After(2 * time.Second):
+		t.Fatal("final cleanup did not detect lease transfer")
+	}
+	allowLeaseRetry()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrLeaseLost) {
+			t.Fatalf("Execute = %v, want ErrLeaseLost", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale executor did not finish")
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("stale owner removed successor workspace: %v", err)
 	}
 }
 

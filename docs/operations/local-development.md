@@ -67,13 +67,14 @@ The worker is the runner host (docs/architecture/runner.md). Beyond
 - `RUNNER_LOST_AFTER_SECONDS` (30): heartbeat staleness that marks a runner
   lost; must exceed the heartbeat interval
 - `WORKER_POLL_SECONDS` (2): idle claim-poll interval
+- `AGENT_TIMEOUT_SECONDS` (2700): default attempt runtime when a task omits
+  `max_runtime_seconds`; the executor enforces it for every adapter
 
-The worker also reads the agent adapter selection (`AGENT_PROVIDER` and the
-other `AGENT_*` variables) - see docs/architecture/agent-providers.md and
-`.env.example` for the list and defaults - plus `RUNNER_TYPE` (process,
-docker, or kubernetes) and the one-shot controls `WORKER_MAX_TASKS` and
-`WORKER_IDLE_EXIT_SECONDS` that a Kubernetes Job runner sets so the Job
-completes and TTL cleanup applies.
+The worker also reads the agent adapter selection and CLI settings - see
+docs/architecture/agent-providers.md and `.env.example` for the list and
+defaults - plus `RUNNER_TYPE` (process, docker, or kubernetes) and the one-shot
+controls `WORKER_MAX_TASKS` and `WORKER_IDLE_EXIT_SECONDS` that a Kubernetes
+Job runner sets so the Job completes and TTL cleanup applies.
 
 The Kubernetes Job template requires an explicit
 `OTEL_EXPORTER_OTLP_ENDPOINT`. The local kind verifier sets it to `off`; a live

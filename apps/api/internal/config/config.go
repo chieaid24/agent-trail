@@ -35,6 +35,9 @@ type Config struct {
 	RunnerLostAfter time.Duration
 	// WorkerPoll is the idle claim-poll interval (WORKER_POLL_SECONDS).
 	WorkerPoll time.Duration
+	// DefaultTaskRuntime applies when a task omits max_runtime_seconds
+	// (AGENT_TIMEOUT_SECONDS).
+	DefaultTaskRuntime time.Duration
 	// RunnerType identifies how this worker is hosted in the runner
 	// registry: process, docker, or kubernetes (RUNNER_TYPE).
 	RunnerType string
@@ -75,8 +78,7 @@ type Config struct {
 	// default false for plain-HTTP localhost development).
 	AuthCookieSecure bool
 	// AgentProvider selects the agent adapter: "fake" (default) or
-	// "claude-code" (AGENT_PROVIDER). The remaining Agent* settings apply only
-	// to the Claude Code CLI adapter (docs/architecture/agent-providers.md).
+	// "claude-code" (AGENT_PROVIDER).
 	AgentProvider string
 	// AgentCLIPath is the Claude Code executable, resolved from PATH when bare
 	// (AGENT_CLI_PATH, default "claude").
@@ -89,9 +91,6 @@ type Config struct {
 	// AgentCLIVersion, when set, pins the CLI version: it must appear in
 	// `claude --version` or the worker refuses to start (AGENT_CLI_VERSION).
 	AgentCLIVersion string
-	// AgentTimeout is the hard per-attempt agent runtime cap
-	// (AGENT_TIMEOUT_SECONDS).
-	AgentTimeout time.Duration
 	// OTLPEndpoint is the plaintext OTLP/gRPC target; "off" disables export.
 	OTLPEndpoint string
 }
@@ -188,7 +187,7 @@ func Load() (Config, error) {
 		{&cfg.RunnerHeartbeat, "RUNNER_HEARTBEAT_SECONDS", 10},
 		{&cfg.RunnerLostAfter, "RUNNER_LOST_AFTER_SECONDS", 30},
 		{&cfg.WorkerPoll, "WORKER_POLL_SECONDS", 2},
-		{&cfg.AgentTimeout, "AGENT_TIMEOUT_SECONDS", 2700},
+		{&cfg.DefaultTaskRuntime, "AGENT_TIMEOUT_SECONDS", 2700},
 	} {
 		secs, err := envSeconds(d.key, d.fallback)
 		if err != nil {

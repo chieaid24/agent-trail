@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-27
+- Amended: 2026-08-19
 
 ## Context
 
@@ -21,6 +22,14 @@ into the neutral event stream inside the `agent` package. Provider
 selection is worker configuration (`AGENT_PROVIDER`), and every
 Claude-specific type stays behind the adapter boundary.
 
+The executor, not an adapter, owns the attempt deadline. It derives that
+deadline from the task's `max_runtime_seconds`, uses
+`AGENT_TIMEOUT_SECONDS` only as the default, and carries the original
+attempt deadline across lease recovery. Adapters receive the deadline on
+their caller context and must implement `Session.Cancel` so API cancellation
+can stop provider-specific work. [ADR-0016](0016-executor-owned-task-runtime.md)
+defines that provider-neutral lifecycle policy.
+
 ## Alternatives
 
 - Claude Agent SDK: a typed stream instead of parsed stdout, but it moves
@@ -34,6 +43,9 @@ Claude-specific type stays behind the adapter boundary.
 - Bare model API with a homegrown loop: full control of the event shape at
   the cost of rebuilding tool execution, permissions, and planning that the
   CLI already provides. Rejected for scope.
+- Provider-local runtime limits: simple for one adapter, but they do not cover
+  fake or future adapters and cannot consistently enforce per-task overrides.
+  The executor is the provider-neutral lifecycle owner.
 
 ## Consequences
 
@@ -43,8 +55,10 @@ Claude-specific type stays behind the adapter boundary.
   corrupting timelines.
 - Print mode takes no follow-up input, so `Session.Send` is unsupported
   for this provider until an interactive surface is adopted.
-- The CLI spawns tool subprocesses; the adapter owns the whole process
-  group so timeout and cancellation kill everything the session started.
+- The CLI spawns tool subprocesses; the adapter owns the whole process group
+  while the executor owns timeout and cancellation policy. Either signal
+  kills everything the session started, and the executor drains the terminal
+  event stream before releasing task resources.
 
 ## Security implications
 

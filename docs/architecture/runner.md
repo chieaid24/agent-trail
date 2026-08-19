@@ -78,7 +78,11 @@ Required guarantees:
 - At-least-once task delivery is acceptable.
 - Only one runner may own an attempt at a time.
 - Every ownership claim must have an expiration.
+- The executor revalidates and extends a claim under a bounded context before
+  reading task state or starting provider work.
 - Runner heartbeats extend the lease.
+- A transient lease-extension error cancels active work but keeps retrying while
+  ownership may remain. Only `ErrLeaseLost` proves that retries must stop.
 - A lost runner must not immediately cause duplicate execution.
 - Publishing must be idempotent.
 
@@ -122,6 +126,58 @@ heartbeat_at      -- last lease extension, for diagnostics
 ```
 
 `runner_id` records which runner ran the attempt and survives release.
+
+## Runtime limits and cancellation
+
+The executor owns the attempt deadline, independent of the selected agent
+adapter. `tasks.max_runtime_seconds` is authoritative when present;
+`AGENT_TIMEOUT_SECONDS` supplies the 2700-second default when it is absent.
+Recovery preserves the original attempt deadline by computing it from the
+stored `task_attempts.started_at` value rather than granting a fresh runtime.
+
+When the deadline expires, the executor cancels the session and its context.
+After provider termination and a successful final ownership fence, it
+transitions the task and attempt to `timed_out` with failure code
+`task_runtime_exceeded`, removes the workspace, and releases the lease. The
+adapter's `Session.Cancel` contract is what lets provider-specific
+implementations stop their own processes; the Claude Code adapter kills the CLI
+process group.
+If an adapter ignores both cancellation signals, the executor keeps extending
+the lease and preserves the workspace until termination is proven. While lease
+renewal succeeds, a shutdown that exceeds five seconds adds
+`ErrSessionStopFailed` to the eventual result but does not let the host process
+another task or a new owner reclaim this one. Cleanup begins only after the
+provider stops. If ownership transferred, the stale owner preserves the
+repository workspace and does not release the successor's lease.
+
+The task store records API cancellation immediately. While an attempt runs,
+the executor checks that terminal state every 100ms. The next successful poll
+that observes cancellation cancels the live session and execution context.
+Because the task is already terminal, an owner that passes the final fence
+removes the workspace and lease without another state transition. Shutdown and
+lease loss remain recoverable interruptions: a stale owner leaves repository
+worktrees intact for the current owner or operator recovery, while
+repository-less temporary workspaces are removed.
+
+The same cleanup contract covers recovery from any status with recorded git
+context, including `validating` and `publishing`: terminal timeout or
+cancellation removes a reattached worktree even when the deadline expires
+before the stage resumes. Recovery cleanup uses the recorded repository ID and
+branch, so it does not depend on GitHub access and removes partial workspace
+directories as well as registered worktrees. Workspace-removal, cleanup-event,
+and lease-release errors are returned by the executor as well as logged; they
+are never reported as successful cleanup. Cleanup database writes use bounded
+contexts. Immediately before a runner-driven transition or repository cleanup,
+the executor extends the lease under a context shorter than the lease itself.
+A failed final fence records `ErrLeaseLost` independently of the execution
+cancellation cause, so a stale owner performs neither settlement nor repository
+worktree cleanup. Transient final-fence errors retry within the bounded fence
+window. Publishing removes its worktree before entering the non-claimable
+`awaiting_review` state, so a cleanup failure leaves the attempt recoverable in
+`publishing`.
+
+[ADR-0016](../adr/0016-executor-owned-task-runtime.md) records why the executor
+owns this policy instead of each adapter.
 
 ## Status
 

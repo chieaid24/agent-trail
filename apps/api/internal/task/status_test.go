@@ -19,7 +19,7 @@ var specEdges = map[Status][]Status{
 	StatusPublishing: {StatusAwaitingReview, StatusFailed, StatusTimedOut,
 		StatusCancelled},
 	StatusAwaitingReview: {StatusCompleted, StatusRevisionRequested,
-		StatusCancelled},
+		StatusCancelled, StatusTimedOut},
 	StatusRevisionRequested: {StatusQueued, StatusCancelled},
 	StatusCompleted:         {},
 	StatusFailed:            {},

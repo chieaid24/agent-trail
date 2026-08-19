@@ -156,8 +156,7 @@ func (s *scriptSession) run(ctx context.Context, req agent.Request) {
 		return
 
 	case len(mode) > 0 && mode[0] == modeHang:
-		// A hung provider: never another event, never a result, until the
-		// runner process itself stops.
+		// A hung provider emits nothing else until its context or session stops.
 		select {
 		case <-ctx.Done():
 		case <-s.stop:
