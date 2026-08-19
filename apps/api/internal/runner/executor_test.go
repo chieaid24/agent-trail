@@ -313,12 +313,14 @@ type scriptedSession struct {
 type hangingAdapter struct {
 	started   chan string
 	cancelled chan struct{}
+	finished  chan struct{}
 }
 
 func newHangingAdapter() *hangingAdapter {
 	return &hangingAdapter{
 		started:   make(chan string, 1),
 		cancelled: make(chan struct{}),
+		finished:  make(chan struct{}),
 	}
 }
 
@@ -330,7 +332,7 @@ func (a *hangingAdapter) Start(ctx context.Context, req agent.Request) (agent.Se
 	a.started <- req.WorkspaceDir
 	s := &hangingSession{
 		events:    make(chan agent.Event),
-		done:      make(chan struct{}),
+		done:      a.finished,
 		stop:      make(chan struct{}),
 		cancelled: a.cancelled,
 	}
@@ -575,6 +577,7 @@ func TestExecuteTimesOutHangingSession(t *testing.T) {
 	default:
 		t.Fatal("session was not cancelled")
 	}
+	assertSessionStopped(t, adapter)
 
 	got, err := ts.Get(ctx, tk.ID)
 	if err != nil {
@@ -605,6 +608,7 @@ func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {
 	if err := exec.Execute(ctx, r.ID, c); !errors.Is(err, ErrAttemptFailed) {
 		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
 	}
+	assertSessionStopped(t, adapter)
 	got, err := ts.Get(ctx, tk.ID)
 	if err != nil || got.Status != task.StatusTimedOut {
 		t.Fatalf("task = %+v, %v; want timed_out", got, err)
@@ -678,6 +682,54 @@ func TestExecuteRecoveryKeepsOriginalRuntimeDeadline(t *testing.T) {
 	}
 }
 
+func TestExecuteTimesOutRecoveredRepositorylessReview(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	dead := mustRegister(t, s)
+	successor := mustRegister(t, s)
+	maxRuntime := 1
+	tk, err := ts.Create(ctx, task.CreateParams{
+		Title:             "recovered review timeout task",
+		Instructions:      "already executed",
+		MaxRuntimeSeconds: &maxRuntime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Claim(ctx, dead.ID, time.Minute)
+	if err != nil || first == nil {
+		t.Fatalf("first claim = %+v, %v", first, err)
+	}
+	for _, to := range []task.Status{
+		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
+		task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview,
+	} {
+		if _, err := ts.Transition(ctx, tk.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET started_at = now() - interval '2 seconds',
+			lease_expires_at = now() - interval '1 second'
+		WHERE id = $1`, first.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Claim(ctx, successor.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("recovery claim = %+v, %v", c, err)
+	}
+
+	if err := testExecutor(db, s, ts).Execute(ctx, successor.ID, c); !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+}
+
 func TestExecuteCancellationInterruptsHangingSession(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -715,6 +767,7 @@ func TestExecuteCancellationInterruptsHangingSession(t *testing.T) {
 	default:
 		t.Fatal("session was not cancelled")
 	}
+	assertSessionStopped(t, adapter)
 	got, err := ts.Get(ctx, tk.ID)
 	if err != nil || got.Status != task.StatusCancelled {
 		t.Fatalf("task = %+v, %v; want cancelled", got, err)
@@ -741,5 +794,14 @@ func assertWorkspaceRemoved(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("workspace %q still exists: %v", path, err)
+	}
+}
+
+func assertSessionStopped(t *testing.T, adapter *hangingAdapter) {
+	t.Helper()
+	select {
+	case <-adapter.finished:
+	case <-time.After(time.Second):
+		t.Fatal("session did not finish")
 	}
 }

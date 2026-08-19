@@ -3,11 +3,15 @@ package runner
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -121,4 +125,51 @@ func TestExecuteCompletesClaudeTaskWithoutPlan(t *testing.T) {
 		"task.planning", "agent.started", "agent.completed",
 		"task.executing", "task.validating", "task.completed",
 	})
+}
+
+func TestExecuteTimeoutStopsClaudeProcess(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	maxRuntime := 1
+	tk, err := ts.Create(ctx, task.CreateParams{
+		Title:             "timed Claude task",
+		Instructions:      "hang",
+		MaxRuntimeSeconds: &maxRuntime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	pidFile := filepath.Join(t.TempDir(), "claude.pid")
+	stub := "printf '%s' \"$$\" > " + strconv.Quote(pidFile) + "\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"m\",\"session_id\":\"s\"}'\n" +
+		"sleep 30\n"
+
+	started := time.Now()
+	err = claudeExecutor(db, s, ts, stubClaudeCLI(t, stub)).Execute(ctx, r.ID, c)
+	if !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("Claude timeout took %s", elapsed)
+	}
+	rawPID, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(rawPID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("Claude process %d still exists: %v", pid, err)
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
 }

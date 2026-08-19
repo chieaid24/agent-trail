@@ -44,13 +44,15 @@ Terminal states:
 - CANCELLED
 - TIMED_OUT
 
-Beyond the diagram, two rule-based edge families exist (safe failure):
+Beyond the diagram, these rule-based edges exist for safe failure:
 
 - Any non-terminal state -> CANCELLED.
 - Any running state (PROVISIONING, PLANNING, EXECUTING, VALIDATING,
   PUBLISHING) -> FAILED or TIMED_OUT. The diagram draws VALIDATING -> FAILED
   because validation failure is the common case; a crash, timeout, or rate
   limit in any running state must also land in a clear terminal state.
+- AWAITING_REVIEW -> TIMED_OUT supports recovery of a repository-less attempt
+  whose original runtime expired before its executor auto-completed it.
 
 Statuses are stored lowercase (`created`, `queued`, ... `awaiting_review`,
 `revision_requested`, `timed_out`). Each status maps to a stored, derived

@@ -241,7 +241,7 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 // publishRecovered resumes publishing for an attempt claimed at status
 // publishing: reattach the surviving worktree when it exists, otherwise
 // publish from the already-pushed branch, otherwise the work is gone.
-func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget) (task.Status, error) {
+func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget) (st task.Status, retErr error) {
 	if t.WorkingBranch == nil || t.BaseCommitSHA == nil {
 		return "", e.failTask(ctx, c, "publish_state_missing",
 			"task reached publishing without a recorded branch and base commit")
@@ -254,6 +254,12 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 		return "", err
 	}
 	if ws, ok := e.Workspaces.Lookup(c.AttemptID, repoRef, branch, base); ok {
+		defer func() {
+			if errors.Is(retErr, context.DeadlineExceeded) {
+				retErr = e.timeoutTask(ctx, c, e.taskRuntime(t))
+			}
+			retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
+		}()
 		// Refresh the mirror's stored credential before reusing its remote.
 		fetchCtx, span := startSpan(ctx, "git.fetch", c)
 		_, err := e.Workspaces.EnsureMirror(fetchCtx, repoRef)

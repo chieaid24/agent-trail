@@ -133,6 +133,7 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	if timedOut {
 		err = e.timeoutTask(ctx, c, runtime)
 	}
+	err = e.cleanupTerminalRecovery(ctx, log, c, err)
 	// Release only our own lease; after ErrLeaseLost there is nothing to
 	// release and the attempt may already belong to another runner.
 	if !errors.Is(err, ErrLeaseLost) {
@@ -144,9 +145,41 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 				slog.String("event", "runner_lease_release_failed"),
 				slog.String("error", relErr.Error()),
 			)
+			err = errors.Join(err, fmt.Errorf("release lease: %w", relErr))
 		}
 	}
 	return err
+}
+
+func (e *Executor) cleanupTerminalRecovery(ctx context.Context, log *slog.Logger, c *Claim, retErr error) error {
+	if c.TaskStatus != task.StatusPublishing || e.Workspaces == nil {
+		return retErr
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
+	defer cancel()
+	t, err := e.Tasks.Get(cleanupCtx, c.TaskID)
+	if err != nil {
+		return errors.Join(retErr, fmt.Errorf("read task for recovery cleanup: %w", err))
+	}
+	if !t.Status.Terminal() || t.WorkingBranch == nil || t.BaseCommitSHA == nil {
+		return retErr
+	}
+	pub, err := e.publishTarget(cleanupCtx, c, t)
+	if err != nil {
+		return errors.Join(retErr, fmt.Errorf("resolve recovery cleanup target: %w", err))
+	}
+	if pub == nil {
+		return retErr
+	}
+	repoRef, err := e.repoRef(cleanupCtx, pub.repo)
+	if err != nil {
+		return errors.Join(retErr, fmt.Errorf("resolve recovery cleanup repository: %w", err))
+	}
+	ws, ok := e.Workspaces.Lookup(c.AttemptID, repoRef, *t.WorkingBranch, *t.BaseCommitSHA)
+	if !ok {
+		return retErr
+	}
+	return e.cleanupGitWorkspace(cleanupCtx, log, c, ws, retErr)
 }
 
 func (e *Executor) runtimeDeadline(ctx context.Context, c *Claim) (time.Duration, time.Time, error) {
@@ -369,36 +402,22 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 			retErr = e.timeoutTask(ctx, c, e.taskRuntime(t))
 		}
 		if pub != nil {
-			// A settled attempt (published, or terminally failed) releases
-			// its worktree; a transient error keeps it so the recovering
-			// owner can reattach (Lookup) instead of losing the work.
-			if retErr != nil && !errors.Is(retErr, ErrAttemptFailed) {
-				current, err := e.Tasks.Get(cleanupCtx, c.TaskID)
-				if err != nil || !current.Status.Terminal() {
-					return
-				}
-			}
-			if err := e.Workspaces.Remove(cleanupCtx, ws); err != nil {
-				log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
-					slog.String("event", "runner_workspace_cleanup_failed"),
-					slog.String("error", err.Error()),
-				)
-				return
-			}
-		} else {
-			if err := os.RemoveAll(workspace); err != nil {
-				e.Metrics.observeCleanup("failed")
-				log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
-					slog.String("event", "runner_workspace_cleanup_failed"),
-					slog.String("error", err.Error()),
-				)
-				return
-			}
-			e.Metrics.observeCleanup("removed")
+			retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
+			return
+		} else if err := os.RemoveAll(workspace); err != nil {
+			e.Metrics.observeCleanup("failed")
+			log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
+				slog.String("event", "runner_workspace_cleanup_failed"),
+				slog.String("error", err.Error()),
+			)
+			retErr = errors.Join(retErr, fmt.Errorf("workspace cleanup: %w", err))
+			return
 		}
-		// Best effort; a failed append must not fail a finished attempt.
-		_ = e.Tasks.AppendAttemptEvent(cleanupCtx, c.AttemptID,
-			"cleanup.completed", "runner", map[string]any{"workspace": "removed"})
+		e.Metrics.observeCleanup("removed")
+		if err := e.Tasks.AppendAttemptEvent(cleanupCtx, c.AttemptID,
+			"cleanup.completed", "runner", map[string]any{"workspace": "removed"}); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("record workspace cleanup: %w", err))
+		}
 	}()
 	if err := e.append(ctx, c, "workspace.ready", "runner", nil); err != nil {
 		return "", err
@@ -425,11 +444,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	// channel is unbuffered, so an abandoned producer would block forever.
 	abort := func(err error) error {
 		endSpan(sessionSpan, err)
-		cancelSession(session)
-		go func() {
-			for range session.Events() {
-			}
-		}()
+		stopSession(session, session.Events())
 		return err
 	}
 	events := session.Events()
@@ -442,7 +457,8 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 				goto sessionEnded
 			}
 		case <-ctx.Done():
-			cancelSession(session)
+			endSpan(sessionSpan, ctx.Err())
+			stopSession(session, events)
 			return "", ctx.Err()
 		}
 		e.Metrics.observeLogBytes(len(ev.Payload))
@@ -520,10 +536,46 @@ sessionEnded:
 	return e.publishFromWorkspace(ctx, log, c, t, pub, ws, result.Summary)
 }
 
-func cancelSession(session agent.Session) {
+func (e *Executor) cleanupGitWorkspace(ctx context.Context, log *slog.Logger, c *Claim, ws gitworkspace.Workspace, retErr error) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
+	defer cancel()
+	if retErr != nil && !errors.Is(retErr, ErrAttemptFailed) {
+		current, err := e.Tasks.Get(cleanupCtx, c.TaskID)
+		if err != nil || !current.Status.Terminal() {
+			return retErr
+		}
+	}
+	if err := e.Workspaces.Remove(cleanupCtx, ws); err != nil {
+		e.Metrics.observeCleanup("failed")
+		log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
+			slog.String("event", "runner_workspace_cleanup_failed"),
+			slog.String("error", err.Error()),
+		)
+		return errors.Join(retErr, fmt.Errorf("workspace cleanup: %w", err))
+	}
+	e.Metrics.observeCleanup("removed")
+	if err := e.Tasks.AppendAttemptEvent(cleanupCtx, c.AttemptID,
+		"cleanup.completed", "runner", map[string]any{"workspace": "removed"}); err != nil {
+		return errors.Join(retErr, fmt.Errorf("record workspace cleanup: %w", err))
+	}
+	return retErr
+}
+
+func stopSession(session agent.Session, events <-chan agent.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), sessionCancelTimeout)
 	defer cancel()
-	_ = session.Cancel(ctx)
+	drained := make(chan struct{})
+	go func() {
+		for range events {
+		}
+		_, _ = session.Wait(ctx)
+		close(drained)
+	}()
+	go func() { _ = session.Cancel(ctx) }()
+	select {
+	case <-drained:
+	case <-ctx.Done():
+	}
 }
 
 // workspaceLostNote explains an unrunnable recovery-path validation.

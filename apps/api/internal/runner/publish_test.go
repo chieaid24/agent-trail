@@ -623,6 +623,43 @@ func TestPublishRetryCreatesNoSecondPR(t *testing.T) {
 	}
 }
 
+func TestPublishRecoveryTimeoutRemovesWorktree(t *testing.T) {
+	f := newPublishFixture(t)
+	c := f.claim(t)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	f.fake.cancelOnComment = cancel
+	if err := f.exec.Execute(runCtx, f.runner.ID, c); err == nil {
+		t.Fatal("interrupted run reported success")
+	}
+	entries, err := os.ReadDir(filepath.Join(f.wsRoot, "workspaces"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("retained worktrees = %v, %v; want one", entries, err)
+	}
+	if _, err := f.db.Exec(`UPDATE tasks SET max_runtime_seconds = 1 WHERE id = $1`,
+		f.task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Exec(`
+		UPDATE task_attempts SET started_at = now() - interval '2 seconds'
+		WHERE id = $1`, c.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+
+	c2 := f.claim(t)
+	if err := f.exec.Execute(context.Background(), f.runner.ID, c2); !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("recovered Execute = %v, want ErrAttemptFailed", err)
+	}
+	got, err := f.tasks.Get(context.Background(), f.task.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	entries, err = os.ReadDir(filepath.Join(f.wsRoot, "workspaces"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("worktrees after timeout = %v, %v; want none", entries, err)
+	}
+}
+
 // TestPublishNoChangeCreatesNoPR is the empty-diff acceptance: a session
 // that changes nothing opens no PR, resolves the check neutral on the base
 // commit, explains itself on the issue, and fails the task as no_change.
