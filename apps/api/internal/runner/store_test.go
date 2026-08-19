@@ -390,3 +390,103 @@ func TestRecordAttemptPublishFieldsFirstWriteWins(t *testing.T) {
 	}
 	_ = tk
 }
+
+// TestClaimRecoversStrandedRepositorylessAwaitingReview: a task with no
+// repository only passes through awaiting_review on its way to the
+// executor's auto-complete, so an owner that dies between those two
+// commits must not strand it - the attempt stays claimable and the next
+// owner completes it. Found by the database-restart failure injection.
+func TestClaimRecoversStrandedRepositorylessAwaitingReview(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	tk := mustCreateTask(t, ts)
+
+	// The dead owner drove the task all the way to awaiting_review and
+	// vanished before the completing transition; no lease is held.
+	for _, to := range []task.Status{
+		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
+		task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview,
+	} {
+		if _, err := ts.Transition(ctx, tk.ID, task.TransitionParams{
+			To: to, Source: "runner",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	successor := mustRegister(t, s)
+	c, err := s.Claim(ctx, successor.ID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil {
+		t.Fatal("stranded awaiting_review task was not claimable")
+	}
+	if c.TaskStatus != task.StatusAwaitingReview {
+		t.Fatalf("claimed status = %s, want awaiting_review", c.TaskStatus)
+	}
+	if err := testExecutor(db, s, ts).Execute(ctx, successor.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != task.StatusCompleted {
+		t.Errorf("recovered task status = %s, want completed", got.Status)
+	}
+}
+
+// TestClaimSkipsPublishedAwaitingReview: a repository-backed task in
+// awaiting_review rests there for a human on the draft PR and must never
+// be re-claimed.
+func TestClaimSkipsPublishedAwaitingReview(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+
+	var orgID, repoID string
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO organizations
+			(name, slug, github_account_id, github_account_login, github_account_type)
+		VALUES ('Acme', 'acme', 4242, 'acme', 'Organization')
+		RETURNING id`).Scan(&orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.QueryRowContext(ctx, `
+		INSERT INTO repositories
+			(organization_id, github_repository_id, owner, name, full_name, clone_url)
+		VALUES ($1, 4243, 'acme', 'svc', 'acme/svc', 'https://github.example/acme/svc.git')
+		RETURNING id`, orgID).Scan(&repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issue := int64(7)
+	tk, err := ts.Create(ctx, task.CreateParams{
+		Title:             "published task at rest",
+		Instructions:      "do the thing",
+		SourceType:        "github_issue",
+		SourceIssueNumber: &issue,
+		OrganizationID:    &orgID,
+		RepositoryID:      &repoID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []task.Status{
+		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
+		task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview,
+	} {
+		if _, err := ts.Transition(ctx, tk.ID, task.TransitionParams{
+			To: to, Source: "runner",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r := mustRegister(t, s)
+	if c, err := s.Claim(ctx, r.ID, time.Minute); err != nil || c != nil {
+		t.Fatalf("claim on published awaiting_review = %+v, %v; want nil, nil", c, err)
+	}
+}
