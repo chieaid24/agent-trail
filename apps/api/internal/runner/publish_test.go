@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -721,7 +722,22 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 	adapter := newResistantAdapter()
 	f.exec.Adapter = adapter
 	f.exec.DefaultRuntime = time.Minute
-	f.exec.LeaseDuration = 300 * time.Millisecond
+	f.exec.LeaseDuration = 3 * time.Second
+	transientSeen := make(chan struct{})
+	allowRetry := make(chan struct{})
+	leaseLost := make(chan struct{})
+	var extendCalls atomic.Int32
+	f.exec.extendLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		switch extendCalls.Add(1) {
+		case 1:
+			close(transientSeen)
+			return errors.New("temporary lease extension failure")
+		case 2:
+			<-allowRetry
+		}
+		return f.store.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
+	f.exec.leaseLostHook = func() { close(leaseLost) }
 	done := make(chan error, 1)
 	finished := make(chan struct{})
 	go func() {
@@ -731,7 +747,10 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 	workspace := <-adapter.started
 	var forceOnce sync.Once
 	forceStop := func() { forceOnce.Do(func() { close(adapter.forceStop) }) }
+	var allowOnce sync.Once
+	allowLeaseRetry := func() { allowOnce.Do(func() { close(allowRetry) }) }
 	t.Cleanup(func() {
+		allowLeaseRetry()
 		forceStop()
 		select {
 		case <-finished:
@@ -744,6 +763,11 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 		}
 	})
 
+	select {
+	case <-transientSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("heartbeat did not encounter transient failure")
+	}
 	successor := mustRegister(t, f.store)
 	if _, err := f.db.ExecContext(ctx, `
 		UPDATE task_attempts
@@ -751,8 +775,9 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 		WHERE id = $2`, successor.ID, c.AttemptID); err != nil {
 		t.Fatal(err)
 	}
+	allowLeaseRetry()
 	select {
-	case <-adapter.cancelling:
+	case <-leaseLost:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stale owner did not detect lease transfer")
 	}

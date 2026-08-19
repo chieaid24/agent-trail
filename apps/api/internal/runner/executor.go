@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
@@ -67,7 +68,19 @@ type Executor struct {
 	// SessionStopTimeout marks adapter shutdowns that exceed the safe window.
 	SessionStopTimeout  time.Duration
 	extendLeaseHook     func(context.Context, string, string, time.Duration) error
+	leaseLostHook       func()
 	runtimeDeadlineHook func(context.Context, *Claim) (time.Duration, time.Time, error)
+}
+
+type attemptLeaseState struct {
+	lost atomic.Bool
+}
+
+type attemptLeaseStateKey struct{}
+
+func leaseOwnershipLost(ctx context.Context) bool {
+	state, _ := ctx.Value(attemptLeaseStateKey{}).(*attemptLeaseState)
+	return state != nil && state.lost.Load()
 }
 
 // ErrAttemptFailed wraps every failTask error: the task reached a terminal
@@ -121,8 +134,10 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	// Stop everything on shutdown, lease loss, timeout, or task cancellation.
 	deadlineCtx, cancelDeadline := context.WithDeadline(ctx, deadline)
 	defer cancelDeadline()
-	execCtx, cancel := context.WithCancelCause(deadlineCtx)
+	cancelCtx, cancel := context.WithCancelCause(deadlineCtx)
 	defer cancel(context.Canceled)
+	leaseState := &attemptLeaseState{}
+	execCtx := context.WithValue(cancelCtx, attemptLeaseStateKey{}, leaseState)
 	leaseCtx, stopLease := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopLease()
 	cancellationDone := make(chan struct{})
@@ -160,6 +175,10 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 					return
 				}
 				if errors.Is(err, ErrLeaseLost) {
+					leaseState.lost.Store(true)
+					if e.leaseLostHook != nil {
+						e.leaseLostHook()
+					}
 					log.LogAttrs(leaseCtx, slog.LevelWarn, "lease lost; stopping",
 						slog.String("event", "runner_lease_lost"),
 						slog.String("error", err.Error()),
@@ -184,11 +203,15 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	}()
 	spanCtx, span := startSpan(execCtx, "runner.attempt", c)
 	err = e.drive(spanCtx, log, c)
+	if leaseState.lost.Load() {
+		err = errors.Join(err, ErrLeaseLost)
+	}
 	if cause := context.Cause(execCtx); cause != nil && !errors.Is(err, cause) {
 		err = errors.Join(err, cause)
 	}
 	endSpan(span, err)
-	timedOut := err != nil && errors.Is(context.Cause(execCtx), context.DeadlineExceeded) &&
+	timedOut := err != nil && !leaseState.lost.Load() &&
+		errors.Is(context.Cause(execCtx), context.DeadlineExceeded) &&
 		!errors.Is(err, ErrAttemptFailed)
 	// Stop extending before releasing, or the last extension races the
 	// release and logs a spurious loss.
@@ -199,7 +222,7 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	if timedOut {
 		err = errors.Join(e.timeoutTask(ctx, c, runtime), err)
 	}
-	err = e.cleanupTerminalRecovery(ctx, log, c, err)
+	err = e.cleanupTerminalRecovery(execCtx, log, c, err)
 	// Release only our own lease; after ErrLeaseLost there is nothing to
 	// release and the attempt may already belong to another runner.
 	if !errors.Is(err, ErrLeaseLost) {
@@ -225,7 +248,7 @@ func (e *Executor) extendLease(ctx context.Context, attemptID, runnerID string) 
 }
 
 func (e *Executor) cleanupTerminalRecovery(ctx context.Context, log *slog.Logger, c *Claim, retErr error) error {
-	if e.Workspaces == nil || errors.Is(retErr, ErrLeaseLost) {
+	if e.Workspaces == nil || errors.Is(retErr, ErrLeaseLost) || leaseOwnershipLost(ctx) {
 		return retErr
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
@@ -480,7 +503,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	defer func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
 		defer cleanupCancel()
-		if errors.Is(retErr, context.DeadlineExceeded) {
+		if errors.Is(retErr, context.DeadlineExceeded) && !leaseOwnershipLost(ctx) {
 			retErr = errors.Join(e.timeoutTask(ctx, c, e.taskRuntime(t)), retErr)
 		}
 		if pub != nil {
@@ -618,7 +641,7 @@ sessionEnded:
 }
 
 func (e *Executor) cleanupGitWorkspace(ctx context.Context, log *slog.Logger, c *Claim, ws gitworkspace.Workspace, retErr error) error {
-	if errors.Is(retErr, ErrLeaseLost) {
+	if errors.Is(retErr, ErrLeaseLost) || leaseOwnershipLost(ctx) {
 		return retErr
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
