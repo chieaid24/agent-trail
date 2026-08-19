@@ -130,6 +130,8 @@ func TestExecuteCompletesClaudeTaskWithoutPlan(t *testing.T) {
 func TestExecuteTimeoutStopsClaudeProcess(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 	r := mustRegister(t, s)
 	maxRuntime := 1
 	tk, err := ts.Create(ctx, task.CreateParams{
@@ -154,6 +156,9 @@ func TestExecuteTimeoutStopsClaudeProcess(t *testing.T) {
 	if !errors.Is(err, ErrAttemptFailed) {
 		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
 	}
+	if errors.Is(err, ErrSessionStopFailed) {
+		t.Fatalf("Execute = %v, provider termination was proven", err)
+	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
 		t.Fatalf("Claude timeout took %s", elapsed)
 	}
@@ -171,5 +176,10 @@ func TestExecuteTimeoutStopsClaudeProcess(t *testing.T) {
 	got, err := ts.Get(ctx, tk.ID)
 	if err != nil || got.Status != task.StatusTimedOut {
 		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+	leftovers, err := filepath.Glob(filepath.Join(tmp, "agent-trail-attempt-*"))
+	if err != nil || len(leftovers) != 0 {
+		t.Fatalf("workspaces = %v, %v; want none", leftovers, err)
 	}
 }

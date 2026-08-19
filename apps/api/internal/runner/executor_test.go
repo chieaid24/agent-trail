@@ -676,7 +676,7 @@ func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {
 	assertWorkspaceRemoved(t, <-adapter.started)
 }
 
-func TestExecutePreservesResourcesWhenSessionDoesNotStop(t *testing.T) {
+func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
 	r := mustRegister(t, s)
@@ -690,41 +690,48 @@ func TestExecutePreservesResourcesWhenSessionDoesNotStop(t *testing.T) {
 	exec.Adapter = adapter
 	exec.DefaultRuntime = time.Second
 	exec.SessionStopTimeout = 100 * time.Millisecond
+	exec.LeaseDuration = 150 * time.Millisecond
 	done := make(chan error, 1)
 	go func() { done <- exec.Execute(ctx, r.ID, c) }()
 	workspace := <-adapter.started
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrSessionStopFailed) || !errors.Is(err, ErrAttemptFailed) {
-			t.Fatalf("Execute = %v, want ErrSessionStopFailed and ErrAttemptFailed", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("executor did not report the failed session stop")
-	}
-	got, err := ts.Get(ctx, tk.ID)
-	if err != nil || got.Status != task.StatusTimedOut {
-		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+		t.Fatalf("Execute returned while provider was running: %v", err)
+	case <-time.After(1400 * time.Millisecond):
 	}
 	if _, err := os.Stat(workspace); err != nil {
 		t.Fatalf("workspace was removed before provider termination: %v", err)
 	}
 	var leaseOwner *string
+	var leaseExpiresAt time.Time
 	if err := db.QueryRowContext(ctx, `
-		SELECT lease_owner FROM task_attempts WHERE id = $1`, c.AttemptID).
-		Scan(&leaseOwner); err != nil {
+		SELECT lease_owner, lease_expires_at FROM task_attempts WHERE id = $1`, c.AttemptID).
+		Scan(&leaseOwner, &leaseExpiresAt); err != nil {
 		t.Fatal(err)
 	}
 	if leaseOwner == nil || *leaseOwner != r.ID {
 		t.Fatalf("lease_owner = %v, want %s", leaseOwner, r.ID)
 	}
+	if !leaseExpiresAt.After(time.Now()) {
+		t.Fatalf("lease expired while provider was running: %s", leaseExpiresAt)
+	}
 
 	close(adapter.forceStop)
 	select {
-	case <-adapter.finished:
+	case err := <-done:
+		if !errors.Is(err, ErrSessionStopFailed) || !errors.Is(err, ErrAttemptFailed) {
+			t.Fatalf("Execute = %v, want ErrSessionStopFailed and ErrAttemptFailed", err)
+		}
 	case <-time.After(time.Second):
-		t.Fatal("resistant session did not finish after forced stop")
+		t.Fatal("executor did not finish after provider termination")
 	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil || got.Status != task.StatusTimedOut {
+		t.Fatalf("task = %+v, %v; want timed_out", got, err)
+	}
+	assertAttemptSettled(t, db, c.AttemptID, "timed_out")
+	assertWorkspaceRemoved(t, workspace)
 }
 
 func TestExecuteRecoveryKeepsOriginalRuntimeDeadline(t *testing.T) {

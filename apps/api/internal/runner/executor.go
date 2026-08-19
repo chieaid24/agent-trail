@@ -64,7 +64,7 @@ type Executor struct {
 	LeaseDuration time.Duration
 	// DefaultRuntime applies when a task omits max_runtime_seconds.
 	DefaultRuntime time.Duration
-	// SessionStopTimeout bounds adapter cancellation and drain.
+	// SessionStopTimeout marks adapter shutdowns that exceed the safe window.
 	SessionStopTimeout time.Duration
 }
 
@@ -97,6 +97,8 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	// Stop everything on shutdown, lease loss, timeout, or task cancellation.
 	execCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
+	leaseCtx, stopLease := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopLease()
 	cancellationDone := make(chan struct{})
 	go func() {
 		defer close(cancellationDone)
@@ -109,12 +111,12 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		defer ticker.Stop()
 		for {
 			select {
-			case <-execCtx.Done():
+			case <-leaseCtx.Done():
 				return
 			case <-ticker.C:
-				if err := e.Store.ExtendLease(execCtx, c.AttemptID, runnerID, e.LeaseDuration); err != nil {
+				if err := e.Store.ExtendLease(leaseCtx, c.AttemptID, runnerID, e.LeaseDuration); err != nil {
 					if !errors.Is(err, context.Canceled) {
-						log.LogAttrs(execCtx, slog.LevelWarn, "lease extension failed; stopping",
+						log.LogAttrs(leaseCtx, slog.LevelWarn, "lease extension failed; stopping",
 							slog.String("event", "runner_lease_lost"),
 							slog.String("error", err.Error()),
 						)
@@ -133,15 +135,16 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	// Stop extending before releasing, or the last extension races the
 	// release and logs a spurious loss.
 	cancel()
-	<-heartbeatDone
 	<-cancellationDone
+	stopLease()
+	<-heartbeatDone
 	if timedOut {
 		err = errors.Join(e.timeoutTask(ctx, c, runtime), err)
 	}
 	err = e.cleanupTerminalRecovery(ctx, log, c, err)
 	// Release only our own lease; after ErrLeaseLost there is nothing to
 	// release and the attempt may already belong to another runner.
-	if !errors.Is(err, ErrLeaseLost) && !errors.Is(err, ErrSessionStopFailed) {
+	if !errors.Is(err, ErrLeaseLost) {
 		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer releaseCancel()
 		if relErr := e.Store.ReleaseLease(releaseCtx, c.AttemptID, runnerID); relErr != nil &&
@@ -157,7 +160,7 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 }
 
 func (e *Executor) cleanupTerminalRecovery(ctx context.Context, log *slog.Logger, c *Claim, retErr error) error {
-	if e.Workspaces == nil || errors.Is(retErr, ErrSessionStopFailed) {
+	if e.Workspaces == nil {
 		return retErr
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
@@ -414,8 +417,6 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		if pub != nil {
 			retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
 			return
-		} else if errors.Is(retErr, ErrSessionStopFailed) {
-			return
 		} else if err := os.RemoveAll(workspace); err != nil {
 			e.Metrics.observeCleanup("failed")
 			log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
@@ -547,9 +548,6 @@ sessionEnded:
 }
 
 func (e *Executor) cleanupGitWorkspace(ctx context.Context, log *slog.Logger, c *Claim, ws gitworkspace.Workspace, retErr error) error {
-	if errors.Is(retErr, ErrSessionStopFailed) {
-		return retErr
-	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
 	defer cancel()
 	if retErr != nil && !errors.Is(retErr, ErrAttemptFailed) {
@@ -575,33 +573,33 @@ func (e *Executor) cleanupGitWorkspace(ctx context.Context, log *slog.Logger, c 
 }
 
 func stopSession(session agent.Session, events <-chan agent.Event, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	cancelCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	drained := make(chan error, 1)
 	cancelled := make(chan error, 1)
 	go func() {
 		for range events {
 		}
-		_, err := session.Wait(ctx)
+		_, err := session.Wait(context.Background())
 		drained <- err
 	}()
-	go func() { cancelled <- session.Cancel(ctx) }()
-	var cancelErr, waitErr error
-	for cancelled != nil || drained != nil {
+	go func() { cancelled <- session.Cancel(cancelCtx) }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var cancelErr, waitErr, stopErr error
+	for drained != nil {
 		select {
 		case cancelErr = <-cancelled:
 			cancelled = nil
 		case waitErr = <-drained:
 			drained = nil
-		case <-ctx.Done():
-			return errors.Join(cancelErr,
-				fmt.Errorf("%w: session did not stop within %s: %v",
-					ErrSessionStopFailed, timeout, ctx.Err()))
+		case <-timer.C:
+			stopErr = fmt.Errorf("%w: session did not stop within %s",
+				ErrSessionStopFailed, timeout)
 		}
 	}
 	if errors.Is(waitErr, context.Canceled) || errors.Is(waitErr, context.DeadlineExceeded) {
-		waitErr = fmt.Errorf("%w: wait returned before provider termination: %v",
-			ErrSessionStopFailed, waitErr)
+		waitErr = nil
 	}
 	if cancelErr != nil {
 		cancelErr = fmt.Errorf("cancel session: %w", cancelErr)
@@ -609,7 +607,7 @@ func stopSession(session agent.Session, events <-chan agent.Event, timeout time.
 	if waitErr != nil {
 		waitErr = fmt.Errorf("wait for stopped session: %w", waitErr)
 	}
-	return errors.Join(cancelErr, waitErr)
+	return errors.Join(stopErr, cancelErr, waitErr)
 }
 
 // workspaceLostNote explains an unrunnable recovery-path validation.
