@@ -603,7 +603,7 @@ func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {
 	adapter := newHangingAdapter()
 	exec := testExecutor(db, s, ts)
 	exec.Adapter = adapter
-	exec.DefaultRuntime = 50 * time.Millisecond
+	exec.DefaultRuntime = time.Second
 
 	if err := exec.Execute(ctx, r.ID, c); !errors.Is(err, ErrAttemptFailed) {
 		t.Fatalf("Execute = %v, want ErrAttemptFailed", err)
