@@ -79,6 +79,8 @@ Required guarantees:
 - Only one runner may own an attempt at a time.
 - Every ownership claim must have an expiration.
 - Runner heartbeats extend the lease.
+- A transient lease-extension error cancels active work but keeps retrying while
+  ownership may remain. Only `ErrLeaseLost` proves that retries must stop.
 - A lost runner must not immediately cause duplicate execution.
 - Publishing must be idempotent.
 
