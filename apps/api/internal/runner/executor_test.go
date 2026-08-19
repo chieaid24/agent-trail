@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -686,7 +687,7 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	ctx := context.Background()
 	r := mustRegister(t, s)
 	tk := mustCreateTask(t, ts)
-	c, err := s.Claim(ctx, r.ID, 2*time.Second)
+	c, err := s.Claim(ctx, r.ID, 5*time.Second)
 	if err != nil || c == nil {
 		t.Fatalf("claim = %+v, %v", c, err)
 	}
@@ -695,15 +696,70 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	exec.Adapter = adapter
 	exec.DefaultRuntime = time.Second
 	exec.SessionStopTimeout = 100 * time.Millisecond
-	exec.LeaseDuration = 2 * time.Second
+	exec.LeaseDuration = 5 * time.Second
+	var extendCalls atomic.Int32
+	exec.extendLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
+		if extendCalls.Add(1) == 1 {
+			return errors.New("temporary lease extension failure")
+		}
+		return s.ExtendLease(ctx, attemptID, runnerID, lease)
+	}
 	done := make(chan error, 1)
-	go func() { done <- exec.Execute(ctx, r.ID, c) }()
+	var executeFinished atomic.Bool
+	go func() {
+		err := exec.Execute(ctx, r.ID, c)
+		executeFinished.Store(true)
+		done <- err
+	}()
 	workspace := <-adapter.started
+	var forceOnce sync.Once
+	forceStop := func() { forceOnce.Do(func() { close(adapter.forceStop) }) }
+	t.Cleanup(func() {
+		forceStop()
+		deadline := time.NewTimer(3 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for !executeFinished.Load() {
+			select {
+			case <-deadline.C:
+				return
+			case <-ticker.C:
+			}
+		}
+	})
 
-	select {
-	case err := <-done:
-		t.Fatalf("Execute returned while provider was running: %v", err)
-	case <-time.After(3 * time.Second):
+	var initialHeartbeat time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT heartbeat_at FROM task_attempts WHERE id = $1`, c.AttemptID).
+		Scan(&initialHeartbeat); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.NewTimer(6 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(50 * time.Millisecond)
+	defer poll.Stop()
+	lastHeartbeat := initialHeartbeat
+	heartbeatAdvances := 0
+	for heartbeatAdvances < 2 || extendCalls.Load() < 3 {
+		select {
+		case err := <-done:
+			t.Fatalf("Execute returned while provider was running: %v", err)
+		case <-deadline.C:
+			t.Fatalf("lease heartbeat did not recover: advances=%d calls=%d",
+				heartbeatAdvances, extendCalls.Load())
+		case <-poll.C:
+			var heartbeat time.Time
+			if err := db.QueryRowContext(ctx, `
+				SELECT heartbeat_at FROM task_attempts WHERE id = $1`, c.AttemptID).
+				Scan(&heartbeat); err != nil {
+				t.Fatal(err)
+			}
+			if heartbeat.After(lastHeartbeat) {
+				heartbeatAdvances++
+				lastHeartbeat = heartbeat
+			}
+		}
 	}
 	if _, err := os.Stat(workspace); err != nil {
 		t.Fatalf("workspace was removed before provider termination: %v", err)
@@ -722,7 +778,7 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 		t.Fatalf("lease expired while provider was running: %s", leaseExpiresAt)
 	}
 
-	close(adapter.forceStop)
+	forceStop()
 	select {
 	case err := <-done:
 		if !errors.Is(err, ErrSessionStopFailed) || !errors.Is(err, ErrAttemptFailed) ||

@@ -461,7 +461,9 @@ func TestInjectAgentHang(t *testing.T) {
 	f := startFleet(db, s, ts, 1, &scriptAdapter{}, lease, "bench-hang")
 	defer f.stop(t)
 	waitInt(t, db, `
-		SELECT count(*) FROM tasks WHERE id = $1 AND status = 'timed_out'`,
+		SELECT count(*) FROM tasks t
+		JOIN task_attempts a ON a.task_id = t.id
+		WHERE t.id = $1 AND t.status = 'timed_out' AND a.lease_owner IS NULL`,
 		1, 5*time.Second, "runtime timeout", timed.ID)
 	timed, err = ts.Get(ctx, timed.ID)
 	if err != nil {

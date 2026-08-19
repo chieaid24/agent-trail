@@ -66,6 +66,7 @@ type Executor struct {
 	DefaultRuntime time.Duration
 	// SessionStopTimeout marks adapter shutdowns that exceed the safe window.
 	SessionStopTimeout time.Duration
+	extendLeaseHook    func(context.Context, string, string, time.Duration) error
 }
 
 // ErrAttemptFailed wraps every failTask error: the task reached a terminal
@@ -109,20 +110,49 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		defer close(heartbeatDone)
 		ticker := time.NewTicker(e.LeaseDuration / 3)
 		defer ticker.Stop()
+		retryDelay := e.LeaseDuration / 9
+		if retryDelay <= 0 || retryDelay > 100*time.Millisecond {
+			retryDelay = 100 * time.Millisecond
+		}
+		extensionTimeout := e.LeaseDuration / 3
+		if extensionTimeout <= 0 || extensionTimeout > 5*time.Second {
+			extensionTimeout = 5 * time.Second
+		}
 		for {
 			select {
 			case <-leaseCtx.Done():
 				return
 			case <-ticker.C:
-				if err := e.Store.ExtendLease(leaseCtx, c.AttemptID, runnerID, e.LeaseDuration); err != nil {
-					if !errors.Is(err, context.Canceled) {
-						log.LogAttrs(leaseCtx, slog.LevelWarn, "lease extension failed; stopping",
-							slog.String("event", "runner_lease_lost"),
-							slog.String("error", err.Error()),
-						)
-					}
+			}
+			for {
+				extendCtx, cancelExtend := context.WithTimeout(leaseCtx, extensionTimeout)
+				err := e.extendLease(extendCtx, c.AttemptID, runnerID)
+				cancelExtend()
+				if err == nil {
+					break
+				}
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				if errors.Is(err, ErrLeaseLost) {
+					log.LogAttrs(leaseCtx, slog.LevelWarn, "lease lost; stopping",
+						slog.String("event", "runner_lease_lost"),
+						slog.String("error", err.Error()),
+					)
 					cancel()
 					return
+				}
+				log.LogAttrs(leaseCtx, slog.LevelWarn, "lease extension failed; retrying",
+					slog.String("event", "runner_lease_extension_failed"),
+					slog.String("error", err.Error()),
+				)
+				cancel()
+				retry := time.NewTimer(retryDelay)
+				select {
+				case <-leaseCtx.Done():
+					retry.Stop()
+					return
+				case <-retry.C:
 				}
 			}
 		}
@@ -157,6 +187,13 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		}
 	}
 	return err
+}
+
+func (e *Executor) extendLease(ctx context.Context, attemptID, runnerID string) error {
+	if e.extendLeaseHook != nil {
+		return e.extendLeaseHook(ctx, attemptID, runnerID, e.LeaseDuration)
+	}
+	return e.Store.ExtendLease(ctx, attemptID, runnerID, e.LeaseDuration)
 }
 
 func (e *Executor) cleanupTerminalRecovery(ctx context.Context, log *slog.Logger, c *Claim, retErr error) error {
