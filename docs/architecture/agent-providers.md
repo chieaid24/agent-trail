@@ -71,7 +71,6 @@ task is future work.
 | `AGENT_MODEL` | (CLI default) | provider model |
 | `AGENT_PERMISSION_MODE` | `acceptEdits` | one of `default`, `acceptEdits`, `plan`, `bypassPermissions` |
 | `AGENT_CLI_VERSION` | (unset) | required whole version token of `claude --version`; unset skips the check |
-| `AGENT_TIMEOUT_SECONDS` | `2700` | default attempt runtime when the task omits `max_runtime_seconds` |
 
 The worker calls `ValidateConfiguration` once at startup and refuses to start
 if the selected provider is misconfigured (CLI missing, or a pinned version
@@ -135,7 +134,8 @@ backs the subprocess through `exec.CommandContext`, so expiry kills the CLI's
 whole process group and the executor records the task as `timed_out`. An API
 cancellation is detected by the executor and calls `Session.Cancel`, which
 kills the same process group. Tool subprocesses therefore do not survive to
-hold the output pipe open.
+hold the output pipe open. Runner configuration and policy live in
+[runner.md](runner.md) and [ADR-0015](../adr/0015-executor-owned-task-runtime.md).
 
 ### Guarding against CLI changes
 

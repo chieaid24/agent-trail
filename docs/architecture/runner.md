@@ -142,13 +142,18 @@ the executor checks that terminal state every 100ms. Observing cancellation
 cancels the live session and execution context; because the task is already
 terminal, cleanup removes the workspace and lease without another state
 transition. Shutdown and lease loss remain recoverable interruptions: their
-non-terminal workspaces are retained for the next owner.
+non-terminal repository worktrees are retained for the next owner, while
+repository-less temporary workspaces are removed.
 
-The same cleanup contract covers an owner recovering at `publishing`: a
-terminal timeout or cancellation removes a reattached worktree even when the
-deadline expires before publishing resumes. Workspace-removal, cleanup-event,
-and lease-release errors are returned by the executor as well as logged; they
-are never reported as successful cleanup.
+The same cleanup contract covers recovery from any status with recorded git
+context, including `validating` and `publishing`: terminal timeout or
+cancellation removes a reattached worktree even when the deadline expires
+before the stage resumes. Workspace-removal, cleanup-event, and lease-release
+errors are returned by the executor as well as logged; they are never reported
+as successful cleanup.
+
+[ADR-0015](../adr/0015-executor-owned-task-runtime.md) records why the executor
+owns this policy instead of each adapter.
 
 ## Status
 
