@@ -721,6 +721,67 @@ func TestExecuteUsesDefaultRuntimeForHangingSession(t *testing.T) {
 	assertWorkspaceRemoved(t, <-adapter.started)
 }
 
+func TestExecuteLeaseLossDuringDeadlineSkipsTimeoutSettlement(t *testing.T) {
+	db, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	successor := mustRegister(t, s)
+	tk := mustCreateTask(t, ts)
+	c, err := s.Claim(ctx, r.ID, time.Second)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	adapter := newHangingAdapter()
+	exec := testExecutor(db, s, ts)
+	exec.Adapter = adapter
+	exec.DefaultRuntime = time.Second
+	exec.LeaseDuration = 600 * time.Millisecond
+	extensionStarted := make(chan struct{})
+	allowExtension := make(chan struct{})
+	var allowOnce sync.Once
+	exec.extendLeaseHook = func(_ context.Context, attemptID, runnerID string, lease time.Duration) error {
+		close(extensionStarted)
+		<-allowExtension
+		return s.ExtendLease(context.Background(), attemptID, runnerID, lease)
+	}
+	done := make(chan error, 1)
+	go func() { done <- exec.Execute(ctx, r.ID, c) }()
+	t.Cleanup(func() { allowOnce.Do(func() { close(allowExtension) }) })
+
+	select {
+	case <-extensionStarted:
+	case <-time.After(time.Second):
+		t.Fatal("lease extension did not start")
+	}
+	select {
+	case <-adapter.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime deadline did not cancel session")
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET lease_owner = $1, lease_expires_at = now() + interval '1 minute'
+		WHERE id = $2`, successor.ID, c.AttemptID); err != nil {
+		t.Fatal(err)
+	}
+	allowOnce.Do(func() { close(allowExtension) })
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrLeaseLost) {
+			t.Fatalf("Execute = %v, want ErrLeaseLost", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executor did not finish after lease loss")
+	}
+	got, err := ts.Get(ctx, tk.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status == task.StatusTimedOut || got.Status.Terminal() {
+		t.Fatalf("task status = %s, want recoverable non-terminal status", got.Status)
+	}
+}
+
 func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()

@@ -163,7 +163,10 @@ branch, so it does not depend on GitHub access and removes partial workspace
 directories as well as registered worktrees. Workspace-removal, cleanup-event,
 and lease-release errors are returned by the executor as well as logged; they
 are never reported as successful cleanup. Cleanup database writes use bounded
-contexts, and an owner that receives `ErrLeaseLost` leaves repository worktree
+contexts. Immediately before a runner-driven transition or repository cleanup,
+the executor extends the lease under a context shorter than the lease itself.
+A failed final fence records `ErrLeaseLost` independently of the execution
+cancellation cause, so a stale owner leaves settlement and repository worktree
 cleanup to its successor.
 
 [ADR-0015](../adr/0015-executor-owned-task-runtime.md) records why the executor

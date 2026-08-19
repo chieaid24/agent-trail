@@ -29,6 +29,11 @@ runtime limits. The executor polls the stored task state every 100ms so API
 cancellation interrupts a live session, drains its terminal event stream, and
 then settles resource cleanup.
 
+The executor keeps definitive lease loss separate from the first execution
+cancellation cause. It also extends ownership under a bounded context directly
+before runner-driven task transitions and repository cleanup. If that final
+fence fails, the stale owner performs neither operation.
+
 ## Alternatives
 
 - Keep a timeout in every adapter. Rejected because behavior and failure codes
@@ -50,6 +55,8 @@ then settles resource cleanup.
   cleanup failures remain observable executor errors.
 - Until provider termination is proven, the executor keeps extending the lease
   and preserves the workspace so another owner cannot overlap the session.
+- Terminal writes and repository cleanup require a final lease fence whose
+  database work is bounded to less than the renewed lease.
 - Every executing attempt adds one small task-state query per polling interval.
 
 ## Security implications

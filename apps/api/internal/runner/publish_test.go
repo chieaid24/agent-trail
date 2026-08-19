@@ -775,12 +775,6 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 		WHERE id = $2`, successor.ID, c.AttemptID); err != nil {
 		t.Fatal(err)
 	}
-	allowLeaseRetry()
-	select {
-	case <-leaseLost:
-	case <-time.After(2 * time.Second):
-		t.Fatal("stale owner did not detect lease transfer")
-	}
 	if _, err := f.tasks.Transition(ctx, f.task.ID, task.TransitionParams{
 		To: task.StatusTimedOut, Source: "runner", FailureCode: "successor_timeout",
 		FailureMessage: "successor settled transferred attempt",
@@ -788,6 +782,12 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	forceStop()
+	select {
+	case <-leaseLost:
+	case <-time.After(2 * time.Second):
+		t.Fatal("final cleanup did not detect lease transfer")
+	}
+	allowLeaseRetry()
 	select {
 	case err := <-done:
 		if !errors.Is(err, ErrLeaseLost) {
