@@ -48,15 +48,18 @@ then settles resource cleanup.
   plus adapter shutdown time.
 - Terminal timeout and cancellation remove workspaces and release leases;
   cleanup failures remain observable executor errors.
+- If provider termination cannot be proven, the executor preserves the
+  workspace and lease for an external isolation boundary to recover safely.
 - Every executing attempt adds one small task-state query per polling interval.
 
 ## Security implications
 
-The executor stops provider processes before it releases their workspace and
-lease. The Claude Code adapter kills the full process group so child tool
-processes do not survive the session. A provider that ignores both its context
-and `Session.Cancel` can exceed the five-second shutdown wait; the executor
-reports that failure instead of claiming the provider stopped.
+The executor requests provider shutdown and waits up to five seconds before it
+releases the workspace and lease. The Claude Code adapter kills the full
+process group so child tool processes do not survive the session. If a provider
+ignores both its context and `Session.Cancel`, the executor returns
+`ErrSessionStopFailed` and preserves those resources instead of claiming the
+provider stopped.
 
 ## Revisit conditions
 

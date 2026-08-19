@@ -136,6 +136,10 @@ removes the workspace, transitions the task and attempt to `timed_out` with
 failure code `task_runtime_exceeded`, and releases the lease. The adapter's
 `Session.Cancel` contract is what lets provider-specific implementations stop
 their own processes; the Claude Code adapter kills the CLI process group.
+If an adapter ignores both cancellation signals and does not stop within five
+seconds, the executor returns `ErrSessionStopFailed` and preserves the
+workspace and lease. Releasing either while provider code may still run would
+allow a second owner to overlap the first.
 
 The task store records API cancellation immediately. While an attempt runs,
 the executor checks that terminal state every 100ms. Observing cancellation
@@ -148,9 +152,11 @@ repository-less temporary workspaces are removed.
 The same cleanup contract covers recovery from any status with recorded git
 context, including `validating` and `publishing`: terminal timeout or
 cancellation removes a reattached worktree even when the deadline expires
-before the stage resumes. Workspace-removal, cleanup-event, and lease-release
-errors are returned by the executor as well as logged; they are never reported
-as successful cleanup.
+before the stage resumes. Recovery cleanup uses the recorded repository ID and
+branch, so it does not depend on GitHub access and removes partial workspace
+directories as well as registered worktrees. Workspace-removal, cleanup-event,
+and lease-release errors are returned by the executor as well as logged; they
+are never reported as successful cleanup.
 
 [ADR-0015](../adr/0015-executor-owned-task-runtime.md) records why the executor
 owns this policy instead of each adapter.
