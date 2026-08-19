@@ -147,7 +147,7 @@ func run() error {
 			Conflicts:      conflicts,
 			Metrics:        runnerMetrics,
 			LeaseDuration:  cfg.RunnerLease,
-			DefaultRuntime: cfg.AgentTimeout,
+			DefaultRuntime: cfg.DefaultTaskRuntime,
 		},
 		Logger:        logger,
 		Metrics:       runnerMetrics,

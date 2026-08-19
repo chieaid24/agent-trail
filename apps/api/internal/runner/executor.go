@@ -131,7 +131,7 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	<-heartbeatDone
 	<-cancellationDone
 	if timedOut {
-		err = e.timeoutTask(ctx, c, runtime)
+		err = errors.Join(e.timeoutTask(ctx, c, runtime), err)
 	}
 	err = e.cleanupTerminalRecovery(ctx, log, c, err)
 	// Release only our own lease; after ErrLeaseLost there is nothing to
@@ -152,7 +152,7 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 }
 
 func (e *Executor) cleanupTerminalRecovery(ctx context.Context, log *slog.Logger, c *Claim, retErr error) error {
-	if c.TaskStatus != task.StatusPublishing || e.Workspaces == nil {
+	if e.Workspaces == nil {
 		return retErr
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
@@ -399,7 +399,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	defer func() {
 		cleanupCtx := context.WithoutCancel(ctx)
 		if errors.Is(retErr, context.DeadlineExceeded) {
-			retErr = e.timeoutTask(ctx, c, e.taskRuntime(t))
+			retErr = errors.Join(e.timeoutTask(ctx, c, e.taskRuntime(t)), retErr)
 		}
 		if pub != nil {
 			retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
@@ -444,8 +444,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	// channel is unbuffered, so an abandoned producer would block forever.
 	abort := func(err error) error {
 		endSpan(sessionSpan, err)
-		stopSession(session, session.Events())
-		return err
+		return errors.Join(err, stopSession(session, session.Events()))
 	}
 	events := session.Events()
 	for {
@@ -458,8 +457,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 			}
 		case <-ctx.Done():
 			endSpan(sessionSpan, ctx.Err())
-			stopSession(session, events)
-			return "", ctx.Err()
+			return "", errors.Join(ctx.Err(), stopSession(session, events))
 		}
 		e.Metrics.observeLogBytes(len(ev.Payload))
 		eventType, ok := agentEventTypes[ev.Type]
@@ -561,21 +559,40 @@ func (e *Executor) cleanupGitWorkspace(ctx context.Context, log *slog.Logger, c 
 	return retErr
 }
 
-func stopSession(session agent.Session, events <-chan agent.Event) {
+func stopSession(session agent.Session, events <-chan agent.Event) error {
 	ctx, cancel := context.WithTimeout(context.Background(), sessionCancelTimeout)
 	defer cancel()
-	drained := make(chan struct{})
+	drained := make(chan error, 1)
+	cancelled := make(chan error, 1)
 	go func() {
 		for range events {
 		}
-		_, _ = session.Wait(ctx)
-		close(drained)
+		_, err := session.Wait(ctx)
+		drained <- err
 	}()
-	go func() { _ = session.Cancel(ctx) }()
-	select {
-	case <-drained:
-	case <-ctx.Done():
+	go func() { cancelled <- session.Cancel(ctx) }()
+	var cancelErr, waitErr error
+	for cancelled != nil || drained != nil {
+		select {
+		case cancelErr = <-cancelled:
+			cancelled = nil
+		case waitErr = <-drained:
+			drained = nil
+		case <-ctx.Done():
+			return errors.Join(cancelErr,
+				fmt.Errorf("session did not stop within %s: %w", sessionCancelTimeout, ctx.Err()))
+		}
 	}
+	if errors.Is(waitErr, context.Canceled) || errors.Is(waitErr, context.DeadlineExceeded) {
+		waitErr = nil
+	}
+	if cancelErr != nil {
+		cancelErr = fmt.Errorf("cancel session: %w", cancelErr)
+	}
+	if waitErr != nil {
+		waitErr = fmt.Errorf("wait for stopped session: %w", waitErr)
+	}
+	return errors.Join(cancelErr, waitErr)
 }
 
 // workspaceLostNote explains an unrunnable recovery-path validation.

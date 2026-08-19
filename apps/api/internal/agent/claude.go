@@ -38,9 +38,6 @@ type ClaudeCodeOptions struct {
 	// PinnedVersion, when set, is required as a substring of `claude --version`
 	// so a drifted CLI fails validation instead of running (docs/security/risks.md).
 	PinnedVersion string
-	// Timeout is a hard runtime cap that kills the CLI process; zero leaves the
-	// caller's context in sole control.
-	Timeout time.Duration
 	// Logger receives structured session logs; nil discards.
 	Logger *slog.Logger
 }
@@ -119,15 +116,7 @@ func (c *ClaudeCode) Start(ctx context.Context, req Request) (Session, error) {
 		return nil, fmt.Errorf("claude-code: workspace %q is not a directory", req.WorkspaceDir)
 	}
 
-	// runCtx adds the adapter's hard timeout on top of the caller's
-	// cancellation; either firing kills the CLI process via CommandContext.
-	var runCtx context.Context
-	var cancel context.CancelFunc
-	if c.opts.Timeout > 0 {
-		runCtx, cancel = context.WithTimeout(ctx, c.opts.Timeout)
-	} else {
-		runCtx, cancel = context.WithCancel(ctx)
-	}
+	runCtx, cancel := context.WithCancel(ctx)
 
 	// Argument array only: the CLI is exec'd directly, never through a shell,
 	// so nothing in Instructions is ever interpreted by one.

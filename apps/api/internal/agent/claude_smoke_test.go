@@ -21,13 +21,14 @@ func TestClaudeCodeRealCLISmoke(t *testing.T) {
 	}
 	ws := t.TempDir()
 	ad := NewClaudeCode(ClaudeCodeOptions{
-		Model:   "haiku",
-		Timeout: 3 * time.Minute,
+		Model: "haiku",
 	})
 	if err := ad.ValidateConfiguration(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	sess, err := ad.Start(context.Background(), Request{
+	runCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	sess, err := ad.Start(runCtx, Request{
 		WorkspaceDir: ws,
 		Instructions: "Create a file named SMOKE.md whose entire content is the single line: smoke test passed",
 	})

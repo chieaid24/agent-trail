@@ -256,7 +256,7 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 	if ws, ok := e.Workspaces.Lookup(c.AttemptID, repoRef, branch, base); ok {
 		defer func() {
 			if errors.Is(retErr, context.DeadlineExceeded) {
-				retErr = e.timeoutTask(ctx, c, e.taskRuntime(t))
+				retErr = errors.Join(e.timeoutTask(ctx, c, e.taskRuntime(t)), retErr)
 			}
 			retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
 		}()
