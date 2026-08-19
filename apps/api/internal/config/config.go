@@ -75,8 +75,7 @@ type Config struct {
 	// default false for plain-HTTP localhost development).
 	AuthCookieSecure bool
 	// AgentProvider selects the agent adapter: "fake" (default) or
-	// "claude-code" (AGENT_PROVIDER). The remaining Agent* settings apply only
-	// to the Claude Code CLI adapter (docs/architecture/agent-providers.md).
+	// "claude-code" (AGENT_PROVIDER).
 	AgentProvider string
 	// AgentCLIPath is the Claude Code executable, resolved from PATH when bare
 	// (AGENT_CLI_PATH, default "claude").

@@ -144,6 +144,12 @@ terminal, cleanup removes the workspace and lease without another state
 transition. Shutdown and lease loss remain recoverable interruptions: their
 non-terminal workspaces are retained for the next owner.
 
+The same cleanup contract covers an owner recovering at `publishing`: a
+terminal timeout or cancellation removes a reattached worktree even when the
+deadline expires before publishing resumes. Workspace-removal, cleanup-event,
+and lease-release errors are returned by the executor as well as logged; they
+are never reported as successful cleanup.
+
 ## Status
 
 The runner currently lives inside `cmd/worker` as a `process` runner: it
