@@ -33,8 +33,8 @@ Do not use these numbers until measured. Measured so far (see
 docs/testing/benchmark-results.md for methodology and caveats): 10,000
 deliveries with zero duplicate tasks, 20 provably simultaneous sessions
 with isolated workspaces, and 100% cleanup across 100 forced
-cancellations and failures - all on the process runner with the fake
-adapter on one host. The Kubernetes-Jobs and cloud parts of these
+cancellations and failures - all on the process runner with the fake or
+scripted bench adapters on one host. The Kubernetes-Jobs and cloud parts of these
 bullets are not yet backed by a measured run.
 
 **Agent Trail - Agent-Native Development Platform** | Go, PostgreSQL, Kubernetes, Docker, GitHub Apps, AWS, Terraform

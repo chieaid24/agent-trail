@@ -83,11 +83,12 @@ Test:
 
 ### Load tests
 
-Implemented for the control plane and scheduler: `scripts/bench.sh` runs
-the gated suite in `apps/api/internal/bench/` (skipped without
-`AGENT_TRAIL_BENCH=1`, so the CI gate never pays for it); measured numbers
-live in `benchmark-results.md`. The log-volume browser test below still
-needs a browser-side harness.
+Implemented for the webhook path and the scheduler: `scripts/bench.sh`
+runs the gated suite in `apps/api/internal/bench/` (skipped without
+`AGENT_TRAIL_BENCH=1`, so the CI gate never pays for it); measured
+numbers live in `benchmark-results.md`. SSE-connection load and the
+log-volume browser test below still need harnesses, and API latency is
+measured only for the webhook ack path.
 
 Control plane:
 

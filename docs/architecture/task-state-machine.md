@@ -61,9 +61,12 @@ revision_requested), `terminal`.
 There is no dedicated no-change state: a publishable attempt whose agent
 session changed nothing ends PUBLISHING -> FAILED with failure code
 `no_change` and the explanation preserved on the task and timeline
-(docs/architecture/publishing.md). AWAITING_REVIEW is a resting state:
-runners do not claim it, and the next transition belongs to the human
-review flow.
+(docs/architecture/publishing.md). AWAITING_REVIEW is a resting state
+for published tasks: runners do not claim them, and the next transition
+belongs to the human review flow. A task with no repository is the one
+exception - it only passes through AWAITING_REVIEW on its way to the
+executor's auto-complete, so it stays claimable in case its owner dies
+between those two transitions (docs/architecture/runner.md).
 
 Requirements (all enforced by `Store.Transition`, with DB constraints as
 backstop):

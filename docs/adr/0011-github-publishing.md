@@ -38,7 +38,9 @@ code `no_change`, the explanation preserved in the failure message, a
 `publishing.no_change` timeline event, a neutral check on the base
 commit, and an explaining issue comment. `awaiting_review` leaves the
 claimable set: it is the resting state where a human reviews the draft
-PR.
+PR. (Amended later: a task with no repository stays claimable in
+`awaiting_review` so a dying owner cannot strand it before the
+executor's auto-complete - see docs/architecture/runner.md.)
 
 Two supporting rules land in gitworkspace: mirror refreshes reset the
 stored remote URL (installation tokens expire hourly) and exclude

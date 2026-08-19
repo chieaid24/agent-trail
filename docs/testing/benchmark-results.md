@@ -83,9 +83,10 @@ proof of true 20-way concurrency, not an inference from timestamps.
 
 Isolation measured here is workspace and timeline isolation of the
 process runner. Branch-level isolation of the git worktree flow is
-covered by `internal/gitworkspace` tests; Kubernetes Job isolation is
-verified separately by `scripts/verify-k8s-runner.sh` and was not part of
-this run.
+covered by `internal/gitworkspace` tests; per-task resource limits and
+Kubernetes Job isolation are properties of the Job manifest, verified
+separately by `scripts/verify-k8s-runner.sh`, and were not part of this
+run.
 
 ## Cleanup (100 forced cancellations and failures)
 
@@ -106,7 +107,10 @@ Scope caveat: this measures the temp-dir workspace of the process runner
 flow. For repository-backed tasks a mid-flight cancellation deliberately
 keeps the git worktree for the recovering owner
 (`internal/runner/executor.go`); there is no TTL sweeper for stranded
-worktrees outside Kubernetes (`ttlSecondsAfterFinished`).
+worktrees outside Kubernetes (`ttlSecondsAfterFinished`). Credential
+cleanup is not exercised: the fake flow holds no credentials, and in the
+publishing flow installation tokens live only in process memory, so
+process exit is their destruction.
 
 ## Failure injection
 
@@ -145,7 +149,8 @@ after the fix.
   delivery (unbounded); at 5,000 unique deliveries the capped pool (50)
   absorbed it. Sustained abuse beyond that is untested.
 - The log-volume browser test (20 tasks, multiple MB of logs, browser
-  responsiveness) and the review study in `benchmarks.md` have no
-  harness yet.
+  responsiveness), SSE-connection load, and the review study in
+  `benchmarks.md` have no harness yet; API latency is measured only for
+  the webhook ack path.
 - Queue redelivery and control-plane restart from the
   `testing-strategy.md` matrix are not yet injected.

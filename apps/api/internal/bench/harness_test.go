@@ -116,11 +116,11 @@ func queryInt(t *testing.T, db *sql.DB, query string, args ...any) int {
 }
 
 // waitInt polls query until it returns want or the timeout passes.
-func waitInt(t *testing.T, db *sql.DB, query string, want int, timeout time.Duration, what string) {
+func waitInt(t *testing.T, db *sql.DB, query string, want int, timeout time.Duration, what string, args ...any) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
-		got := queryInt(t, db, query)
+		got := queryInt(t, db, query, args...)
 		if got == want {
 			return
 		}
