@@ -6,9 +6,9 @@ exporter feeds the provisioned Grafana dashboards and alerts. The API also
 keeps its unauthenticated `GET /metrics` Prometheus endpoint. Cloud-side alarms
 live in `deploy/terraform/modules/observability`.
 
-`OTEL_EXPORTER_OTLP_ENDPOINT` is a plaintext `host:port` target. It defaults to
-`localhost:4317` for native processes alongside the Compose collector; empty or
-`off` disables OTLP while leaving API `/metrics` available. Export failures are
+`OTEL_EXPORTER_OTLP_ENDPOINT` is a plaintext `host:port` target. An unset or
+empty value defaults to `localhost:4317` for native processes alongside the
+Compose collector; `off` disables OTLP while leaving API `/metrics` available. Export failures are
 logged and do not stop task execution. Process shutdown gets five seconds to
 flush telemetry. See [ADR-0015](../adr/0015-opentelemetry-runtime.md).
 
@@ -158,4 +158,7 @@ Compose provisions these nine Grafana-managed alert rules:
 - Unusual policy denials
 
 Thresholds are development defaults, not measured service-level objectives.
-Tune them against observed workloads before production use.
+Tune them against observed workloads before production use. Local rules are
+evaluation-only: Compose does not configure SMTP or another notification
+contact point, so Grafana cannot deliver notifications until an operator adds
+one.

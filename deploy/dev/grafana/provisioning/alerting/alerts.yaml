@@ -188,7 +188,7 @@ groups:
               refId: A
               instant: true
               range: false
-              expr: sum(rate(minio_s3_requests_errors_total[10m])) or on() vector(0)
+              expr: (sum(rate(minio_s3_requests_rejected_auth_total[10m])) or vector(0)) + (sum(rate(minio_s3_requests_rejected_header_total[10m])) or vector(0)) + (sum(rate(minio_s3_requests_rejected_invalid_total[10m])) or vector(0)) + (sum(rate(minio_s3_requests_rejected_timestamp_total[10m])) or vector(0))
           - refId: C
             relativeTimeRange: { from: 0, to: 0 }
             datasourceUid: __expr__

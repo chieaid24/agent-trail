@@ -23,6 +23,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -81,6 +82,9 @@ type fakePublish struct {
 	checks      []github.CheckRunParams
 	updates     []github.CheckRunParams
 	comments    []string
+	createErr   error
+	commentSeen chan struct{}
+	commentDone chan struct{}
 	// cancelOnComment, when set, makes the next CreateIssueComment cancel
 	// the run and fail once: the "owner died mid-publish" simulation.
 	cancelOnComment context.CancelFunc
@@ -112,6 +116,10 @@ func (f *fakePublish) BranchHeadSHA(_ context.Context, _ int64, _, _, branch str
 func (f *fakePublish) CreateIssueComment(_ context.Context, _ int64, _, _ string, _ int64, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.commentSeen != nil {
+		close(f.commentSeen)
+		<-f.commentDone
+	}
 	if f.cancelOnComment != nil {
 		cancel := f.cancelOnComment
 		f.cancelOnComment = nil
@@ -136,6 +144,9 @@ func (f *fakePublish) FindPullRequestByHead(_ context.Context, _ int64, _, _, _,
 func (f *fakePublish) CreateDraftPullRequest(_ context.Context, _ int64, _, _ string, p github.PullRequestParams) (github.PullRequest, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.createErr != nil {
+		return github.PullRequest{}, f.createErr
+	}
 	f.prsCreated++
 	pr := github.PullRequest{
 		Number: int64(f.prsCreated), State: "open", Draft: true,
@@ -420,6 +431,64 @@ func TestPublishEmitsRequiredSpans(t *testing.T) {
 			t.Errorf("missing span %q; got %v", name, got)
 		}
 	}
+}
+
+func TestPullRequestSpanEndsBeforeLaterPublishingWork(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	f := newPublishFixture(t)
+	f.fake.commentSeen = make(chan struct{})
+	f.fake.commentDone = make(chan struct{})
+	c := f.claim(t)
+	done := make(chan error, 1)
+	go func() { done <- f.exec.Execute(context.Background(), f.runner.ID, c) }()
+	<-f.fake.commentSeen
+	var found bool
+	for _, span := range exporter.GetSpans() {
+		if span.Name == "github.pr_create" {
+			found = true
+		}
+	}
+	close(f.fake.commentDone)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("github.pr_create span remained open during issue commenting")
+	}
+}
+
+func TestPullRequestSpanRecordsGitHubError(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	f := newPublishFixture(t)
+	f.fake.createErr = errors.New("create failed")
+	if err := f.exec.Execute(context.Background(), f.runner.ID, f.claim(t)); err == nil {
+		t.Fatal("Execute succeeded with a failed pull-request creation")
+	}
+	for _, span := range exporter.GetSpans() {
+		if span.Name == "github.pr_create" {
+			if span.Status.Code != codes.Error {
+				t.Fatalf("pull-request span status = %s", span.Status.Code)
+			}
+			return
+		}
+	}
+	t.Fatal("missing github.pr_create span")
 }
 
 func TestEndSpanRecordsErrors(t *testing.T) {

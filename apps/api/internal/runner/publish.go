@@ -295,34 +295,38 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 	body := evidence.PRBody(report, finalSHA)
 
 	prCtx, prSpan := startSpan(ctx, "github.pr_create", c)
-	defer prSpan.End()
 	pr, err := e.GitHub.FindPullRequestByHead(prCtx, rc.InstallationID, rc.Owner,
 		rc.Name, rc.Owner, branch)
 	if err != nil {
-		recordSpanError(prSpan, err)
+		endSpan(prSpan, err)
 		return "", e.publishFailure(ctx, c, "find pull request", err)
 	}
+	wasCreated := pr == nil
 	if pr == nil {
 		created, err := e.GitHub.CreateDraftPullRequest(prCtx, rc.InstallationID,
 			rc.Owner, rc.Name, github.PullRequestParams{
 				Title: t.Title, Head: branch, Base: t.BaseBranch, Body: body,
 			})
 		if err != nil {
-			recordSpanError(prSpan, err)
+			endSpan(prSpan, err)
 			return "", e.publishFailure(ctx, c, "create pull request", err)
 		}
 		pr = &created
+	} else {
+		if err := e.GitHub.UpdatePullRequestBody(prCtx, rc.InstallationID,
+			rc.Owner, rc.Name, pr.Number, body); err != nil {
+			endSpan(prSpan, err)
+			return "", e.publishFailure(ctx, c, "update pull request", err)
+		}
+	}
+	endSpan(prSpan, nil)
+	if wasCreated {
 		if err := e.append(ctx, c, "pull_request.created", "runner", map[string]any{
 			"number": pr.Number, "url": pr.HTMLURL, "draft": true,
 		}); err != nil {
 			return "", err
 		}
 	} else {
-		if err := e.GitHub.UpdatePullRequestBody(prCtx, rc.InstallationID,
-			rc.Owner, rc.Name, pr.Number, body); err != nil {
-			recordSpanError(prSpan, err)
-			return "", e.publishFailure(ctx, c, "update pull request", err)
-		}
 		if err := e.append(ctx, c, "pull_request.updated", "runner", map[string]any{
 			"number": pr.Number, "url": pr.HTMLURL,
 		}); err != nil {
