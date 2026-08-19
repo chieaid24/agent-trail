@@ -383,13 +383,18 @@ type resistantSession struct {
 	finished  chan struct{}
 }
 
+var errResistantCancel = errors.New("resistant cancel blocked until forced stop")
+
 func (s *resistantSession) Events() <-chan agent.Event { return s.events }
 
 func (s *resistantSession) Send(context.Context, string) error {
 	return errors.New("resistant session takes no input")
 }
 
-func (s *resistantSession) Cancel(context.Context) error { return nil }
+func (s *resistantSession) Cancel(context.Context) error {
+	<-s.forceStop
+	return errResistantCancel
+}
 
 func (s *resistantSession) Wait(ctx context.Context) (agent.Result, error) {
 	select {
@@ -681,7 +686,7 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	ctx := context.Background()
 	r := mustRegister(t, s)
 	tk := mustCreateTask(t, ts)
-	c, err := s.Claim(ctx, r.ID, time.Minute)
+	c, err := s.Claim(ctx, r.ID, 2*time.Second)
 	if err != nil || c == nil {
 		t.Fatalf("claim = %+v, %v", c, err)
 	}
@@ -690,7 +695,7 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	exec.Adapter = adapter
 	exec.DefaultRuntime = time.Second
 	exec.SessionStopTimeout = 100 * time.Millisecond
-	exec.LeaseDuration = 150 * time.Millisecond
+	exec.LeaseDuration = 2 * time.Second
 	done := make(chan error, 1)
 	go func() { done <- exec.Execute(ctx, r.ID, c) }()
 	workspace := <-adapter.started
@@ -698,7 +703,7 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	select {
 	case err := <-done:
 		t.Fatalf("Execute returned while provider was running: %v", err)
-	case <-time.After(1400 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 	}
 	if _, err := os.Stat(workspace); err != nil {
 		t.Fatalf("workspace was removed before provider termination: %v", err)
@@ -720,8 +725,9 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	close(adapter.forceStop)
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrSessionStopFailed) || !errors.Is(err, ErrAttemptFailed) {
-			t.Fatalf("Execute = %v, want ErrSessionStopFailed and ErrAttemptFailed", err)
+		if !errors.Is(err, ErrSessionStopFailed) || !errors.Is(err, ErrAttemptFailed) ||
+			!errors.Is(err, errResistantCancel) {
+			t.Fatalf("Execute = %v, want shutdown, attempt, and cancel errors", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("executor did not finish after provider termination")

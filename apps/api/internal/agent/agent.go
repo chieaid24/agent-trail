@@ -58,8 +58,8 @@ type Adapter interface {
 	Start(ctx context.Context, req Request) (Session, error)
 }
 
-// Session is one running agent invocation. Events must be drained; the
-// channel closes when the session ends, after which Wait returns.
+// Session is one running agent invocation. Cancel must honor its context.
+// Events closes only when the provider stops, after which Wait returns.
 type Session interface {
 	Events() <-chan Event
 	Send(ctx context.Context, message string) error

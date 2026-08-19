@@ -576,28 +576,35 @@ func stopSession(session agent.Session, events <-chan agent.Event, timeout time.
 	cancelCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	drained := make(chan error, 1)
-	cancelled := make(chan error, 1)
 	go func() {
 		for range events {
 		}
 		_, err := session.Wait(context.Background())
 		drained <- err
 	}()
-	go func() { cancelled <- session.Cancel(cancelCtx) }()
-	timer := time.NewTimer(timeout)
+	started := time.Now()
+	cancelErr := session.Cancel(cancelCtx)
+	remaining := timeout - time.Since(started)
+	var stopErr error
+	if remaining <= 0 {
+		stopErr = fmt.Errorf("%w: session did not stop within %s",
+			ErrSessionStopFailed, timeout)
+		remaining = time.Nanosecond
+	}
+	timer := time.NewTimer(remaining)
 	defer timer.Stop()
-	var cancelErr, waitErr, stopErr error
-	for drained != nil {
+	var waitErr error
+	for {
 		select {
-		case cancelErr = <-cancelled:
-			cancelled = nil
 		case waitErr = <-drained:
-			drained = nil
+			goto stopped
 		case <-timer.C:
 			stopErr = fmt.Errorf("%w: session did not stop within %s",
 				ErrSessionStopFailed, timeout)
 		}
 	}
+
+stopped:
 	if errors.Is(waitErr, context.Canceled) || errors.Is(waitErr, context.DeadlineExceeded) {
 		waitErr = nil
 	}
