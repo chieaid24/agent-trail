@@ -78,6 +78,8 @@ Required guarantees:
 - At-least-once task delivery is acceptable.
 - Only one runner may own an attempt at a time.
 - Every ownership claim must have an expiration.
+- The executor revalidates and extends a claim under a bounded context before
+  reading task state or starting provider work.
 - Runner heartbeats extend the lease.
 - A transient lease-extension error cancels active work but keeps retrying while
   ownership may remain. Only `ErrLeaseLost` proves that retries must stop.
@@ -160,7 +162,9 @@ before the stage resumes. Recovery cleanup uses the recorded repository ID and
 branch, so it does not depend on GitHub access and removes partial workspace
 directories as well as registered worktrees. Workspace-removal, cleanup-event,
 and lease-release errors are returned by the executor as well as logged; they
-are never reported as successful cleanup.
+are never reported as successful cleanup. Cleanup database writes use bounded
+contexts, and an owner that receives `ErrLeaseLost` leaves repository worktree
+cleanup to its successor.
 
 [ADR-0015](../adr/0015-executor-owned-task-runtime.md) records why the executor
 owns this policy instead of each adapter.
