@@ -66,6 +66,14 @@ type Claim struct {
 const claimableStatuses = `('queued', 'provisioning', 'planning',
 	'executing', 'validating', 'publishing')`
 
+// claimableWhere widens claimableStatuses with one recovery case: a task
+// with no repository only passes through awaiting_review on its way to the
+// executor's auto-complete, so an owner dying between those two commits
+// would otherwise strand it in a status no runner may claim (found by the
+// database-restart injection in internal/bench).
+const claimableWhere = `(t.status IN ` + claimableStatuses + `
+	OR (t.status = 'awaiting_review' AND t.repository_id IS NULL))`
+
 // Store is the PostgreSQL-backed runner registry and lease arbiter.
 type Store struct {
 	db *sql.DB
@@ -224,7 +232,7 @@ func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.D
 		JOIN tasks t ON t.id = a.task_id
 		WHERE a.status = 'active'
 		  AND (a.lease_expires_at IS NULL OR a.lease_expires_at < now())
-		  AND t.status IN `+claimableStatuses+`
+		  AND `+claimableWhere+`
 		ORDER BY t.priority DESC, t.created_at
 		FOR UPDATE OF a SKIP LOCKED
 		LIMIT 1`).

@@ -2,6 +2,11 @@
 
 Use reproducible benchmarks, not invented user metrics.
 
+Implemented: `scripts/bench.sh` (or `make bench`) runs every benchmark and
+the failure-injection matrix from `apps/api/internal/bench/` against a
+dedicated disposable database. Measured numbers live in
+`benchmark-results.md`; nothing below is a result until it appears there.
+
 ### Concurrent agents
 
 Goal:

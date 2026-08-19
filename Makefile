@@ -9,7 +9,7 @@ SHELL := /usr/bin/env bash
 DATABASE_URL ?= postgres://agent_trail:agent_trail@localhost:5432/agent_trail?sslmode=disable
 TEST_DATABASE_URL ?= $(DATABASE_URL)
 
-.PHONY: dev infra migrate seed test integration-test e2e demo clean hooks
+.PHONY: dev infra migrate seed test integration-test e2e bench demo clean hooks
 
 ## dev: start infra (compose), run migrations, run api + worker + web
 dev: infra migrate
@@ -40,6 +40,11 @@ integration-test:
 ## (compose project agent-trail-e2e; ports overridable via E2E_* envs)
 e2e:
 	cd apps/web && npx playwright test
+
+## bench: benchmarks and failure injection against a dedicated disposable
+## database (compose project agent-trail-bench; see docs/testing/benchmarks.md)
+bench:
+	bash scripts/bench.sh
 
 ## demo: scripted issue-to-PR demo against a simulated GitHub (needs infra)
 demo:

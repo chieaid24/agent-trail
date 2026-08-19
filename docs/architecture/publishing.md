@@ -61,8 +61,8 @@ request still opens.
 The issue comment is at-least-once: an owner that dies between the
 comment and the final transition leaves a duplicate comment on retry,
 matching the timeline's at-least-once delivery. `AWAITING_REVIEW` is the
-resting state - runners do not claim it, and the human review gate on the
-draft PR closes the loop.
+resting state - runners do not claim a published task there, and the
+human review gate on the draft PR closes the loop.
 
 
 ## Revision Workflow

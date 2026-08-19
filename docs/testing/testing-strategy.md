@@ -83,6 +83,13 @@ Test:
 
 ### Load tests
 
+Implemented for the webhook path and the scheduler: `scripts/bench.sh`
+runs the gated suite in `apps/api/internal/bench/` (skipped without
+`AGENT_TRAIL_BENCH=1`, so the CI gate never pays for it); measured
+numbers live in `benchmark-results.md`. SSE-connection load and the
+log-volume browser test below still need harnesses, and API latency is
+measured only for the webhook ack path.
+
 Control plane:
 
 - 10,000 webhook deliveries
@@ -104,6 +111,13 @@ Logs:
 - Memory usage
 
 ### Failure injection
+
+Implemented in `apps/api/internal/bench/inject_test.go` (run via
+`scripts/bench.sh`) for: runner kill, network interruption, database
+restart, GitHub rate limit, agent hang, and full disk. S3 timeout is
+recorded as not applicable until an object-storage code path exists; queue
+redelivery and control-plane restart still need their harnesses. Outcomes
+and limitations are in `benchmark-results.md`.
 
 Simulate:
 

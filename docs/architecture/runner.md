@@ -91,8 +91,9 @@ FROM task_attempts a
 JOIN tasks t ON t.id = a.task_id
 WHERE a.status = 'active'
   AND (a.lease_expires_at IS NULL OR a.lease_expires_at < now())
-  AND t.status IN ('queued', 'provisioning', 'planning', 'executing',
-                   'validating', 'publishing')
+  AND (t.status IN ('queued', 'provisioning', 'planning', 'executing',
+                    'validating', 'publishing')
+       OR (t.status = 'awaiting_review' AND t.repository_id IS NULL))
 ORDER BY t.priority DESC, t.created_at
 FOR UPDATE OF a SKIP LOCKED
 LIMIT 1;
@@ -103,9 +104,14 @@ claim; any later status is recovery of an attempt whose owner lost its
 lease, and the new owner resumes from the recorded status. Delivery is
 at-least-once, so a resumed attempt may repeat agent events on the
 timeline; only-one-owner-at-a-time is the invariant the lease enforces.
-`awaiting_review` is deliberately not claimable: a published task rests
-there for the human on the draft PR, and re-claiming it would spin
-runners on finished work.
+`awaiting_review` is deliberately not claimable for a published task: it
+rests there for the human on the draft PR, and re-claiming it would spin
+runners on finished work. A task with no repository is the one exception:
+it only passes through `awaiting_review` on its way to the executor's
+auto-complete, so an owner dying between those two commits would strand
+it in an unclaimable status (found by the database-restart failure
+injection); such attempts stay claimable and the next owner completes
+them.
 
 Lease fields on `task_attempts`:
 
