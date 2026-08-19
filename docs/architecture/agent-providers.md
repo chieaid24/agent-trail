@@ -20,6 +20,11 @@ type Session interface {
 }
 ```
 
+`Cancel` must return no later than its context deadline. The `Events` channel
+closes only after provider termination; after it closes, `Wait` returns the
+terminal result. The executor drains that channel while cancellation runs,
+then waits for both operations before releasing the workspace and lease.
+
 Normalized events:
 
 - session_started
