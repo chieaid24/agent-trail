@@ -136,18 +136,20 @@ removes the workspace, transitions the task and attempt to `timed_out` with
 failure code `task_runtime_exceeded`, and releases the lease. The adapter's
 `Session.Cancel` contract is what lets provider-specific implementations stop
 their own processes; the Claude Code adapter kills the CLI process group.
-If an adapter ignores both cancellation signals and does not stop within five
-seconds, the executor returns `ErrSessionStopFailed` and preserves the
-workspace and lease. Releasing either while provider code may still run would
-allow a second owner to overlap the first.
+If an adapter ignores both cancellation signals, the executor keeps extending
+the lease and preserves the workspace until termination is proven. A shutdown
+that exceeds five seconds adds `ErrSessionStopFailed` to the eventual result,
+but does not let the host process another task or a new owner reclaim this one.
+Only after the provider stops does cleanup remove the workspace and release the
+lease.
 
 The task store records API cancellation immediately. While an attempt runs,
-the executor checks that terminal state every 100ms. Observing cancellation
-cancels the live session and execution context; because the task is already
-terminal, cleanup removes the workspace and lease without another state
-transition. Shutdown and lease loss remain recoverable interruptions: their
-non-terminal repository worktrees are retained for the next owner, while
-repository-less temporary workspaces are removed.
+the executor checks that terminal state every 100ms. The next successful poll
+that observes cancellation cancels the live session and execution context;
+because the task is already terminal, cleanup removes the workspace and lease
+without another state transition. Shutdown and lease loss remain recoverable
+interruptions: their non-terminal repository worktrees are retained for the
+next owner, while repository-less temporary workspaces are removed.
 
 The same cleanup contract covers recovery from any status with recorded git
 context, including `validating` and `publishing`: terminal timeout or
