@@ -89,8 +89,8 @@ type Config struct {
 	// AgentCLIVersion, when set, pins the CLI version: it must appear in
 	// `claude --version` or the worker refuses to start (AGENT_CLI_VERSION).
 	AgentCLIVersion string
-	// AgentTimeout is the hard per-attempt agent runtime cap
-	// (AGENT_TIMEOUT_SECONDS).
+	// AgentTimeout is the default attempt runtime when a task omits its own
+	// max_runtime_seconds value (AGENT_TIMEOUT_SECONDS).
 	AgentTimeout time.Duration
 	// OTLPEndpoint is the plaintext OTLP/gRPC target; "off" disables export.
 	OTLPEndpoint string

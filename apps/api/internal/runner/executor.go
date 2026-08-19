@@ -62,16 +62,22 @@ type Executor struct {
 	// LeaseDuration is the claim lease; the executor extends it at a third
 	// of this interval while it works.
 	LeaseDuration time.Duration
+	// DefaultRuntime applies when a task omits max_runtime_seconds.
+	DefaultRuntime time.Duration
 }
 
 // ErrAttemptFailed wraps every failTask error: the task reached a terminal
 // failed state, so the attempt is settled rather than retryable.
 var ErrAttemptFailed = errors.New("attempt failed")
 
-// Execute drives claim c to a terminal task state. A cancelled ctx or a
-// lost lease stops work and leaves the attempt for recovery: the task stays
-// mid-flight, the lease (if still ours) is released, and a later claim
-// resumes from the recorded status.
+const (
+	fallbackRuntime          = 45 * time.Minute
+	cancellationPollInterval = 100 * time.Millisecond
+	sessionCancelTimeout     = 5 * time.Second
+)
+
+// Execute drives claim c to a terminal task state. Shutdown or a lost lease
+// leaves the attempt for recovery; an attempt deadline settles it timed_out.
 func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error {
 	log := e.Logger.With(
 		slog.String("task_id", c.TaskID),
@@ -79,10 +85,18 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		slog.String("runner_id", runnerID),
 	)
 
-	// Stop everything the moment the lease cannot be extended: after expiry
-	// another runner may own the attempt, and two owners must never run.
-	execCtx, cancel := context.WithCancel(ctx)
+	runtime, deadline, err := e.runtimeDeadline(ctx, c)
+	if err != nil {
+		return err
+	}
+	// Stop everything on shutdown, lease loss, timeout, or task cancellation.
+	execCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
+	cancellationDone := make(chan struct{})
+	go func() {
+		defer close(cancellationDone)
+		e.watchTaskCancellation(execCtx, cancel, log, c.TaskID)
+	}()
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
@@ -107,12 +121,18 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		}
 	}()
 	spanCtx, span := startSpan(execCtx, "runner.attempt", c)
-	err := e.drive(spanCtx, log, c)
+	err = e.drive(spanCtx, log, c)
 	endSpan(span, err)
+	timedOut := err != nil && errors.Is(execCtx.Err(), context.DeadlineExceeded) &&
+		!errors.Is(err, ErrAttemptFailed)
 	// Stop extending before releasing, or the last extension races the
 	// release and logs a spurious loss.
 	cancel()
 	<-heartbeatDone
+	<-cancellationDone
+	if timedOut {
+		err = e.timeoutTask(ctx, c, runtime)
+	}
 	// Release only our own lease; after ErrLeaseLost there is nothing to
 	// release and the attempt may already belong to another runner.
 	if !errors.Is(err, ErrLeaseLost) {
@@ -127,6 +147,90 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		}
 	}
 	return err
+}
+
+func (e *Executor) runtimeDeadline(ctx context.Context, c *Claim) (time.Duration, time.Time, error) {
+	t, err := e.Tasks.Get(ctx, c.TaskID)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	runtime := e.taskRuntime(t)
+	startedAt, err := e.Store.AttemptStartedAt(ctx, c.AttemptID)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	start := time.Now()
+	if startedAt != nil {
+		start = *startedAt
+	}
+	return runtime, start.Add(runtime), nil
+}
+
+func (e *Executor) taskRuntime(t task.Task) time.Duration {
+	runtime := e.DefaultRuntime
+	if runtime <= 0 {
+		runtime = fallbackRuntime
+	}
+	if t.MaxRuntimeSeconds != nil {
+		runtime = time.Duration(*t.MaxRuntimeSeconds) * time.Second
+	}
+	return runtime
+}
+
+func (e *Executor) watchTaskCancellation(ctx context.Context, cancel context.CancelFunc, log *slog.Logger, taskID string) {
+	ticker := time.NewTicker(cancellationPollInterval)
+	defer ticker.Stop()
+	loggedFailure := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		t, err := e.Tasks.Get(ctx, taskID)
+		if err != nil {
+			if ctx.Err() == nil && !loggedFailure {
+				log.LogAttrs(ctx, slog.LevelWarn, "task cancellation check failed",
+					slog.String("event", "runner_cancellation_check_failed"),
+					slog.String("error", err.Error()),
+				)
+				loggedFailure = true
+			}
+			continue
+		}
+		loggedFailure = false
+		if t.Status.Terminal() {
+			cancel()
+			return
+		}
+	}
+}
+
+func (e *Executor) timeoutTask(ctx context.Context, c *Claim, runtime time.Duration) error {
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCancelTimeout)
+	defer cancel()
+	current, err := e.Tasks.Get(settleCtx, c.TaskID)
+	if err != nil {
+		return fmt.Errorf("read task after timeout: %w", err)
+	}
+	if current.Status == task.StatusCancelled {
+		return context.Canceled
+	}
+	if current.Status.Terminal() {
+		return fmt.Errorf("%w: task already %s", ErrAttemptFailed, current.Status)
+	}
+	message := fmt.Sprintf("task exceeded runtime limit of %s", runtime)
+	_, err = e.Tasks.Transition(settleCtx, c.TaskID, task.TransitionParams{
+		To:             task.StatusTimedOut,
+		Source:         "runner",
+		FailureCode:    "task_runtime_exceeded",
+		FailureMessage: message,
+		IdempotencyKey: fmt.Sprintf("attempt:%s:timeout", c.AttemptID),
+	})
+	if err != nil {
+		return fmt.Errorf("time out task: %w", err)
+	}
+	return fmt.Errorf("%w: task_runtime_exceeded: %s", ErrAttemptFailed, message)
 }
 
 // drive advances the task from its claimed status to its resting state:
@@ -261,12 +365,18 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	}
 	defer func() {
 		cleanupCtx := context.WithoutCancel(ctx)
+		if errors.Is(retErr, context.DeadlineExceeded) {
+			retErr = e.timeoutTask(ctx, c, e.taskRuntime(t))
+		}
 		if pub != nil {
 			// A settled attempt (published, or terminally failed) releases
 			// its worktree; a transient error keeps it so the recovering
 			// owner can reattach (Lookup) instead of losing the work.
 			if retErr != nil && !errors.Is(retErr, ErrAttemptFailed) {
-				return
+				current, err := e.Tasks.Get(cleanupCtx, c.TaskID)
+				if err != nil || !current.Status.Terminal() {
+					return
+				}
 			}
 			if err := e.Workspaces.Remove(cleanupCtx, ws); err != nil {
 				log.LogAttrs(ctx, slog.LevelWarn, "workspace cleanup failed",
@@ -315,14 +425,26 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 	// channel is unbuffered, so an abandoned producer would block forever.
 	abort := func(err error) error {
 		endSpan(sessionSpan, err)
-		_ = session.Cancel(ctx)
+		cancelSession(session)
 		go func() {
 			for range session.Events() {
 			}
 		}()
 		return err
 	}
-	for ev := range session.Events() {
+	events := session.Events()
+	for {
+		var ev agent.Event
+		var ok bool
+		select {
+		case ev, ok = <-events:
+			if !ok {
+				goto sessionEnded
+			}
+		case <-ctx.Done():
+			cancelSession(session)
+			return "", ctx.Err()
+		}
 		e.Metrics.observeLogBytes(len(ev.Payload))
 		eventType, ok := agentEventTypes[ev.Type]
 		if !ok {
@@ -340,6 +462,8 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 			status = next
 		}
 	}
+
+sessionEnded:
 
 	result, err := session.Wait(ctx)
 	endSpan(sessionSpan, err)
@@ -394,6 +518,12 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		return next, nil
 	}
 	return e.publishFromWorkspace(ctx, log, c, t, pub, ws, result.Summary)
+}
+
+func cancelSession(session agent.Session) {
+	ctx, cancel := context.WithTimeout(context.Background(), sessionCancelTimeout)
+	defer cancel()
+	_ = session.Cancel(ctx)
 }
 
 // workspaceLostNote explains an unrunnable recovery-path validation.
