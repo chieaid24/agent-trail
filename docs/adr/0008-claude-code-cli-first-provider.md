@@ -27,7 +27,7 @@ deadline from the task's `max_runtime_seconds`, uses
 `AGENT_TIMEOUT_SECONDS` only as the default, and carries the original
 attempt deadline across lease recovery. Adapters receive the deadline on
 their caller context and must implement `Session.Cancel` so API cancellation
-can stop provider-specific work. [ADR-0015](0015-executor-owned-task-runtime.md)
+can stop provider-specific work. [ADR-0016](0016-executor-owned-task-runtime.md)
 defines that provider-neutral lifecycle policy.
 
 ## Alternatives

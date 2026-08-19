@@ -1,4 +1,4 @@
-# ADR-0015: Executor-owned task runtime
+# ADR-0016: Executor-owned task runtime
 
 - Status: accepted
 - Date: 2026-08-19

@@ -140,7 +140,7 @@ whole process group and the executor records the task as `timed_out`. An API
 cancellation is detected by the executor and calls `Session.Cancel`, which
 kills the same process group. Tool subprocesses therefore do not survive to
 hold the output pipe open. Runner configuration and policy live in
-[runner.md](runner.md) and [ADR-0015](../adr/0015-executor-owned-task-runtime.md).
+[runner.md](runner.md) and [ADR-0016](../adr/0016-executor-owned-task-runtime.md).
 
 ### Guarding against CLI changes
 

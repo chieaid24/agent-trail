@@ -176,7 +176,7 @@ window. Publishing removes its worktree before entering the non-claimable
 `awaiting_review` state, so a cleanup failure leaves the attempt recoverable in
 `publishing`.
 
-[ADR-0015](../adr/0015-executor-owned-task-runtime.md) records why the executor
+[ADR-0016](../adr/0016-executor-owned-task-runtime.md) records why the executor
 owns this policy instead of each adapter.
 
 ## Status
