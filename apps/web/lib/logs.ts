@@ -1,5 +1,5 @@
 // Pure derivation of terminal log lines from activity events. The platform
-// has no separate log store yet (docs/architecture/logs-and-streaming.md);
+// has no separate log store yet;
 // the transcript is rebuilt from command.* events.
 
 import type { ActivityEvent } from "./types";
@@ -11,7 +11,7 @@ export interface LogLine {
   key: string;
   stream: LogStream;
   text: string;
-  // Redacted lines render a visible marker, never a silent gap (DESIGN.md).
+  // Redacted lines render a visible marker, never a silent gap.
   redacted: boolean;
 }
 

@@ -1,5 +1,5 @@
-// Package evidence builds and stores the evidence report
-// (docs/architecture/evidence.md): the structured JSON document and the
+// Package evidence builds and stores the evidence report:
+// the structured JSON document and the
 // Markdown summary that back a task's draft PR. Only measured facts enter
 // a report; fields nothing measured are omitted, never invented.
 package evidence

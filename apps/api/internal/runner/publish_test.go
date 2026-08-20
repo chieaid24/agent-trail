@@ -637,7 +637,7 @@ func TestPublishCleanupFailureRemainsRecoverable(t *testing.T) {
 			return err
 		}
 		if current.Status == task.StatusPublishing {
-			return errors.New("temporary final fence failure")
+			return errors.New("transient final fence failure")
 		}
 		return f.store.ExtendLease(ctx, attemptID, runnerID, lease)
 	}
@@ -776,7 +776,7 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 		switch extendCalls.Add(1) {
 		case 1:
 			close(transientSeen)
-			return errors.New("temporary lease extension failure")
+			return errors.New("transient lease extension failure")
 		case 2:
 			<-allowRetry
 		}

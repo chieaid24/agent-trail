@@ -735,7 +735,7 @@ func TestFinalLeaseFenceRetriesTransientFailure(t *testing.T) {
 	var calls atomic.Int32
 	exec.fenceLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
 		if calls.Add(1) == 1 {
-			return errors.New("temporary final fence failure")
+			return errors.New("transient final fence failure")
 		}
 		return s.ExtendLease(ctx, attemptID, runnerID, lease)
 	}
@@ -837,7 +837,7 @@ func TestExecuteHoldsLeaseUntilSessionEventuallyStops(t *testing.T) {
 	var extendCalls atomic.Int32
 	exec.extendLeaseHook = func(ctx context.Context, attemptID, runnerID string, lease time.Duration) error {
 		if extendCalls.Add(1) == 1 {
-			return errors.New("temporary lease extension failure")
+			return errors.New("transient lease extension failure")
 		}
 		return s.ExtendLease(ctx, attemptID, runnerID, lease)
 	}

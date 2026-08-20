@@ -68,7 +68,7 @@ func requestCursor(r *http.Request) (streamCursor, error) {
 }
 
 // handleTaskStream serves GET /api/v1/tasks/{taskId}/stream: the task's
-// activity timeline as server-sent events (docs/architecture/api.md). Each
+// activity timeline as server-sent events. Each
 // event's data is the same JSON object GET /events returns; the SSE id field
 // carries the resume cursor. When the task is terminal and the timeline is
 // drained the server emits a "done" event and closes; clients should close

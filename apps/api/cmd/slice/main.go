@@ -1,11 +1,12 @@
-// Command demo runs the complete issue-to-PR vertical slice in one process
-// (VISION.md): a signed GitHub webhook creates a task, the fake agent edits
+// Command slice runs the complete issue-to-PR vertical slice in one process:
+// a signed GitHub webhook creates a task, the fake agent edits
 // an isolated git worktree, trusted validation and evidence run, and
 // publishing commits, pushes, and opens one evidence-backed draft pull
 // request. GitHub itself is simulated by internal/githubfixture - a local
-// API server and a local bare repository - so the demo needs only PostgreSQL
-// (DATABASE_URL) and git; every other component - webhook verification, the
-// task store, the runner, the GitHub client - is the production code path.
+// API server and a local bare repository - so the command needs only
+// PostgreSQL (DATABASE_URL) and git; every other component - webhook
+// verification, the task store, the runner, the GitHub client - is the
+// production code path.
 package main
 
 import (
@@ -37,28 +38,28 @@ import (
 )
 
 const (
-	demoInstallationID = 424242
-	demoRepositoryID   = 424243
-	demoIssueNumber    = 7
-	webhookSecret      = "demo-webhook-secret"
+	fixtureInstallationID = 424242
+	fixtureRepositoryID   = 424243
+	fixtureIssueNumber    = 7
+	webhookSecret         = "local-webhook-secret"
 )
 
 func main() {
 	if err := run(os.Getenv("DATABASE_URL")); err != nil {
-		fmt.Fprintln(os.Stderr, "demo failed:", err)
+		fmt.Fprintln(os.Stderr, "slice failed:", err)
 		os.Exit(1)
 	}
 }
 
 func run(databaseURL string) error {
 	if databaseURL == "" {
-		return errors.New("demo requires DATABASE_URL (run: make infra migrate)")
+		return errors.New("DATABASE_URL is required (run: make infra migrate)")
 	}
 	if _, err := exec.LookPath("git"); err != nil {
-		return errors.New("demo requires git on PATH")
+		return errors.New("git is required on PATH")
 	}
 	ctx := context.Background()
-	logger := observability.NewLogger(io.Discard, "demo", slog.LevelError)
+	logger := observability.NewLogger(io.Discard, "slice", slog.LevelError)
 	metrics := observability.NewRegistry()
 
 	db, err := sql.Open("pgx", databaseURL)
@@ -71,7 +72,7 @@ func run(databaseURL string) error {
 	}
 
 	step("Preparing a sample repository (local bare origin with one commit)")
-	dir, err := os.MkdirTemp("", "agent-trail-demo-repo-")
+	dir, err := os.MkdirTemp("", "agent-trail-slice-repo-")
 	if err != nil {
 		return err
 	}
@@ -91,7 +92,7 @@ func run(databaseURL string) error {
 	}
 	defer server.Close()
 
-	keyPEM, err := githubfixture.ThrowawayKey()
+	keyPEM, err := githubfixture.EphemeralKey()
 	if err != nil {
 		return err
 	}
@@ -106,16 +107,16 @@ func run(databaseURL string) error {
 		return err
 	}
 
-	repo, err := ghStore.RepositoryByGitHubID(ctx, demoRepositoryID)
+	repo, err := ghStore.RepositoryByGitHubID(ctx, fixtureRepositoryID)
 	if err != nil {
 		return err
 	}
-	// A previous demo run leaves its task in awaiting_review; cancel it so
+	// A previous run leaves its task in awaiting_review; cancel it so
 	// the one-active-task-per-issue rule lets this run create a fresh one.
-	if stale, active, err := tasks.ActiveTaskForIssue(ctx, repo.ID, demoIssueNumber); err != nil {
+	if stale, active, err := tasks.ActiveTaskForIssue(ctx, repo.ID, fixtureIssueNumber); err != nil {
 		return err
 	} else if active {
-		if _, err := tasks.Cancel(ctx, stale.ID, "superseded by a new demo run"); err != nil {
+		if _, err := tasks.Cancel(ctx, stale.ID, "superseded by a new slice run"); err != nil {
 			return err
 		}
 	}
@@ -127,7 +128,7 @@ func run(databaseURL string) error {
 		return err
 	}
 	processor.Wait()
-	created, active, err := tasks.ActiveTaskForIssue(ctx, repo.ID, demoIssueNumber)
+	created, active, err := tasks.ActiveTaskForIssue(ctx, repo.ID, fixtureIssueNumber)
 	if err != nil {
 		return err
 	}
@@ -137,7 +138,7 @@ func run(databaseURL string) error {
 	fmt.Println("   task:", created.ID)
 
 	step("Running the task: fake agent, trusted validation, evidence, publishing")
-	workspaceRoot, err := os.MkdirTemp("", "agent-trail-demo-ws-")
+	workspaceRoot, err := os.MkdirTemp("", "agent-trail-slice-ws-")
 	if err != nil {
 		return err
 	}
@@ -148,7 +149,7 @@ func run(databaseURL string) error {
 	}
 	store := runner.NewStore(db)
 	reg, err := store.Register(ctx, runner.RegisterParams{
-		Type: "process", HostnameOrPod: "demo",
+		Type: "process", HostnameOrPod: "local",
 	})
 	if err != nil {
 		return err
@@ -203,12 +204,12 @@ func run(databaseURL string) error {
 	if final.Status != task.StatusAwaitingReview {
 		return fmt.Errorf("task ended at %s, want awaiting_review", final.Status)
 	}
-	fmt.Println("\nDemo complete: the task now awaits human review on the draft PR.")
+	fmt.Println("\nSlice complete: the task now awaits human review on the draft PR.")
 	return nil
 }
 
-// claimTask claims until it owns the demo task (a dev worker may be polling
-// the same database; those claims are for other tasks).
+// claimTask claims until it owns the slice task (a local worker may be
+// polling the same database; those claims are for other tasks).
 func claimTask(ctx context.Context, store *runner.Store, runnerID, taskID string) (*runner.Claim, error) {
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -226,7 +227,7 @@ func claimTask(ctx context.Context, store *runner.Store, runnerID, taskID string
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return nil, errors.New("could not claim the demo task (another worker may have taken it)")
+	return nil, errors.New("could not claim the slice task (another worker may have taken it)")
 }
 
 func step(title string) {
@@ -241,12 +242,12 @@ func indent(s, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-// seedRepository registers the demo installation and repository the way an
-// installation webhook would.
+// seedRepository registers the fixture installation and repository the way
+// an installation webhook would.
 func seedRepository(ctx context.Context, s *github.Store, origin string) error {
 	err := s.UpsertInstallation(ctx, github.InstallationParams{
-		GitHubInstallationID: demoInstallationID,
-		AccountID:            demoInstallationID,
+		GitHubInstallationID: fixtureInstallationID,
+		AccountID:            fixtureInstallationID,
 		AccountLogin:         "acme",
 		AccountType:          "Organization",
 	})
@@ -254,18 +255,18 @@ func seedRepository(ctx context.Context, s *github.Store, origin string) error {
 		return err
 	}
 	repo := github.Repository{
-		ID: demoRepositoryID, Name: "demo", FullName: "acme/demo",
+		ID: fixtureRepositoryID, Name: "fixture", FullName: "acme/fixture",
 		DefaultBranch: "main", CloneURL: origin,
 	}
 	repo.Owner.Login = "acme"
-	return s.SyncRepositories(ctx, demoInstallationID, []github.Repository{repo})
+	return s.SyncRepositories(ctx, fixtureInstallationID, []github.Repository{repo})
 }
 
 // deliverRunCommand posts a signed /agent-trail run issue comment to the
 // webhook handler, exactly as GitHub would.
 func deliverRunCommand(webhook http.Handler) error {
 	req, err := githubfixture.RunCommandRequest([]byte(webhookSecret),
-		demoInstallationID, demoRepositoryID, demoIssueNumber)
+		fixtureInstallationID, fixtureRepositoryID, fixtureIssueNumber)
 	if err != nil {
 		return err
 	}
@@ -277,22 +278,22 @@ func deliverRunCommand(webhook http.Handler) error {
 	return nil
 }
 
-type demoServer struct {
+type fixtureServer struct {
 	URL    string
 	server *http.Server
 }
 
-func (d *demoServer) Close() {
+func (d *fixtureServer) Close() {
 	_ = d.server.Close()
 }
 
 // serve exposes the fixture on a loopback port for the GitHub client.
-func serve(h http.Handler) (*demoServer, error) {
+func serve(h http.Handler) (*fixtureServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
-	return &demoServer{URL: "http://" + ln.Addr().String(), server: srv}, nil
+	return &fixtureServer{URL: "http://" + ln.Addr().String(), server: srv}, nil
 }

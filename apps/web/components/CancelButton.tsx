@@ -6,7 +6,7 @@ import type { Task } from "@/lib/types";
 
 type Phase = "idle" | "confirming" | "cancelling" | "failed";
 
-// Cancellation with inline confirmation (DESIGN.md: not a modal). The
+// Cancellation with inline confirmation (not a modal). The
 // confirm step swaps in place; an optional reason lands in the timeline.
 export function CancelButton({
   task,

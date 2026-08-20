@@ -9,8 +9,8 @@ const STATUS_CLASSES: Record<ValidationStatus, string> = {
   error: "text-warning",
 };
 
-// Trusted validation results. Each result is a self-contained unit
-// (DESIGN.md allows a card here); the trust badge is the load-bearing part.
+// Trusted validation results. Each result is a self-contained unit;
+// the trust badge is the load-bearing part.
 export function ValidationList({ results }: { results: ValidationResult[] }) {
   if (results.length === 0) {
     return (

@@ -132,8 +132,8 @@ func (s *Server) handleRepositoryDisable(w http.ResponseWriter, r *http.Request)
 }
 
 // setRepositoryEnabled flips repository enablement. With auth configured
-// the caller must belong to the repository's organization
-// (docs/security/threat-model.md); the structured log line is the audit
+// the caller must belong to the repository's organization;
+// the structured log line is the audit
 // record the threat model requires for enablement changes.
 func (s *Server) setRepositoryEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
 	if !s.dashboardAvailable(w) {

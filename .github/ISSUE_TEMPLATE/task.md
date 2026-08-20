@@ -6,7 +6,7 @@ labels: ready, afk
 ---
 
 <!-- Autonomy is a label, not a body field - exactly one of the two. This template applies `afk`:
-     fully autonomous, no human involvement (preferred; this repo defaults to it, see VISION.md).
+     fully autonomous, no human involvement (preferred; this repo defaults to it).
      Swap it for `hitl` only when a human genuinely gates the slice: GitHub App registration,
      cloud accounts or spend, credentials/secrets, or an irreversible externally visible action.
      `/start-next-issue` skips `hitl`, so a human picks it up. -->
@@ -18,9 +18,9 @@ labels: ready, afk
 ## What to build
 
 <!-- Concise end-to-end description of this slice. Describe behavior, not layer-by-layer implementation.
-     Avoid specific file paths - they go stale fast. Exception: if a prototype produced a snippet that
-     encodes a decision more precisely than prose (state machine, schema, type shape), inline it and
-     note it came from a prototype. -->
+     Avoid specific file paths - they go stale fast. Exception: if design exploration produced a
+     snippet that encodes a decision more precisely than prose (state machine, schema, type shape),
+     inline it and note its origin. -->
 
 ## Acceptance criteria
 
@@ -35,14 +35,13 @@ labels: ready, afk
 ## Definition of done
 
 - [ ] CI `test` check green
-- [ ] VISION.md definition of done satisfied (tests, docs, observability, security impact)
+- [ ] Definition of done satisfied (tests, docs, observability, security impact)
 - [ ] Verified locally if runtime behavior or UI changes
-- [ ] Frontend/UI changes conform to `DESIGN.md` and pass its mandatory in-browser audit (Playwright screenshots of every changed state, attached to the PR)
-- [ ] Architecture changes carry an ADR in `docs/adr/`
+- [ ] Frontend/UI changes verified in-browser (Playwright screenshots of every changed state, attached to the PR)
 - [ ] PR on branch `<issue#>-<slug>` with `Closes #<this issue>`
 
 ## Notes / context
 
-<!-- Links to specs in docs/, ADRs, related issues. If this issue is labelled `hitl`, say exactly
+<!-- Links to related issues. If this issue is labelled `hitl`, say exactly
      what human input it needs and who can give it - otherwise whoever picks it up has to work
      that out. -->

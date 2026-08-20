@@ -18,11 +18,17 @@ afterEach(() => {
 test("renders repository settings, metrics, and task sections", async () => {
   const repository = {
     id: "39be2f56-3419-4a0a-a7ad-1a72698c0cc5",
+    organization_id: "5b0a6f6e-3c73-4b57-9d5c-0f0f38c4a001",
+    owner: "chieaid24",
+    name: "agent-trail",
     full_name: "chieaid24/agent-trail",
     github_repository_id: 201,
     default_branch: "main",
     is_enabled: true,
     is_private: false,
+    active_task_count: 1,
+    recent_task_count: 3,
+    created_at: "2026-07-28T12:00:00Z",
     updated_at: "2026-07-28T12:00:00Z",
     settings: {
       default_policy: "restricted",

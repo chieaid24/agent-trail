@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Verifies the Kubernetes runner acceptance criteria locally in a throwaway
-# kind cluster (docs/operations/aws-deployment.md):
+# Verifies the Kubernetes runner acceptance criteria locally in a per-run
+# kind cluster:
 #   1. a task runs end to end inside the restricted runner Job
 #   2. the pod spec carries every hardening the Job template promises
 #   3. ttlSecondsAfterFinished removes the finished Job

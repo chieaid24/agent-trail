@@ -1,9 +1,8 @@
 # Benchmark Results
 
 Measured output of the reproducible suite in `apps/api/internal/bench/`,
-run via `scripts/bench.sh` (see `benchmarks.md` for the plan and
-`docs/operations/local-development.md` for the runbook). Every number
-below names its recorded run; nothing is estimated or extrapolated.
+run via `scripts/bench.sh` (see `benchmarks.md` for the plan). Every
+number below names its recorded run; nothing is estimated or extrapolated.
 
 ## Recorded run
 
@@ -47,8 +46,7 @@ shuffled - POSTed by 64 concurrent clients to the real
 | Tasks created | 5,000 |
 | Issues with duplicate tasks | 0 |
 
-The p95 ack latency meets the < 500ms target in
-`docs/operations/reliability-targets.md`. Duplicate arbitration is the
+The p95 ack latency meets the < 500ms target. Duplicate arbitration is the
 `github_delivery_id` unique constraint (`INSERT ... ON CONFLICT DO
 NOTHING`), so it holds under concurrency: originals and duplicates were
 in flight simultaneously.

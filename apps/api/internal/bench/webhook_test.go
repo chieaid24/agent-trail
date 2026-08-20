@@ -257,7 +257,7 @@ func TestWebhookIdempotency10k(t *testing.T) {
 			accepted, duplicates, uniqueDeliveries, webhookDeliveries-uniqueDeliveries)
 	}
 
-	// The invariants (docs/operations/reliability-targets.md): one ledger
+	// The invariants: one ledger
 	// row per delivery id, one task per issue, zero duplicates.
 	if got := queryInt(t, db,
 		`SELECT count(*) FROM github_webhook_deliveries WHERE github_delivery_id LIKE 'bench-delivery-%'`); got != uniqueDeliveries {

@@ -5,7 +5,7 @@ import { StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatDuration, runtimeMs } from "@/lib/format";
 import type { Task } from "@/lib/types";
 
-// One dense row per task (DESIGN.md: table rows are rows, not cards).
+// One dense row per task (table rows are rows, not cards).
 export function TaskRows({ tasks }: { tasks: Task[] }) {
   return (
     <ul>

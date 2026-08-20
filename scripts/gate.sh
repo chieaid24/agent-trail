@@ -2,8 +2,7 @@
 # Deterministic pre-merge gate. Run by CI (the required `test` check) and by
 # the pre-commit hook. Mirrors the deterministic steps of the no-mistakes
 # pipeline (format, lint, test, build) plus the repo's docs ASCII check. The
-# AI gates (review, docs-sync) run separately - see
-# docs/operations/validation-pipeline.md.
+# AI gates (review, docs-sync) run separately on the agent side.
 #
 # Stack is auto-detected per directory: every go.mod module and every
 # package.json app gets its gates. Absent tooling skips cleanly and stays

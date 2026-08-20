@@ -64,7 +64,7 @@ func userFrom(ctx context.Context) (auth.User, bool) {
 // requireSession rejects requests without a live session cookie. It is
 // applied to /api/v1 and /me only when auth is configured; the SSE stream
 // sits under it too, which is why the session travels as a cookie
-// (EventSource cannot set headers, docs/adr/0005-sse-streaming.md).
+// (EventSource cannot set headers).
 func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(sessionCookieName)

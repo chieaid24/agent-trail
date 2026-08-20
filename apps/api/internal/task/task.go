@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Task mirrors the tasks table (docs/architecture/data-model.md). JSON tags
+// Task mirrors the tasks table. JSON tags
 // are the API wire shape.
 type Task struct {
 	ID                string     `json:"id"`

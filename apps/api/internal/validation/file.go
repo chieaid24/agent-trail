@@ -1,5 +1,5 @@
-// Package validation implements trusted platform validation
-// (docs/architecture/validation.md): parsing the repository validation
+// Package validation implements trusted platform validation:
+// parsing the repository validation
 // file, running its checks in the attempt workspace after editing ends,
 // and storing the results. Platform-run results carry
 // trusted_execution=true; agent-reported checks never do, and no agent
@@ -38,8 +38,7 @@ const (
 	MaxTotalTimeoutSeconds = 3600
 )
 
-// Categories mirrors the validation_results category CHECK constraint
-// (docs/architecture/data-model.md).
+// Categories mirrors the validation_results category CHECK constraint.
 var Categories = map[string]bool{
 	"unit_test":        true,
 	"integration_test": true,

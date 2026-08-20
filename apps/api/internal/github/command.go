@@ -16,8 +16,8 @@ type Command struct {
 const commandUsage = "Unknown command. Supported: `/agent-trail run`."
 
 // ParseCommand scans the comment body for an /agent-trail command line. The
-// first line starting with "/agent-trail" decides; MVP syntax accepts
-// exactly "run" with no arguments (docs/architecture/github-app.md).
+// first line starting with "/agent-trail" decides; the command grammar
+// accepts exactly "run" with no arguments.
 func ParseCommand(body string) Command {
 	for line := range strings.Lines(body) {
 		fields := strings.Fields(line)

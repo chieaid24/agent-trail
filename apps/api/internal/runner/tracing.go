@@ -1,4 +1,4 @@
-// Package runner traces the flows in docs/operations/observability.md.
+// Package runner traces the flows.
 package runner
 
 import (

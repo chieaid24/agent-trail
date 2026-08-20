@@ -36,7 +36,7 @@ type ClaudeCodeOptions struct {
 	// PermissionMode is the Claude Code permission mode (default "acceptEdits").
 	PermissionMode string
 	// PinnedVersion, when set, is required as a substring of `claude --version`
-	// so a drifted CLI fails validation instead of running (docs/security/risks.md).
+	// so a drifted CLI fails validation instead of running.
 	PinnedVersion string
 	// Logger receives structured session logs; nil discards.
 	Logger *slog.Logger
@@ -45,7 +45,7 @@ type ClaudeCodeOptions struct {
 // ClaudeCode is the real agent adapter backed by the Claude Code CLI. It runs
 // the CLI as a subprocess in the task workspace with --output-format
 // stream-json and normalizes that provider stream into the neutral Event
-// stream (docs/architecture/agent-providers.md). Every Claude-specific type
+// stream. Every Claude-specific type
 // stays in this file, behind the Adapter boundary, so the core domain never
 // sees a provider format.
 type ClaudeCode struct {

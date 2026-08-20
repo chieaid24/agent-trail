@@ -3,8 +3,7 @@
 // attempts with expiring leases, executes them with the configured agent
 // adapter (fake by default, or the Claude Code CLI), heartbeats the registry,
 // and reaps lost runners. WORKER_MAX_TASKS=1 turns it into a one-shot
-// Kubernetes Job runner. Spec: docs/architecture/runner.md and
-// docs/architecture/agent-providers.md.
+// Kubernetes Job runner.
 package main
 
 import (

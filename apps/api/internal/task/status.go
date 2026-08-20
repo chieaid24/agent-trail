@@ -1,7 +1,6 @@
 // Package task implements the task domain: the validated state machine,
 // optimistic versioning, task attempts, and the append-only activity
-// timeline. Spec: docs/architecture/task-state-machine.md and
-// docs/architecture/data-model.md. All state changes go through
+// timeline. All state changes go through
 // Store.Transition; nothing else may assign task states.
 package task
 

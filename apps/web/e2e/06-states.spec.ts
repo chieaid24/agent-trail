@@ -145,7 +145,7 @@ test("full-spectrum grouped board", async ({ page }) => {
         runners: [
           {
             id: "3b241101-e2bb-4255-8caf-4136c566a907",
-            hostname_or_pod: "runner-demo-1",
+            hostname_or_pod: "runner-local-1",
             status: "online",
             capacity: 4,
             active_task_count: 2,

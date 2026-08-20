@@ -9,7 +9,7 @@ test("overview lists seeded tasks with grouped state and summary", async ({
 
   await expect(page.getByRole("region", { name: "Finished" })).toBeVisible();
   await expect(page.getByText(EXECUTED_TASK_TITLE)).toBeVisible();
-  await expect(page.getByText("Demo: upgrade the TLS library")).toBeVisible();
+  await expect(page.getByText("Upgrade the TLS library")).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Runner health" }),
   ).toContainText("online");

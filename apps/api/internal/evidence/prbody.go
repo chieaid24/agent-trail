@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// PRBody renders the draft pull request body from the stored report
-// (docs/architecture/evidence.md "Pull-Request Body"). finalCommit is the
+// PRBody renders the draft pull request body from the stored report.
+// finalCommit is the
 // published commit, measured at publish time (the report is generated before
 // the commit exists). Only measured facts appear; no prompts, no secrets.
 func PRBody(r Report, finalCommit string) string {

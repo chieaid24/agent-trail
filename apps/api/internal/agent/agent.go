@@ -1,5 +1,5 @@
 // Package agent defines the provider-neutral agent adapter interface and its
-// normalized event stream (docs/architecture/agent-providers.md), plus the
+// normalized event stream, plus the
 // fake adapter that exercises the orchestration path without model cost.
 package agent
 

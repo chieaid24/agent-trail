@@ -10,7 +10,7 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function demoTask(overrides: Partial<Task>): Task {
+function makeTask(overrides: Partial<Task>): Task {
   return {
     id: "3b241101-e2bb-4255-8caf-4136c566a962",
     organization_id: null,
@@ -18,7 +18,7 @@ function demoTask(overrides: Partial<Task>): Task {
     source_type: "api",
     source_issue_number: null,
     source_comment_id: null,
-    title: "Demo task",
+    title: "Sample task",
     instructions: "do it",
     status: "queued",
     phase: "pending",
@@ -77,8 +77,8 @@ test("renders the shell and empty state when no tasks exist", async () => {
 
 test("groups tasks by attention and links to detail", async () => {
   const tasks = [
-    demoTask({ id: "3b241101-e2bb-4255-8caf-4136c566a901", title: "Waiting" }),
-    demoTask({
+    makeTask({ id: "3b241101-e2bb-4255-8caf-4136c566a901", title: "Waiting" }),
+    makeTask({
       id: "3b241101-e2bb-4255-8caf-4136c566a902",
       title: "Working",
       status: "executing",

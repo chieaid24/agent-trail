@@ -1,4 +1,4 @@
-# Throwaway database for the local verification stack. Data lives in an
+# Per-run database for the local verification stack. Data lives in an
 # emptyDir and dies with the pod; the Secret is generated per run by
 # scripts/verify-k8s-runner.sh.
 apiVersion: apps/v1

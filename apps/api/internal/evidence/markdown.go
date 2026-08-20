@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// Markdown renders the report as the human-readable evidence summary
-// (docs/architecture/evidence.md). Trusted results and agent claims are
+// Markdown renders the report as the human-readable evidence summary.
+// Trusted results and agent claims are
 // kept visibly apart: only platform-executed checks appear under
 // "Verified by Agent Trail".
 func Markdown(r Report) string {

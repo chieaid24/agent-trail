@@ -55,7 +55,6 @@ jobs:
       # Deterministic pre-merge gate: format, lint, test, build for every Go
       # module and Node app, plus the docs ASCII check (keep the job name
       # `test` - branch protection requires this check). AI gates (review,
-      # docs-sync) run pre-merge on the agent side; see
-      # docs/operations/validation-pipeline.md.
+      # docs-sync) run pre-merge on the agent side.
       - name: Gate
         run: bash scripts/gate.sh

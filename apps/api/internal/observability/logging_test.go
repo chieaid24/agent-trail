@@ -42,7 +42,7 @@ func TestMiddlewareGeneratesTraceID(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
 		t.Fatalf("log line is not JSON: %v", err)
 	}
-	// Key names per docs/operations/observability.md.
+	// Key names.
 	for _, key := range []string{"timestamp", "level", "service", "event", "trace_id", "message"} {
 		if _, ok := line[key]; !ok {
 			t.Errorf("log line missing %q: %s", key, buf.String())

@@ -28,8 +28,7 @@ type Host struct {
 
 	// MaxTasks caps executed attempts; zero is unbounded. A capped host
 	// exits cleanly after its last attempt, so a Kubernetes Job completes
-	// and ttlSecondsAfterFinished can reclaim it
-	// (docs/operations/aws-deployment.md).
+	// and ttlSecondsAfterFinished can reclaim it.
 	MaxTasks int
 	// IdleExit stops the host when no claim arrives for this long; zero
 	// never idles out. Keeps a one-shot Job from hanging on an empty queue.

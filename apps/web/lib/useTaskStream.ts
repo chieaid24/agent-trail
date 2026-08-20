@@ -1,6 +1,6 @@
 "use client";
 
-// Live task timeline over SSE (docs/architecture/api.md: Streaming). The
+// Live task timeline over SSE. The
 // server replays the whole timeline on first connect and a terminal task
 // ends with a "done" event, after which the socket is closed for good.
 //

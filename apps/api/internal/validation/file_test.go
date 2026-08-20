@@ -32,7 +32,7 @@ validation:
     timeout_seconds: 600
 `
 
-// TestParseDocExample: the example in docs/architecture/validation.md is a
+// TestParseDocExample: the example is a
 // valid file.
 func TestParseDocExample(t *testing.T) {
 	f, err := Parse([]byte(docExample))

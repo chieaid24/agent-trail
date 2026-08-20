@@ -17,8 +17,7 @@ const (
 
 // TestScheduler100Tasks20Runners drains 100 queued tasks with 20 concurrent
 // runners claiming from the Postgres queue (FOR UPDATE SKIP LOCKED leases)
-// and verifies no attempt was ever executed twice
-// (docs/testing/testing-strategy.md "Load tests > Scheduler").
+// and verifies no attempt was ever executed twice.
 func TestScheduler100Tasks20Runners(t *testing.T) {
 	db := openDB(t)
 	t.Setenv("TMPDIR", t.TempDir())

@@ -8,7 +8,7 @@ export interface TimelineRow {
   label: string;
   // Longer free text under the headline, when the payload carries one.
   detail?: string;
-  // Detail renders in mono when it is a shell/git artifact (DESIGN.md).
+  // Detail renders in mono when it is a shell/git artifact.
   monoDetail?: boolean;
 }
 
