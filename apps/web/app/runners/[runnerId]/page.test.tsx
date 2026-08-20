@@ -23,7 +23,10 @@ test("renders runner capacity, resources, and task states", async () => {
     status: "online",
     capacity: 2,
     active_task_count: 1,
+    labels: {},
     last_heartbeat_at: "2026-07-28T12:00:00Z",
+    created_at: "2026-07-28T12:00:00Z",
+    updated_at: "2026-07-28T12:00:00Z",
     resources: {
       cpu_percent: 42,
       memory_percent: 78,
