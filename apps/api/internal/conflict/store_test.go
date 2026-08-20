@@ -28,8 +28,8 @@ func createRepository(t *testing.T, db *sql.DB) string {
 	err = db.QueryRowContext(ctx, `
 		INSERT INTO repositories (organization_id, github_repository_id,
 			owner, name, full_name, clone_url)
-		VALUES ($1, 1, 'test-org', 'demo', 'test-org/demo',
-			'https://example.com/test-org/demo.git')
+		VALUES ($1, 1, 'test-org', 'fixture', 'test-org/fixture',
+			'https://example.com/test-org/fixture.git')
 		RETURNING id`, orgID).Scan(&repoID)
 	if err != nil {
 		t.Fatal(err)

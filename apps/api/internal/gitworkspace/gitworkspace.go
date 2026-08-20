@@ -1,5 +1,5 @@
 // Package gitworkspace provisions and cleans up isolated git worktrees for
-// task attempts (docs/architecture/git-workspaces.md). It keeps a bare mirror
+// task attempts. It keeps a bare mirror
 // cache per repository, cuts one worktree per attempt from a verified base
 // commit, sanitizes branch names under the agent-trail/ prefix, enforces a
 // push policy (agent-trail/* only, no force pushes) in code rather than by
@@ -12,9 +12,9 @@
 //
 // Security limitation: the fetch lock that serializes mirror clones and
 // fetches is process-local. A single control-plane/runner process per host
-// (the MVP shape) is safe; sharing one on-disk mirror cache across processes
-// on the same host would need a cross-process file lock, deferred until a
-// deployment needs it.
+// is safe; sharing one on-disk mirror cache across processes on the same
+// host would need a cross-process file lock, which this package does not
+// implement.
 package gitworkspace
 
 import (

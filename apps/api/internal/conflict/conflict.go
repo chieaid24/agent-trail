@@ -11,7 +11,7 @@ const (
 	KindFileOverlap Kind = "file_overlap"
 	// KindAdjacentLines marks nearby base-side hunks.
 	KindAdjacentLines Kind = "adjacent_lines"
-	// KindMergeConflict marks a failed temporary merge.
+	// KindMergeConflict marks a failed trial merge.
 	KindMergeConflict Kind = "merge_conflict"
 	// KindMigration marks concurrent migration changes.
 	KindMigration Kind = "migration"

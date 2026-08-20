@@ -4,7 +4,7 @@
 // smart HTTP, and a /verify endpoint reporting the seeded task's outcome.
 // On startup it seeds the installation and repository and delivers the
 // signed /agent-trail run webhook, so a worker Job polling the same
-// database finds one queued task. Test-only: anonymous git push, throwaway
+// database finds one queued task. Test-only: anonymous git push, single-run
 // credentials, no TLS.
 package main
 
@@ -158,7 +158,7 @@ func newFixture(db *sql.DB, origin, publicURL string) (*fixture, error) {
 	if err != nil {
 		return nil, err
 	}
-	keyPEM, err := githubfixture.ThrowawayKey()
+	keyPEM, err := githubfixture.EphemeralKey()
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (f *fixture) seed(ctx context.Context) error {
 		return err
 	}
 	repo := github.Repository{
-		ID: repositoryID, Name: "demo", FullName: "acme/demo",
+		ID: repositoryID, Name: "fixture", FullName: "acme/fixture",
 		DefaultBranch: "main", CloneURL: f.cloneURL,
 	}
 	repo.Owner.Login = "acme"

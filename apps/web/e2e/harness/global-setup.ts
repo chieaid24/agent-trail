@@ -24,7 +24,7 @@ import {
 import { spawnDaemon, waitFor } from "./procs";
 
 // The seeded task the worker picks up and drives to completion.
-export const EXECUTED_TASK_TITLE = "Demo: add pagination to the audit log";
+export const EXECUTED_TASK_TITLE = "Add pagination to the audit log";
 
 function compose(...args: string[]): void {
   execFileSync("docker", ["compose", "-p", E2E.project, ...args], {
@@ -103,7 +103,7 @@ export default async function globalSetup(): Promise<void> {
 
   // The fake adapter finishes in seconds. The worker takes the seeded
   // queued task and also recovers the seeded mid-flight one, so wait until
-  // Awaiting-review demo tasks are settled and remain unclaimed. The tasks
+  // Awaiting-review seed tasks are settled and remain unclaimed. The tasks
   // read authenticates like every spec.
   const settled = new Set([
     "completed",

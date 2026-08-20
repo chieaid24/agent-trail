@@ -1,11 +1,9 @@
 // Package observability provides structured JSON logging and request
-// correlation for the control plane. Field names follow
-// docs/operations/observability.md (timestamp, service, level, message);
-// request-scoped lines carry trace_id, the correlation id until
-// OpenTelemetry tracing lands. Handlers add task_id on task-context lines;
-// task_attempt_id and runner_id join when the scheduler and runners start
-// logging attempt-scoped work (the activity timeline carries attempt
-// context until then).
+// correlation for the control plane. Field names are timestamp, service,
+// level, and message;
+// request-scoped lines carry trace_id, the correlation id shared with
+// OpenTelemetry tracing. Handlers add task_id on task-context lines;
+// attempt-scoped lines add task_attempt_id and runner_id.
 package observability
 
 import (
@@ -38,8 +36,7 @@ func NewLogger(w io.Writer, service string, level slog.Level) *slog.Logger {
 	return slog.New(h).With("service", service)
 }
 
-// renameDefaultKeys maps slog's built-in keys to the names required by
-// docs/operations/observability.md.
+// renameDefaultKeys maps slog's built-in keys to the required names.
 func renameDefaultKeys(groups []string, a slog.Attr) slog.Attr {
 	if len(groups) == 0 {
 		switch a.Key {

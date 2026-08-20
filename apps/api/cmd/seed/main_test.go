@@ -22,7 +22,7 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 	db := dbtest.Open(t) // skips without TEST_DATABASE_URL
 	t.Setenv("DATABASE_URL", os.Getenv("TEST_DATABASE_URL"))
 
-	want := len(demoTasks()) + 2
+	want := len(seedTasks()) + 2
 
 	if err := run(); err != nil {
 		t.Fatalf("seed: %v", err)

@@ -23,8 +23,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// Failure-injection matrix (docs/testing/testing-strategy.md "Failure
-// injection", issue #13): runner kill, network interruption, database
+// Failure-injection matrix (issue #13): runner kill, network interruption,
+// database
 // restart, S3 timeout, GitHub rate limit, agent hang, full disk. Each test
 // injects one fault and asserts the recorded behaviour; the measured
 // outcomes live in docs/testing/benchmark-results.md.
@@ -287,7 +287,7 @@ func newInjectRig(t *testing.T) *injectRig {
 	stubSrv := httptest.NewServer(stub)
 	t.Cleanup(stubSrv.Close)
 
-	key, err := githubfixture.ThrowawayKey()
+	key, err := githubfixture.EphemeralKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestInjectNetworkInterruption(t *testing.T) {
 }
 
 // TestInjectGitHubRateLimit answers every GitHub call with 429. The client
-// has no retry or backoff by design (docs/adr/0006), so the delivery fails
+// has no retry or backoff by design, so the delivery fails
 // with the 429 recorded and no task; processing recovers on the next
 // delivery once the limit lifts.
 func TestInjectGitHubRateLimit(t *testing.T) {
@@ -433,8 +433,8 @@ func TestInjectGitHubRateLimit(t *testing.T) {
 func TestInjectS3Timeout(t *testing.T) {
 	guard(t)
 	t.Skip("not applicable: no object-storage code path exists yet - logs, " +
-		"evidence, and validation results live in Postgres " +
-		"(docs/architecture/logs-and-streaming.md); add this injection when " +
+		"evidence, and validation results live in Postgres; " +
+		"add this injection when " +
 		"log offload to object storage lands")
 }
 

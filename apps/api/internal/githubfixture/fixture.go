@@ -1,6 +1,6 @@
 // Package githubfixture simulates the slice of GitHub the runner touches:
 // the handful of REST endpoints publishing calls, a bare git origin, and a
-// signed /agent-trail run webhook delivery. cmd/demo embeds it in-process;
+// signed /agent-trail run webhook delivery. cmd/slice embeds it in-process;
 // cmd/fixture-github serves it over the network so a runner isolated in a
 // Kubernetes Job can exercise the full task pipeline without GitHub.
 package githubfixture
@@ -72,32 +72,32 @@ func (g *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"token":      "fixture-token",
 			"expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		})
-	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/demo/branches/"):
-		sha, err := gitIn(g.origin, "rev-parse", "refs/heads/"+strings.TrimPrefix(path, "/repos/acme/demo/branches/"))
+	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/fixture/branches/"):
+		sha, err := gitIn(g.origin, "rev-parse", "refs/heads/"+strings.TrimPrefix(path, "/repos/acme/fixture/branches/"))
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
 		writeJSON(w, map[string]any{"commit": map[string]any{"sha": sha}})
-	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/demo/collaborators/"):
+	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/fixture/collaborators/"):
 		writeJSON(w, map[string]any{"permission": "admin"})
-	case method == http.MethodPost && strings.HasPrefix(path, "/repos/acme/demo/issues/"):
+	case method == http.MethodPost && strings.HasPrefix(path, "/repos/acme/fixture/issues/"):
 		var body struct {
 			Body string `json:"body"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		g.comments = append(g.comments, body.Body)
 		writeJSON(w, map[string]any{"id": len(g.comments)})
-	case method == http.MethodGet && path == "/repos/acme/demo/pulls":
+	case method == http.MethodGet && path == "/repos/acme/fixture/pulls":
 		if g.prOpen {
 			writeJSON(w, []map[string]any{{
 				"number": 1, "state": "open", "draft": true,
-				"html_url": "https://github.example/acme/demo/pull/1",
+				"html_url": "https://github.example/acme/fixture/pull/1",
 			}})
 			return
 		}
 		writeJSON(w, []map[string]any{})
-	case method == http.MethodPost && path == "/repos/acme/demo/pulls":
+	case method == http.MethodPost && path == "/repos/acme/fixture/pulls":
 		var body struct {
 			Body string `json:"body"`
 		}
@@ -106,9 +106,9 @@ func (g *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.prBody = body.Body
 		writeJSON(w, map[string]any{
 			"number": 1, "state": "open", "draft": true,
-			"html_url": "https://github.example/acme/demo/pull/1",
+			"html_url": "https://github.example/acme/fixture/pull/1",
 		})
-	case method == http.MethodPatch && strings.HasPrefix(path, "/repos/acme/demo/pulls/"):
+	case method == http.MethodPatch && strings.HasPrefix(path, "/repos/acme/fixture/pulls/"):
 		var body struct {
 			Body string `json:"body"`
 		}
@@ -119,13 +119,13 @@ func (g *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{})
 	case method == http.MethodGet && strings.HasSuffix(path, "/check-runs"):
 		writeJSON(w, map[string]any{"check_runs": g.checks})
-	case method == http.MethodPost && path == "/repos/acme/demo/check-runs":
+	case method == http.MethodPost && path == "/repos/acme/fixture/check-runs":
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		body["id"] = len(g.checks) + 1
 		g.checks = append(g.checks, body)
 		writeJSON(w, map[string]any{"id": len(g.checks)})
-	case method == http.MethodPatch && strings.HasPrefix(path, "/repos/acme/demo/check-runs/"):
+	case method == http.MethodPatch && strings.HasPrefix(path, "/repos/acme/fixture/check-runs/"):
 		writeJSON(w, map[string]any{})
 	default:
 		http.NotFound(w, r)
@@ -145,7 +145,7 @@ func BuildOrigin(dir string) (origin, baseSHA string, err error) {
 	if err := os.MkdirAll(src, 0o750); err != nil {
 		return "", "", err
 	}
-	readme := "# Demo repository\n\nThe fake agent records its run here.\n"
+	readme := "# Fixture repository\n\nThe fake agent records its run here.\n"
 	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte(readme), 0o644); err != nil {
 		return "", "", err
 	}
@@ -182,12 +182,12 @@ func RunCommandRequest(secret []byte, installationID, repositoryID, issueNumber 
 		"comment": map[string]any{
 			"id":   1,
 			"body": "/agent-trail run",
-			"user": map[string]any{"id": 9, "login": "demo-user", "type": "User"},
+			"user": map[string]any{"id": 9, "login": "fixture-user", "type": "User"},
 		},
 		"issue": map[string]any{
 			"number": issueNumber,
-			"title":  "Demo: record the run in the fixture file",
-			"body":   "Scripted demo issue driving the full vertical slice.",
+			"title":  "Record the run in the fixture file",
+			"body":   "Scripted issue driving the full vertical slice.",
 		},
 		"repository": map[string]any{
 			"id": repositoryID,
@@ -216,8 +216,8 @@ func RunCommandRequest(secret []byte, installationID, repositoryID, issueNumber 
 	return req, nil
 }
 
-// ThrowawayKey generates a single-run RSA key for the app JWT.
-func ThrowawayKey() ([]byte, error) {
+// EphemeralKey generates a single-run RSA key for the app JWT.
+func EphemeralKey() ([]byte, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err

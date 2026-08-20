@@ -1,4 +1,4 @@
-// Command seed loads demo tasks in representative states so the dashboard
+// Command seed loads sample tasks in representative states so the dashboard
 // and API have data to show. Idempotent: it refuses to run against a
 // database that already has tasks. DATABASE_URL must be set.
 package main
@@ -28,18 +28,18 @@ func main() {
 	}
 }
 
-// demoTask pairs create params with the statuses to walk the task through.
-type demoTask struct {
+// seedTask pairs create params with the statuses to walk the task through.
+type seedTask struct {
 	title        string
 	instructions string
 	repository   int
 	path         []task.TransitionParams
 }
 
-func demoTasks() []demoTask {
-	return []demoTask{
+func seedTasks() []seedTask {
+	return []seedTask{
 		{
-			title:        "Demo: fix flaky login test",
+			title:        "Fix the flaky login test",
 			instructions: "Investigate the flaky login integration test and make it deterministic.",
 			repository:   0,
 			path: []task.TransitionParams{
@@ -50,13 +50,13 @@ func demoTasks() []demoTask {
 			},
 		},
 		{
-			title:        "Demo: add pagination to the audit log",
+			title:        "Add pagination to the audit log",
 			instructions: "Add cursor pagination to the audit log endpoint.",
 			repository:   -1,
 			// Stays queued: shows the pending column.
 		},
 		{
-			title:        "Demo: upgrade the TLS library",
+			title:        "Upgrade the TLS library",
 			instructions: "Upgrade the TLS dependency and run the full test suite.",
 			repository:   1,
 			path: []task.TransitionParams{
@@ -70,7 +70,7 @@ func demoTasks() []demoTask {
 			},
 		},
 		{
-			title:        "Demo: rename the billing module",
+			title:        "Rename the billing module",
 			instructions: "Rename billing to invoicing across the codebase.",
 			repository:   -1,
 			path: []task.TransitionParams{
@@ -117,7 +117,7 @@ func run() error {
 		return err
 	}
 	store := task.NewStore(db)
-	for _, d := range demoTasks() {
+	for _, d := range seedTasks() {
 		params := task.CreateParams{Title: d.title, Instructions: d.instructions}
 		if d.repository >= 0 {
 			params.OrganizationID = &organizationID
@@ -138,12 +138,12 @@ func run() error {
 			slog.String("status", string(t.Status)),
 		)
 	}
-	if err := seedConflictDemo(ctx, db, store, organizationID, repositoryIDs[0]); err != nil {
-		return fmt.Errorf("seed conflict demo: %w", err)
+	if err := seedConflictPair(ctx, db, store, organizationID, repositoryIDs[0]); err != nil {
+		return fmt.Errorf("seed conflict pair: %w", err)
 	}
 	logger.LogAttrs(ctx, slog.LevelInfo, "seed complete",
 		slog.String("event", "seed_done"),
-		slog.Int("tasks", len(demoTasks())+2),
+		slog.Int("tasks", len(seedTasks())+2),
 	)
 	return nil
 }
@@ -191,11 +191,11 @@ func seedRepositories(ctx context.Context, db *sql.DB) (string, []string, error)
 }
 
 const (
-	conflictTaskATitle = "Demo: extract the payment client"
-	conflictTaskBTitle = "Demo: add retries to the payment client"
+	conflictTaskATitle = "Extract the payment client"
+	conflictTaskBTitle = "Add retries to the payment client"
 )
 
-func seedConflictDemo(ctx context.Context, db *sql.DB, store *task.Store,
+func seedConflictPair(ctx context.Context, db *sql.DB, store *task.Store,
 	orgID, repoID string) error {
 	toAwaitingReview := []task.TransitionParams{
 		{To: task.StatusProvisioning}, {To: task.StatusPlanning},

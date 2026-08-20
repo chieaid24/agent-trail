@@ -1,4 +1,4 @@
-# Agent Trail development entrypoints. See docs/operations/local-development.md.
+# Agent Trail development entrypoints.
 SHELL := /usr/bin/env bash
 
 # .env overrides the defaults below (ports, DATABASE_URL, ...). Compose and
@@ -9,7 +9,7 @@ SHELL := /usr/bin/env bash
 DATABASE_URL ?= postgres://agent_trail:agent_trail@localhost:5432/agent_trail?sslmode=disable
 TEST_DATABASE_URL ?= $(DATABASE_URL)
 
-.PHONY: dev infra migrate seed test integration-test e2e bench demo clean hooks
+.PHONY: dev infra migrate seed test integration-test e2e bench slice clean hooks
 
 ## dev: start infra (compose), run migrations, run api + worker + web
 dev: infra migrate
@@ -23,7 +23,7 @@ infra:
 migrate:
 	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/migrate up
 
-## seed: load demo tasks (skips when the database already has tasks)
+## seed: load sample tasks (skips when the database already has tasks)
 seed:
 	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/seed
 
@@ -46,9 +46,9 @@ e2e:
 bench:
 	bash scripts/bench.sh
 
-## demo: scripted issue-to-PR demo against a simulated GitHub (needs infra)
-demo:
-	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/demo
+## slice: scripted issue-to-PR vertical slice against a simulated GitHub (needs infra)
+slice:
+	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/slice
 
 ## clean: stop infra, drop volumes, remove build artifacts
 clean:

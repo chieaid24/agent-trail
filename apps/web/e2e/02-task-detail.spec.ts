@@ -56,7 +56,7 @@ test("executed task shows timeline, logs, validations, evidence, files", async (
 });
 
 test("failed task surfaces its failure loudly", async ({ page }) => {
-  const task = await apiTaskByTitle("Demo: upgrade the TLS library");
+  const task = await apiTaskByTitle("Upgrade the TLS library");
   await page.goto(`/tasks/${task.id}`);
 
   await expect(page.getByText("failed", { exact: true })).toBeVisible();

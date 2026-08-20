@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { apiTaskByTitle } from "./harness/api";
 import { shootBothViewports } from "./harness/shots";
 
-const TASK_A = "Demo: extract the payment client";
-const TASK_B = "Demo: add retries to the payment client";
+const TASK_A = "Extract the payment client";
+const TASK_B = "Add retries to the payment client";
 
 test("task detail warns about the overlapping active task", async ({
   page,
@@ -38,7 +38,7 @@ test("the warning is symmetric: the sibling names this task", async ({
 });
 
 test("a task without stored conflicts shows no warning", async ({ page }) => {
-  const clean = await apiTaskByTitle("Demo: fix flaky login test");
+  const clean = await apiTaskByTitle("Fix the flaky login test");
   await page.goto(`/tasks/${clean.id}`);
 
   await expect(page.getByText("Instructions")).toBeVisible();
