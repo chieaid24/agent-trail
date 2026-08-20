@@ -1,6 +1,6 @@
 // Package runner implements the runner registry, task-attempt leasing, and
 // the loop that drives a claimed attempt through the fake agent flow.
-// Spec: docs/architecture/runner.md. Claiming is FOR UPDATE SKIP LOCKED
+// Claiming is FOR UPDATE SKIP LOCKED
 // against task_attempts (ADR-0003): only one runner ever owns an attempt,
 // every claim carries an expiring lease, and a lost runner's attempt becomes
 // claimable again once its lease expires.
@@ -24,7 +24,7 @@ var ErrLeaseLost = errors.New("lease lost")
 // ErrRunnerNotFound is returned when the runner id does not exist.
 var ErrRunnerNotFound = errors.New("runner not found")
 
-// Runner mirrors the runners table (docs/architecture/data-model.md).
+// Runner mirrors the runners table.
 type Runner struct {
 	ID              string            `json:"id"`
 	Type            string            `json:"runner_type"`

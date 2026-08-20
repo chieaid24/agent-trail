@@ -198,7 +198,7 @@ export async function getEvidence(
   }
 }
 
-// The SSE resume cursor of an event (docs/architecture/api.md: Streaming).
+// The SSE resume cursor of an event.
 export function eventCursor(e: ActivityEvent): string {
   return `${e.attempt_number}:${e.sequence_number}`;
 }

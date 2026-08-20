@@ -17,8 +17,7 @@ const maxWebhookBody = 1 << 20 // 1 MiB
 // Webhook is the POST /webhooks/github handler: it validates the HMAC
 // signature over the raw body, enforces the size limit, records the
 // delivery id under its unique constraint, acks fast, and hands processing
-// to the Processor off the request goroutine
-// (docs/architecture/github-app.md).
+// to the Processor off the request goroutine.
 type Webhook struct {
 	secret    []byte
 	store     *Store

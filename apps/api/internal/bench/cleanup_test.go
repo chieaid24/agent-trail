@@ -96,8 +96,7 @@ func TestCleanup100ForcedFailures(t *testing.T) {
 			cancelled, failed, cleanupCancelled, cleanupTasks-cleanupCancelled)
 	}
 
-	// Every terminal failure must be machine-readable
-	// (docs/operations/reliability-targets.md).
+	// Every terminal failure must be machine-readable.
 	if bare := queryInt(t, db, `
 		SELECT count(*) FROM tasks WHERE status = 'failed'
 		AND (failure_code IS NULL OR failure_message IS NULL)`); bare != 0 {

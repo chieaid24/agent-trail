@@ -391,7 +391,7 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 
 // publishNoChange settles a clean worktree: no PR, a neutral check on the
 // base commit, an explaining comment, and a no_change failure that keeps
-// the explanation (docs/architecture/publishing.md: empty diff means no
+// the explanation (empty diff means no
 // pull request; the task is marked no-change via the failed state).
 func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, baseSHA, summary string) error {
 	rc := pub.repo

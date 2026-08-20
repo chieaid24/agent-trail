@@ -1,6 +1,6 @@
 // Shared configuration for the e2e harness. Everything is overridable so
 // parallel checkouts can run side by side; defaults avoid the common dev
-// ports (docs/operations/local-development.md).
+// ports.
 
 import fs from "node:fs";
 import path from "node:path";

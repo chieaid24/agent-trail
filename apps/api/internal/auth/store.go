@@ -150,7 +150,7 @@ func (s *Store) SyncMemberships(ctx context.Context, userID string, accounts []I
 }
 
 // MemberOfRepository reports whether the user belongs to the repository's
-// organization (docs/security/threat-model.md: resource authorization).
+// organization (resource authorization).
 func (s *Store) MemberOfRepository(ctx context.Context, userID, repositoryID string) (bool, error) {
 	var member bool
 	err := s.db.QueryRowContext(ctx, `

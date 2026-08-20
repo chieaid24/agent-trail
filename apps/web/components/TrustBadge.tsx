@@ -1,4 +1,4 @@
-// The trust distinction (DESIGN.md, VISION.md principle 4): a filled badge
+// The trust distinction: a filled badge
 // marks a platform-verified fact, an outlined badge marks an agent claim.
 // Shape carries the meaning, not hue, so the two never blur.
 export function TrustBadge({ trusted }: { trusted: boolean }) {

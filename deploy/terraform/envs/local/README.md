@@ -3,9 +3,8 @@
 The local environment does not use Terraform: there is no cloud
 infrastructure to manage. It is composed of
 
-- `docker-compose.yml` at the repo root for Postgres, Redis, MinIO, the
-  OpenTelemetry collector, Prometheus, and Grafana (see
-  `docs/operations/local-development.md`), and
+- `docker-compose.yml` at the repo root for Postgres and the OpenTelemetry
+  collector, and
 - a kind cluster for verifying the Kubernetes runner Job locally (see
   `deploy/k8s/` and `scripts/verify-k8s-runner.sh`).
 

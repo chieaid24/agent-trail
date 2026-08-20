@@ -20,8 +20,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// agentEventTypes maps normalized adapter events to activity-event types
-// (docs/architecture/data-model.md). The web client consumes these, never
+// agentEventTypes maps normalized adapter events to activity-event types.
+// The web client consumes these, never
 // raw provider formats.
 var agentEventTypes = map[agent.EventType]string{
 	agent.EventSessionStarted:   "agent.started",
@@ -51,7 +51,7 @@ type Executor struct {
 	Logger      *slog.Logger
 	// Workspaces, GitHub, and Repos are the publishing dependencies: all
 	// three set enables git worktree workspaces and GitHub publishing for
-	// repository-backed tasks (docs/architecture/publishing.md). Any nil
+	// repository-backed tasks. Any nil
 	// keeps the fake local flow: temp-dir workspace, publishing skipped.
 	Workspaces *gitworkspace.Manager
 	GitHub     PublishGitHub

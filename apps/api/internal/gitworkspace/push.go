@@ -12,8 +12,7 @@ import (
 // allowedRemote is the only remote a workspace may push to.
 const allowedRemote = "origin"
 
-// Push policy violations, refused in code before git is invoked
-// (docs/architecture/git-workspaces.md, docs/architecture/command-execution.md).
+// Push policy violations, refused in code before git is invoked.
 var (
 	ErrForbiddenBranch = errors.New("gitworkspace: refusing to push a branch outside agent-trail/")
 	ErrForbiddenRemote = errors.New("gitworkspace: refusing to push to a remote other than origin")

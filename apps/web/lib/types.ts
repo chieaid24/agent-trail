@@ -1,4 +1,4 @@
-// Wire types for the control-plane API (docs/architecture/api.md). Field
+// Wire types for the control-plane API. Field
 // names and casing mirror the Go JSON tags exactly; every nullable column
 // arrives as null, never absent.
 
@@ -105,7 +105,7 @@ export interface ValidationResult {
   exit_code: number | null;
   duration_ms: number;
   summary: string;
-  // The trust distinction (VISION.md principle 4): true means the platform
+  // The trust distinction: true means the platform
   // ran and measured the command; false means the agent merely claimed it.
   trusted_execution: boolean;
   created_at: string;

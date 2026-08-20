@@ -2,7 +2,7 @@
 
 Agent Trail is a control plane for coding agents. Comment `/agent-trail run` on a GitHub issue and it creates a durable task, runs a coding agent in an isolated workspace with scoped credentials, streams every action to a dashboard, independently validates the result, and opens a draft pull request with an evidence report. A human approves the merge.
 
-Status: early. The monorepo, CI gate, dev environment, task domain (state machine, activity timeline, tasks API), GitHub integration (webhook intake, repo sync, `/agent-trail run`), runner loop (registration, expiring attempt leases), and agent adapters (a no-cost fake, and the Claude Code CLI behind `AGENT_PROVIDER`) exist; validation and evidence is next in the milestone queue.
+Status: the issue-to-PR path runs end to end. A signed GitHub webhook creates a durable task; the worker claims it from a PostgreSQL queue, runs an agent (a no-cost fake, or the Claude Code CLI behind `AGENT_PROVIDER`) in an isolated Git worktree, validates the result outside the agent's session, and opens a draft pull request backed by an evidence report, streaming every step to the dashboard over SSE. Conflict detection, OpenTelemetry, and a hardened Kubernetes runner Job (verified in a local kind cluster) are in place; the AWS Terraform is authored and validated but not applied.
 
 ## Quickstart
 
@@ -14,27 +14,21 @@ make test     # unit tests for both apps
 make hooks    # activate the pre-commit hook (once per clone)
 ```
 
-`make dev` serves the API on :8080 and the dashboard on :3000. See
-[docs/operations/local-development.md](docs/operations/local-development.md)
-for every target and port.
+`make dev` serves the API on :8080 and the dashboard on :3000. See the
+[Makefile](Makefile) for every target and port.
 
 ## Layout
 
-- `apps/api/` - Go control plane: `api` (HTTP), `worker` (scheduler skeleton), `migrate` (goose)
+- `apps/api/` - Go control plane: `api` (HTTP), `worker` (runner host), `migrate` (goose)
 - `apps/web/` - Next.js dashboard
-- `deploy/dev/` - compose configs for the dev infrastructure
+- `deploy/dev/` - compose configs for the local infrastructure
 - `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner)
-- `docs/` - the spec; implementation follows it, and PRs that diverge update it
+- `docs/` - benchmark results and dashboard screenshots
 
 ## Documentation
 
-- [VISION.md](VISION.md) - standing direction, operating rules, principles, definition of done
-- [docs/product/](docs/product/) - positioning, user stories, MVP scope, milestones, backlog
-- [docs/architecture/](docs/architecture/) - system design, data model, state machine, API, runner
-- [docs/security/](docs/security/) - threat model and risks
-- [docs/operations/](docs/operations/) - local development, AWS deployment, observability
-- [docs/testing/](docs/testing/) - testing strategy and benchmark plan
-- [docs/adr/](docs/adr/) - architecture decision records
+- [docs/testing/benchmarks.md](docs/testing/benchmarks.md) - benchmark and failure-injection plan
+- [docs/testing/benchmark-results.md](docs/testing/benchmark-results.md) - measured results
 
 ## Tools Used
 
@@ -57,7 +51,7 @@ for every target and port.
   </tr>
   <tr>
     <td><strong>Observability</strong></td>
-    <td><img alt="OpenTelemetry" src="https://img.shields.io/badge/OpenTelemetry-%23425CC7?style=for-the-badge&logo=opentelemetry&logoColor=%23FFFFFF"> <img alt="Prometheus" src="https://img.shields.io/badge/Prometheus-%23E6522C?style=for-the-badge&logo=prometheus&logoColor=%23FFFFFF"> <img alt="Grafana" src="https://img.shields.io/badge/Grafana-%23F46800?style=for-the-badge&logo=grafana&logoColor=%23FFFFFF"></td>
+    <td><img alt="OpenTelemetry" src="https://img.shields.io/badge/OpenTelemetry-%23425CC7?style=for-the-badge&logo=opentelemetry&logoColor=%23FFFFFF"></td>
   </tr>
   <tr>
     <td><strong>Infrastructure</strong></td>

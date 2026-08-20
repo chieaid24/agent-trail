@@ -7,7 +7,7 @@ import (
 )
 
 // BranchPrefix namespaces every branch Agent Trail creates or pushes. The push
-// guard refuses any ref outside it (docs/architecture/git-workspaces.md).
+// guard refuses any ref outside it.
 const BranchPrefix = "agent-trail/"
 
 // maxSlug bounds the sanitized slug so the full ref stays well under the

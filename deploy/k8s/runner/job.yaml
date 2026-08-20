@@ -1,4 +1,4 @@
-# Hardened one-shot runner Job (docs/operations/aws-deployment.md). The
+# Hardened one-shot runner Job. The
 # worker claims one task attempt from the queue, executes it with the
 # configured agent, publishes, and exits; ttlSecondsAfterFinished then
 # reclaims the Job and its pod. envsubst variables: JOB_NAME,

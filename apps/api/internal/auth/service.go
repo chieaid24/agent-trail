@@ -8,8 +8,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// SessionTTL bounds every session; there is no sliding refresh
-// (docs/adr/0013-dashboard-sessions.md).
+// SessionTTL bounds every session; there is no sliding refresh.
 const SessionTTL = 30 * 24 * time.Hour
 
 // Service wires the OAuth client and store into the login flow the HTTP

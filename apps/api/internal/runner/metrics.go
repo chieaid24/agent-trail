@@ -1,4 +1,4 @@
-// Package runner emits the metrics specified in docs/operations/observability.md.
+// Package runner emits the metrics.
 package runner
 
 import (

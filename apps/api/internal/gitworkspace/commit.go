@@ -23,8 +23,7 @@ const (
 var ErrNothingToCommit = errors.New("gitworkspace: nothing to commit")
 
 // CommitParams describes a commit to record in a workspace. The trailer fields
-// are provenance identifiers only - never a prompt or a secret
-// (docs/architecture/git-workspaces.md).
+// are provenance identifiers only - never a prompt or a secret.
 type CommitParams struct {
 	Message     string
 	TaskID      string

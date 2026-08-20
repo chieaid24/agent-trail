@@ -28,7 +28,7 @@ function useCurrentUser(): CurrentUser | null {
   return user;
 }
 
-// Fixed-sidebar app shell (DESIGN.md container policy). Every screen
+// Fixed-sidebar app shell (container policy). Every screen
 // renders inside it; the main region owns scrolling.
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";

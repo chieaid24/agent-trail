@@ -19,7 +19,7 @@ import (
 )
 
 // CheckRunName is the check run created for each GitHub-sourced task and
-// resolved at publish time (docs/architecture/github-app.md).
+// resolved at publish time.
 const CheckRunName = "Agent Trail Task"
 
 // processTimeout bounds the asynchronous handling of one delivery.

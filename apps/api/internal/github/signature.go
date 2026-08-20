@@ -1,7 +1,6 @@
 // Package github implements the GitHub App integration: webhook intake with
 // signature validation and delivery dedup, installation and repository sync,
-// and the /agent-trail run command flow. Spec:
-// docs/architecture/github-app.md.
+// and the /agent-trail run command flow.
 package github
 
 import (

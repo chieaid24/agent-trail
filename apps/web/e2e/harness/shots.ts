@@ -1,4 +1,4 @@
-// Screenshot helper for the DESIGN.md audit: named, full-page shots at the
+// Screenshot helper for the audit: named, full-page shots at the
 // two mandated viewports (1280 primary, 1024 functional floor).
 
 import path from "node:path";

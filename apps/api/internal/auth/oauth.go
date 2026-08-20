@@ -1,6 +1,6 @@
 // Package auth implements the dashboard session layer: GitHub OAuth user
 // authorization, persisted users and memberships, and database-backed
-// browser sessions (docs/adr/0013-dashboard-sessions.md).
+// browser sessions.
 package auth
 
 import (

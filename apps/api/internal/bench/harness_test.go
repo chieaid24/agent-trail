@@ -49,7 +49,7 @@ func discardLogger() *slog.Logger {
 
 // fleet is a set of in-process runner hosts working one shared queue. One
 // cmd/worker process hosts exactly one serial runner, so N concurrent
-// runners are N hosts (docs/architecture/runner.md).
+// runners are N hosts.
 type fleet struct {
 	cancel context.CancelFunc
 	done   chan error

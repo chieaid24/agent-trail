@@ -121,7 +121,7 @@ function OperationalOverview({
           <OperationalEmpty
             message="No runners registered."
             action="Start a worker"
-            href={`${repoUrl}/blob/main/docs/operations/local-development.md`}
+            href={`${repoUrl}/blob/main/README.md`}
           />
         ) : (
           <ul>
@@ -163,7 +163,7 @@ function OperationalOverview({
           <OperationalEmpty
             message="No repositories synced."
             action="Configure the GitHub App"
-            href={`${repoUrl}/blob/main/docs/architecture/github-app.md`}
+            href={`${repoUrl}/blob/main/README.md`}
           />
         ) : (
           <ul>

@@ -3,7 +3,7 @@ package task
 import "testing"
 
 // specEdges is the full legal edge set, written out literally so the test is
-// an independent statement of docs/architecture/task-state-machine.md rather
+// an independent statement rather
 // than a re-derivation from the implementation.
 var specEdges = map[Status][]Status{
 	StatusCreated: {StatusQueued, StatusCancelled},

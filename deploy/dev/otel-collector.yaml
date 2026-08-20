@@ -1,4 +1,6 @@
-# Dev collector: receive OTLP from the apps, expose metrics for Prometheus.
+# Dev collector: receive OTLP from the apps and log it. The dashboard reads
+# per-task spans from Postgres for its trace view; this collector proves the
+# real OTLP export path (traces, metrics, logs) end to end.
 receivers:
   otlp:
     protocols:
@@ -11,18 +13,16 @@ processors:
   batch: {}
 
 exporters:
-  prometheus:
-    endpoint: 0.0.0.0:8889
   debug:
     verbosity: basic
 
 service:
   pipelines:
-    metrics:
+    traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus]
-    traces:
+      exporters: [debug]
+    metrics:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug]
