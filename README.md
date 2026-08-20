@@ -40,20 +40,20 @@ for every target and port.
 
 <table>
   <tr>
-    <td><strong>Control Plane</strong></td>
-    <td><img alt="Go" src="https://img.shields.io/badge/Go-%2300ADD8?style=for-the-badge&logo=go&logoColor=%23FFFFFF"> <img alt="pgx" src="https://img.shields.io/badge/pgx-%23336791?style=for-the-badge&logoColor=%23FFFFFF"> <img alt="goose" src="https://img.shields.io/badge/goose-%235B4B8A?style=for-the-badge&logoColor=%23FFFFFF"></td>
+    <td><strong>Backend</strong></td>
+    <td><img alt="Go" src="https://img.shields.io/badge/Go-%2300ADD8?style=for-the-badge&logo=go&logoColor=%23FFFFFF"> <img alt="GitHub App" src="https://img.shields.io/badge/GitHub%20App-%23181717?style=for-the-badge&logo=github&logoColor=%23FFFFFF"></td>
   </tr>
   <tr>
-    <td><strong>Dashboard</strong></td>
+    <td><strong>Frontend</strong></td>
     <td><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-%233178C6?style=for-the-badge&logo=typescript&logoColor=%23FFFFFF"> <img alt="Next.js" src="https://img.shields.io/badge/Next.js-black?style=for-the-badge&logo=nextdotjs&logoColor=%23FFFFFF"> <img alt="React" src="https://img.shields.io/badge/React-%2361DAFB?style=for-the-badge&logo=react&logoColor=%23000000"> <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind%20CSS-%2306B6D4?style=for-the-badge&logo=tailwindcss&logoColor=%23FFFFFF"></td>
   </tr>
   <tr>
     <td><strong>Data</strong></td>
-    <td><img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-%234169E1?style=for-the-badge&logo=postgresql&logoColor=%23FFFFFF"></td>
+    <td><img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-%234169E1?style=for-the-badge&logo=postgresql&logoColor=%23FFFFFF"> <img alt="pgx" src="https://img.shields.io/badge/pgx-%23336791?style=for-the-badge&logoColor=%23FFFFFF"> <img alt="goose" src="https://img.shields.io/badge/goose-%235B4B8A?style=for-the-badge&logoColor=%23FFFFFF"></td>
   </tr>
   <tr>
-    <td><strong>Agents / Integrations</strong></td>
-    <td><img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-%23D97757?style=for-the-badge&logo=claude&logoColor=%23FFFFFF"> <img alt="GitHub App" src="https://img.shields.io/badge/GitHub%20App-%23181717?style=for-the-badge&logo=github&logoColor=%23FFFFFF"></td>
+    <td><strong>AI Inference</strong></td>
+    <td><img alt="Claude Code" src="https://img.shields.io/badge/Claude%20Code-%23D97757?style=for-the-badge&logo=claude&logoColor=%23FFFFFF"></td>
   </tr>
   <tr>
     <td><strong>Observability</strong></td>
