@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runner-controller
+  namespace: agent-trail-runners
+  labels:
+    app.kubernetes.io/name: agent-trail-runner-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-trail-runner-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-trail-runner-controller
+    spec:
+      serviceAccountName: runner-controller
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: ${RUNNER_IMAGE}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: runner-database
+                  key: url
+            - name: RUNNER_TYPE
+              value: kubernetes
+            - name: RUNNER_IMAGE
+              value: ${RUNNER_IMAGE}
+            - name: RUNNER_TTL_SECONDS
+              value: ${TTL_SECONDS}
+            - name: WORKER_IDLE_EXIT_SECONDS
+              value: ${WORKER_IDLE_EXIT_SECONDS}
+            - name: AGENT_PROVIDER
+              value: ${AGENT_PROVIDER}
+            - name: AGENT_MODEL
+              value: ${AGENT_MODEL}
+            - name: AGENT_PERMISSION_MODE
+              value: ${AGENT_PERMISSION_MODE}
+            - name: AGENT_CLI_VERSION
+              value: ${AGENT_CLI_VERSION}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+            - name: GITHUB_API_BASE_URL
+              value: ${GITHUB_API_BASE_URL}
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

@@ -13,7 +13,9 @@ func clearEnv(t *testing.T) {
 		"API_ADDR", "DATABASE_URL", "LOG_LEVEL",
 		"RUNNER_LEASE_SECONDS", "RUNNER_HEARTBEAT_SECONDS",
 		"RUNNER_LOST_AFTER_SECONDS", "WORKER_POLL_SECONDS",
-		"RUNNER_TYPE", "WORKER_MAX_TASKS", "WORKER_IDLE_EXIT_SECONDS",
+		"RUNNER_TYPE", "TASK_ATTEMPT_ID", "RUNNER_IMAGE",
+		"RUNNER_JOB_TEMPLATE", "RUNNER_NAMESPACE", "RUNNER_TTL_SECONDS",
+		"WORKER_MAX_TASKS", "WORKER_IDLE_EXIT_SECONDS",
 		"WORKSPACE_ROOT",
 		"AGENT_PROVIDER", "AGENT_CLI_PATH", "AGENT_MODEL",
 		"AGENT_PERMISSION_MODE", "AGENT_CLI_VERSION", "AGENT_TIMEOUT_SECONDS",
@@ -261,6 +263,7 @@ func TestLoadRunnerTypeAndWorkerCaps(t *testing.T) {
 	}
 
 	t.Setenv("RUNNER_TYPE", "kubernetes")
+	t.Setenv("RUNNER_IMAGE", "agent-trail/runner:test")
 	t.Setenv("WORKER_MAX_TASKS", "1")
 	t.Setenv("WORKER_IDLE_EXIT_SECONDS", "90")
 	cfg, err = Load()
@@ -269,6 +272,12 @@ func TestLoadRunnerTypeAndWorkerCaps(t *testing.T) {
 	}
 	if cfg.RunnerType != "kubernetes" {
 		t.Errorf("RunnerType = %q, want kubernetes", cfg.RunnerType)
+	}
+	if cfg.RunnerImage != "agent-trail/runner:test" ||
+		cfg.RunnerJobTemplate != "/etc/agent-trail/runner-job.yaml" ||
+		cfg.RunnerNamespace != "agent-trail-runners" || cfg.RunnerJobTTL != 5*time.Minute {
+		t.Errorf("kubernetes config = %q/%q/%q/%v", cfg.RunnerImage,
+			cfg.RunnerJobTemplate, cfg.RunnerNamespace, cfg.RunnerJobTTL)
 	}
 	if cfg.WorkerMaxTasks != 1 {
 		t.Errorf("WorkerMaxTasks = %d, want 1", cfg.WorkerMaxTasks)
@@ -279,6 +288,7 @@ func TestLoadRunnerTypeAndWorkerCaps(t *testing.T) {
 
 	for key, bad := range map[string]string{
 		"RUNNER_TYPE":              "vm",
+		"RUNNER_TTL_SECONDS":       "0",
 		"WORKER_MAX_TASKS":         "-1",
 		"WORKER_IDLE_EXIT_SECONDS": "ten",
 	} {
@@ -289,5 +299,18 @@ func TestLoadRunnerTypeAndWorkerCaps(t *testing.T) {
 				t.Errorf("Load accepted %s=%q", key, bad)
 			}
 		})
+	}
+
+	clearEnv(t)
+	t.Setenv("RUNNER_TYPE", "kubernetes")
+	if _, err := Load(); err == nil {
+		t.Error("kubernetes controller accepted an empty RUNNER_IMAGE")
+	}
+
+	clearEnv(t)
+	t.Setenv("RUNNER_TYPE", "kubernetes")
+	t.Setenv("TASK_ATTEMPT_ID", "attempt-id")
+	if _, err := Load(); err != nil {
+		t.Fatalf("kubernetes task runner config: %v", err)
 	}
 }

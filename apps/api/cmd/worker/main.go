@@ -1,9 +1,4 @@
-// Command worker is the runner host: it registers a runner (process by
-// default; RUNNER_TYPE selects docker or kubernetes hosting), claims task
-// attempts with expiring leases, executes them with the configured agent
-// adapter (fake by default, or the Claude Code CLI), heartbeats the registry,
-// and reaps lost runners. WORKER_MAX_TASKS=1 turns it into a one-shot
-// Kubernetes Job runner.
+// Command worker runs the configured process or Kubernetes backend.
 package main
 
 import (
@@ -18,6 +13,8 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/config"
@@ -59,30 +56,6 @@ func run() error {
 		return err
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
-	}
-	adapter, err := agent.New(agent.Options{
-		Provider:       cfg.AgentProvider,
-		CLIPath:        cfg.AgentCLIPath,
-		Model:          cfg.AgentModel,
-		PermissionMode: cfg.AgentPermissionMode,
-		PinnedVersion:  cfg.AgentCLIVersion,
-		Logger:         logger,
-	})
-	if err != nil {
-		return err
-	}
-	// Fail fast on a misconfigured provider (missing or drifted CLI) before
-	// claiming any work, so it surfaces once at startup, not on every attempt.
-	validateCtx, validateCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if err := adapter.ValidateConfiguration(validateCtx); err != nil {
-		validateCancel()
-		return fmt.Errorf("agent adapter %q: %w", adapter.Name(), err)
-	}
-	validateCancel()
-
 	store := runner.NewStore(db)
 	tasks := task.NewStore(db)
 	telemetry, err := observability.Setup("worker", cfg.OTLPEndpoint, logger)
@@ -103,7 +76,84 @@ func run() error {
 	observability.RegisterRunnerResources(metrics, cfg.WorkspaceRoot, logger)
 	runnerMetrics := runner.NewMetrics(metrics)
 
-	// Publishing and conflict detection share the GitHub workspace mirror.
+	backend, err := buildBackend(cfg, db, store, tasks, logger, metrics, runnerMetrics)
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	logger.LogAttrs(ctx, slog.LevelInfo, "worker started",
+		slog.String("event", "worker_started"),
+		slog.String("runner_backend", cfg.RunnerType),
+		slog.String("agent_provider", cfg.AgentProvider),
+	)
+	err = backend.Run(ctx)
+	logger.LogAttrs(context.Background(), slog.LevelInfo, "worker shutting down",
+		slog.String("event", "worker_shutdown"),
+	)
+	return err
+}
+
+func buildBackend(cfg config.Config, db *sql.DB, store *runner.Store, tasks *task.Store,
+	logger *slog.Logger, metrics *observability.Registry, runnerMetrics *runner.Metrics,
+) (runner.Backend, error) {
+	if cfg.RunnerType == "kubernetes" && cfg.TaskAttemptID == "" {
+		template, err := os.ReadFile(cfg.RunnerJobTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("read runner Job template: %w", err)
+		}
+		restConfig, err := rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("load in-cluster Kubernetes config: %w", err)
+		}
+		client, err := kubernetes.NewForConfig(restConfig)
+		if err != nil {
+			return nil, fmt.Errorf("create Kubernetes client: %w", err)
+		}
+		return &runner.KubernetesBackend{
+			Jobs:            client.BatchV1().Jobs(cfg.RunnerNamespace),
+			Store:           store,
+			Tasks:           tasks,
+			Logger:          logger,
+			Template:        template,
+			Namespace:       cfg.RunnerNamespace,
+			RunnerImage:     cfg.RunnerImage,
+			JobTTL:          cfg.RunnerJobTTL,
+			DefaultRuntime:  cfg.DefaultTaskRuntime,
+			Poll:            cfg.WorkerPoll,
+			WorkerIdleExit:  cfg.WorkerIdleExit,
+			AgentProvider:   cfg.AgentProvider,
+			AgentModel:      cfg.AgentModel,
+			PermissionMode:  cfg.AgentPermissionMode,
+			AgentCLIVersion: cfg.AgentCLIVersion,
+			OTLPEndpoint:    cfg.OTLPEndpoint,
+			GitHubAPIBase:   cfg.GitHubAPIBaseURL,
+		}, nil
+	}
+
+	adapter, err := agent.New(agent.Options{
+		Provider:       cfg.AgentProvider,
+		CLIPath:        cfg.AgentCLIPath,
+		Model:          cfg.AgentModel,
+		PermissionMode: cfg.AgentPermissionMode,
+		PinnedVersion:  cfg.AgentCLIVersion,
+		Logger:         logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	validateCtx, validateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer validateCancel()
+	if err := adapter.ValidateConfiguration(validateCtx); err != nil {
+		return nil, fmt.Errorf("agent adapter %q: %w", adapter.Name(), err)
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
 	var workspaces *gitworkspace.Manager
 	var publishAPI runner.PublishGitHub
 	var repos runner.RepositoryResolver
@@ -111,16 +161,16 @@ func run() error {
 	if cfg.GitHubEnabled() {
 		keyPEM, err := os.ReadFile(cfg.GitHubAppPrivateKeyPath)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		client, err := github.NewClient(cfg.GitHubAppID, keyPEM,
 			cfg.GitHubAPIBaseURL, metrics)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		workspaces, err = gitworkspace.New(cfg.WorkspaceRoot, logger, metrics)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		publishAPI = client
 		repos = github.NewStore(db)
@@ -131,6 +181,10 @@ func run() error {
 		}
 	}
 
+	maxTasks := cfg.WorkerMaxTasks
+	if cfg.TaskAttemptID != "" {
+		maxTasks = 1
+	}
 	host := &runner.Host{
 		Store: store,
 		Executor: &runner.Executor{
@@ -152,24 +206,14 @@ func run() error {
 		Metrics:       runnerMetrics,
 		RunnerType:    cfg.RunnerType,
 		HostnameOrPod: hostname,
+		AttemptID:     cfg.TaskAttemptID,
 		Lease:         cfg.RunnerLease,
 		Heartbeat:     cfg.RunnerHeartbeat,
 		LostAfter:     cfg.RunnerLostAfter,
 		Poll:          cfg.WorkerPoll,
-		MaxTasks:      cfg.WorkerMaxTasks,
+		MaxTasks:      maxTasks,
 		IdleExit:      cfg.WorkerIdleExit,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	logger.LogAttrs(ctx, slog.LevelInfo, "worker started",
-		slog.String("event", "worker_started"),
-		slog.String("agent_provider", adapter.Name()),
-	)
-	err = host.Run(ctx)
-	logger.LogAttrs(context.Background(), slog.LevelInfo, "worker shutting down",
-		slog.String("event", "worker_shutdown"),
-	)
-	return err
+	return &runner.ProcessBackend{Host: host}, nil
 }

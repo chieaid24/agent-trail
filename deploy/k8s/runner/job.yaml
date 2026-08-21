@@ -2,7 +2,7 @@
 # worker claims one task attempt from the queue, executes it with the
 # configured agent, publishes, and exits; ttlSecondsAfterFinished then
 # reclaims the Job and its pod. envsubst variables: JOB_NAME,
-# TASK_ATTEMPT_ID (label only in the pull model), RUNNER_IMAGE,
+# TASK_ATTEMPT_ID, RUNNER_IMAGE,
 # TTL_SECONDS, ACTIVE_DEADLINE_SECONDS, GITHUB_API_BASE_URL,
 # WORKER_IDLE_EXIT_SECONDS, AGENT_PROVIDER, OTEL_EXPORTER_OTLP_ENDPOINT.
 apiVersion: batch/v1
@@ -12,7 +12,8 @@ metadata:
   namespace: agent-trail-runners
   labels:
     app.kubernetes.io/name: agent-trail-runner
-    agent-trail.dev/task-attempt-id: "${TASK_ATTEMPT_ID}"
+    app.kubernetes.io/managed-by: agent-trail-controller
+    agent-trail.dev/task-attempt-id: ${TASK_ATTEMPT_ID}
 spec:
   ttlSecondsAfterFinished: ${TTL_SECONDS}
   backoffLimit: 0
@@ -21,6 +22,8 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: agent-trail-runner
+        app.kubernetes.io/managed-by: agent-trail-controller
+        agent-trail.dev/task-attempt-id: ${TASK_ATTEMPT_ID}
     spec:
       restartPolicy: Never
       serviceAccountName: runner-task
@@ -45,20 +48,31 @@ spec:
                   key: url
             - name: RUNNER_TYPE
               value: kubernetes
+            - name: TASK_ATTEMPT_ID
+              value: ${TASK_ATTEMPT_ID}
             - name: WORKER_MAX_TASKS
               value: "1"
             - name: WORKER_IDLE_EXIT_SECONDS
-              value: "${WORKER_IDLE_EXIT_SECONDS}"
+              value: ${WORKER_IDLE_EXIT_SECONDS}
             - name: WORKSPACE_ROOT
               value: /workspace
             - name: AGENT_PROVIDER
               value: ${AGENT_PROVIDER}
+            - name: AGENT_MODEL
+              value: ${AGENT_MODEL}
+            - name: AGENT_PERMISSION_MODE
+              value: ${AGENT_PERMISSION_MODE}
+            - name: AGENT_CLI_VERSION
+              value: ${AGENT_CLI_VERSION}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: ${OTEL_EXPORTER_OTLP_ENDPOINT}
             - name: GITHUB_API_BASE_URL
               value: ${GITHUB_API_BASE_URL}
             - name: GITHUB_APP_ID
-              value: "1"
+              valueFrom:
+                secretKeyRef:
+                  name: runner-github
+                  key: app-id
             - name: GITHUB_APP_PRIVATE_KEY_PATH
               value: /etc/agent-trail/github/key.pem
             - name: GITHUB_WEBHOOK_SECRET

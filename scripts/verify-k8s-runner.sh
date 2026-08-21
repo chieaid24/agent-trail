@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verifies the Kubernetes runner acceptance criteria locally in a per-run
 # kind cluster:
-#   1. a task runs end to end inside the restricted runner Job
+#   1. the controller creates a Job and the task runs inside it
 #   2. the pod spec carries every hardening the Job template promises
 #   3. ttlSecondsAfterFinished removes the finished Job
 # The cluster, images, and secrets are namespaced per run and torn down on
@@ -93,6 +93,7 @@ KEY_PEM="$(openssl genrsa 2048 2>/dev/null)"
   --from-literal=url="$DB_URL" >/dev/null
 "${KUBECTL[@]}" -n agent-trail-runners create secret generic runner-github \
   --from-literal=webhook-secret="fixture-webhook-secret" \
+  --from-literal=app-id="1" \
   --from-literal=key.pem="$KEY_PEM" >/dev/null
 
 log "Starting postgres"
@@ -107,19 +108,37 @@ log "Starting the GitHub fixture (seeds one queued task)"
 render deploy/k8s/local/fixture.yaml "TOOLS_IMAGE=$TOOLS_IMAGE" | "${KUBECTL[@]}" apply -f - >/dev/null
 "${KUBECTL[@]}" -n agent-trail-local rollout status deployment/fixture --timeout=180s >/dev/null
 
-log "Launching the restricted runner Job"
-JOB_NAME="agent-trail-task-${RUN_ID}"
-render deploy/k8s/runner/job.yaml \
-  "JOB_NAME=$JOB_NAME" \
-  "TASK_ATTEMPT_ID=verify-${RUN_ID}" \
+log "Starting the Kubernetes runner controller"
+render deploy/k8s/runner/controller.yaml \
   "RUNNER_IMAGE=$RUNNER_IMAGE" \
   "TTL_SECONDS=20" \
-  "ACTIVE_DEADLINE_SECONDS=600" \
   "WORKER_IDLE_EXIT_SECONDS=120" \
   "AGENT_PROVIDER=fake" \
+  "AGENT_MODEL=fake-model" \
+  "AGENT_PERMISSION_MODE=acceptEdits" \
+  "AGENT_CLI_VERSION=unused" \
   "OTEL_EXPORTER_OTLP_ENDPOINT=off" \
   "GITHUB_API_BASE_URL=http://fixture.agent-trail-local.svc.cluster.local:8080" \
   | "${KUBECTL[@]}" apply -f - >/dev/null
+"${KUBECTL[@]}" -n agent-trail-runners rollout status deployment/runner-controller --timeout=180s >/dev/null
+
+log "Verifying least-privilege controller RBAC"
+CONTROLLER_USER="system:serviceaccount:agent-trail-runners:runner-controller"
+[ "$("${KUBECTL[@]}" auth can-i create jobs.batch -n agent-trail-runners --as="$CONTROLLER_USER")" = "yes" ] \
+  || fail "runner-controller cannot create Jobs"
+[ "$("${KUBECTL[@]}" auth can-i create secrets -n agent-trail-runners --as="$CONTROLLER_USER")" = "no" ] \
+  || fail "runner-controller can create secrets"
+
+log "Waiting for the controller-created runner Job"
+JOB_NAME=""
+for _ in $(seq 1 60); do
+  JOB_NAME="$("${KUBECTL[@]}" -n agent-trail-runners get jobs \
+    -l app.kubernetes.io/managed-by=agent-trail-controller \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  [ -n "$JOB_NAME" ] && break
+  sleep 2
+done
+[ -n "$JOB_NAME" ] || fail "runner controller did not create a Job"
 
 log "Asserting the pod spec carries the hardening"
 for _ in $(seq 1 60); do
@@ -184,6 +203,7 @@ PY
 log "Waiting for the task to complete inside the Job"
 "${KUBECTL[@]}" -n agent-trail-runners wait --for=condition=complete "job/$JOB_NAME" --timeout=300s >/dev/null
 "${KUBECTL[@]}" -n agent-trail-runners logs "$POD" > "$ARTIFACTS/runner-pod.log" 2>&1 || true
+"${KUBECTL[@]}" -n agent-trail-runners logs deployment/runner-controller > "$ARTIFACTS/runner-controller.log" 2>&1 || true
 
 log "Verifying the task outcome through the fixture"
 "${KUBECTL[@]}" -n agent-trail-local port-forward svc/fixture :8080 > "$ARTIFACTS/port-forward.log" 2>&1 &
@@ -220,5 +240,5 @@ done
 [ "$TTL_GONE" = "1" ] || fail "Job still present after TTL"
 echo "  ok  Job removed by ttlSecondsAfterFinished"
 
-log "PASS: task ran inside the restricted Job, draft PR opened, TTL cleaned up"
+log "PASS: controller created the restricted Job, task completed, TTL cleaned up"
 printf 'artifacts: %s\n' "$ARTIFACTS"
