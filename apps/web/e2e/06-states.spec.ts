@@ -124,6 +124,19 @@ test("trace empty state", async ({ page }) => {
   await shoot(page, "task-trace-empty");
 });
 
+test("trace error state", async ({ page }) => {
+  await mockTraceTask(page);
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
+    route.fulfill({ status: 500, json: { error: "trace read failed" } }),
+  );
+  await page.goto(`/tasks/${traceTaskId}`);
+  await page.getByRole("tab", { name: "Trace" }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Trace data is unavailable" }),
+  ).toBeVisible();
+  await shoot(page, "task-trace-error");
+});
+
 test("trace waterfall and run cost", async ({ page }) => {
   await mockTraceTask(page);
   await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
@@ -174,7 +187,9 @@ test("trace waterfall and run cost", async ({ page }) => {
     }),
   );
   await page.goto(`/tasks/${traceTaskId}`);
-  await expect(page.getByText("$0.0425", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("definition").filter({ hasText: "$0.0425" }),
+  ).toBeVisible();
   await expect(page.getByLabel("Cost breakdown")).toContainText(
     "attempt 1: $0.0425",
   );

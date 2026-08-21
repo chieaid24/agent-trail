@@ -6,8 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -85,7 +87,9 @@ func Setup(service, endpoint string, logger *slog.Logger, options ...SetupOption
 	if !exportOff || configured.spanExporter != nil {
 		providerOptions := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
 		if configured.spanExporter != nil {
-			providerOptions = append(providerOptions, sdktrace.WithBatcher(configured.spanExporter))
+			batcher := sdktrace.NewBatchSpanProcessor(configured.spanExporter)
+			providerOptions = append(providerOptions,
+				sdktrace.WithSpanProcessor(newTaskContextProcessor(batcher)))
 		}
 		if !exportOff {
 			traceExp, err := otlptracegrpc.New(context.Background(),
@@ -104,6 +108,51 @@ func Setup(service, endpoint string, logger *slog.Logger, options ...SetupOption
 		tel.shutdowns = append(tel.shutdowns, tp.Shutdown)
 	}
 	return &tel, nil
+}
+
+type taskContextProcessor struct {
+	next  sdktrace.SpanProcessor
+	mu    sync.RWMutex
+	attrs map[trace.TraceID][]attribute.KeyValue
+}
+
+func newTaskContextProcessor(next sdktrace.SpanProcessor) sdktrace.SpanProcessor {
+	return &taskContextProcessor{
+		next: next, attrs: make(map[trace.TraceID][]attribute.KeyValue),
+	}
+}
+
+func (p *taskContextProcessor) OnStart(parent context.Context, span sdktrace.ReadWriteSpan) {
+	var taskAttrs []attribute.KeyValue
+	for _, value := range span.Attributes() {
+		if value.Key == "task.id" || value.Key == "task.attempt_id" {
+			taskAttrs = append(taskAttrs, value)
+		}
+	}
+	traceID := span.SpanContext().TraceID()
+	if len(taskAttrs) > 0 {
+		p.mu.Lock()
+		p.attrs[traceID] = taskAttrs
+		p.mu.Unlock()
+	} else {
+		p.mu.RLock()
+		inherited := p.attrs[traceID]
+		p.mu.RUnlock()
+		span.SetAttributes(inherited...)
+	}
+	p.next.OnStart(parent, span)
+}
+
+func (p *taskContextProcessor) OnEnd(span sdktrace.ReadOnlySpan) {
+	p.next.OnEnd(span)
+}
+
+func (p *taskContextProcessor) Shutdown(ctx context.Context) error {
+	return p.next.Shutdown(ctx)
+}
+
+func (p *taskContextProcessor) ForceFlush(ctx context.Context) error {
+	return p.next.ForceFlush(ctx)
 }
 
 // Shutdown flushes pending telemetry; call on binary exit.

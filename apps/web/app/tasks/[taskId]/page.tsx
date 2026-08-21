@@ -176,7 +176,14 @@ export default function TaskPage({
 
   useEffect(() => {
     if (stream.state !== "done") return;
-    const refresh = setTimeout(() => void loadTrace(), 1000);
+    let refresh: ReturnType<typeof setTimeout>;
+    let remaining = 6;
+    const poll = () => {
+      void loadTrace();
+      remaining -= 1;
+      if (remaining > 0) refresh = setTimeout(poll, 1000);
+    };
+    refresh = setTimeout(poll, 1000);
     return () => clearTimeout(refresh);
   }, [stream.state, loadTrace]);
 
@@ -362,7 +369,14 @@ function TaskDetail({
           {runtime !== null && (
             <Meta label="runtime" value={formatDuration(runtime)} />
           )}
-          <Meta label="cost" value={`$${cost.totalUsd.toFixed(4)}`} />
+          <Meta
+            label="cost"
+            value={
+              cost.attempts.length > 0
+                ? `$${cost.totalUsd.toFixed(4)}`
+                : "not reported"
+            }
+          />
           {task.max_cost_usd !== null && (
             <Meta label="cost cap" value={`$${task.max_cost_usd.toFixed(2)}`} />
           )}

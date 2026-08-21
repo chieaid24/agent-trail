@@ -76,7 +76,7 @@ func (s *TraceStore) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlyS
 				name, kind, start_time, end_time, attributes_json,
 				status_code, status_message
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-			ON CONFLICT (task_id, span_id) DO UPDATE SET
+			ON CONFLICT (task_id, trace_id, span_id) DO UPDATE SET
 				task_attempt_id = EXCLUDED.task_attempt_id,
 				parent_span_id = EXCLUDED.parent_span_id,
 				name = EXCLUDED.name,
@@ -110,7 +110,7 @@ func (s *TraceStore) ListTaskSpans(ctx context.Context, taskID string) (TaskTrac
 			start_time, end_time, attributes_json, status_code, status_message
 		FROM task_spans
 		WHERE task_id = $1
-		ORDER BY start_time, span_id`, taskID)
+		ORDER BY start_time, trace_id, span_id`, taskID)
 	if err != nil {
 		return TaskTrace{}, fmt.Errorf("list task spans: %w", err)
 	}

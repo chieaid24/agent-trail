@@ -2,7 +2,7 @@
 
 Agent Trail is a control plane for coding agents. Comment `/agent-trail run` on a GitHub issue and it creates a durable task, runs a coding agent in an isolated workspace with scoped credentials, streams every action to a dashboard, independently validates the result, and opens a draft pull request with an evidence report. A human approves the merge.
 
-Status: the issue-to-PR path runs end to end. A signed GitHub webhook creates a durable task; the worker claims it from a PostgreSQL queue, runs an agent (a no-cost fake, or the Claude Code CLI behind `AGENT_PROVIDER`) in an isolated Git worktree, validates the result outside the agent's session, and opens a draft pull request backed by an evidence report. The dashboard streams each step over Server-Sent Events (SSE), renders completed OpenTelemetry spans as a trace waterfall, and totals agent cost updates per run. Process execution remains the default. With `RUNNER_TYPE=kubernetes`, a controller creates one hardened Kubernetes Job per task attempt and watches it through completion. Terraform defines the AWS network, compute, database, queue, artifact, identity, and monitoring foundations; apply the Kubernetes workloads, policies, and Secrets separately.
+Status: the issue-to-PR path runs end to end. A signed GitHub webhook creates a durable task; the worker claims it from a PostgreSQL queue, runs an agent (a no-cost fake, or the Claude Code CLI behind `AGENT_PROVIDER`) in an isolated Git worktree, validates the result outside the agent's session, and opens a draft pull request backed by an evidence report. The dashboard streams lifecycle and cost events over Server-Sent Events (SSE), loads completed OpenTelemetry spans as they become available, and renders them as a trace waterfall. Process execution remains the default. With `RUNNER_TYPE=kubernetes`, a controller creates one hardened Kubernetes Job per task attempt and watches it through completion. Terraform defines the AWS network, compute, database, queue, artifact, identity, and monitoring foundations; apply the Kubernetes workloads, policies, and Secrets separately.
 
 ## Quickstart
 
@@ -19,7 +19,11 @@ make hooks    # activate the pre-commit hook (once per clone)
 
 ## Observability data
 
-The worker exports spans to the configured OpenTelemetry Protocol (OTLP) collector and stores task-scoped spans in PostgreSQL for the dashboard. `GET /api/v1/tasks/{id}/trace` returns the stored waterfall. The task header derives its cost total and per-attempt breakdown from `agent.cost_update` events, so the values update through the existing SSE stream.
+The worker exports spans to the configured OpenTelemetry Protocol (OTLP) collector and batches completed task-scoped spans into PostgreSQL for the dashboard. `GET /api/v1/tasks/{id}/trace` returns a `spans` array ordered by start time, trace ID, and span ID. Each span includes its trace and parent identity, optional attempt ID, name, kind, start and end timestamps, attributes, and status. The dashboard polls this eventually consistent read model after a run ends and constructs the waterfall in the browser.
+
+The task header derives its cost total and per-attempt breakdown from `agent.cost_update` events delivered over SSE. A `total_cost_usd` value replaces the current attempt total, a `cost_usd` value increments it, and the header sums attempt totals. Tasks without a valid cost event show `not reported`.
+
+Span attributes and error descriptions persist as instrumentation records them and remain with the task audit record. Do not attach credentials, source content, or other secrets to span attributes or status messages.
 
 ## Kubernetes backend
 

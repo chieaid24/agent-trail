@@ -6,13 +6,17 @@ export type TraceState =
   | { phase: "ready"; spans: TaskSpan[] }
   | { phase: "error" };
 
+function spanKey(span: Pick<TaskSpan, "trace_id" | "span_id">): string {
+  return `${span.trace_id}:${span.span_id}`;
+}
+
 function spanDepth(span: TaskSpan, byID: Map<string, TaskSpan>): number {
   let depth = 0;
   let parentID = span.parent_span_id;
   const visited = new Set<string>();
   while (parentID && !visited.has(parentID)) {
     visited.add(parentID);
-    const parent = byID.get(parentID);
+    const parent = byID.get(`${span.trace_id}:${parentID}`);
     if (!parent) break;
     depth += 1;
     parentID = parent.parent_span_id;
@@ -33,7 +37,7 @@ export function TraceWaterfall({ state }: { state: TraceState }) {
   if (state.phase === "error") {
     return (
       <p role="alert" className="py-8 text-sm text-danger">
-        Trace data is unavailable. It will be retried while the task runs.
+        Trace data is unavailable. Retrying automatically.
       </p>
     );
   }
@@ -42,7 +46,7 @@ export function TraceWaterfall({ state }: { state: TraceState }) {
       <div className="rounded border border-border px-4 py-8 text-center">
         <p className="text-sm font-semibold">No spans recorded yet</p>
         <p className="mt-1 text-sm text-muted">
-          Task spans appear here as the runner completes each operation.
+          Completed spans appear after the runner stores its telemetry batch.
         </p>
       </div>
     );
@@ -58,7 +62,7 @@ export function TraceWaterfall({ state }: { state: TraceState }) {
     ...ordered.map((span) => Date.parse(span.end_time)),
   );
   const duration = Math.max(traceEnd - traceStart, 1);
-  const byID = new Map(ordered.map((span) => [span.span_id, span]));
+  const byID = new Map(ordered.map((span) => [spanKey(span), span]));
 
   return (
     <div className="overflow-x-auto rounded border border-border">
@@ -77,7 +81,7 @@ export function TraceWaterfall({ state }: { state: TraceState }) {
             const depth = spanDepth(span, byID);
             return (
               <li
-                key={span.span_id}
+                key={spanKey(span)}
                 className="grid grid-cols-[16rem_1fr_5rem] items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
               >
                 <div
