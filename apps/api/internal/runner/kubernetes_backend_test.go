@@ -2,16 +2,19 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
 
+	appsapi "k8s.io/api/apps/v1"
 	batchapi "k8s.io/api/batch/v1"
 	coreapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/yaml"
 )
 
 func testJobTemplate(t *testing.T) []byte {
@@ -141,6 +144,41 @@ func TestRenderJobTemplateRejectsUnsetVariables(t *testing.T) {
 	_, err := renderJobTemplate([]byte("value: ${MISSING}"), nil)
 	if err == nil {
 		t.Fatal("unset template variable accepted")
+	}
+}
+
+func TestControllerManifestRenders(t *testing.T) {
+	template, err := os.ReadFile("../../../../deploy/k8s/runner/controller.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := renderJobTemplate(template, map[string]templateValue{
+		"RUNNER_IMAGE":                {"agent-trail/runner:test", false},
+		"TTL_SECONDS":                 {"300", false},
+		"WORKER_IDLE_EXIT_SECONDS":    {"120", false},
+		"AGENT_PROVIDER":              {"fake", false},
+		"AGENT_MODEL":                 {"fake-model", false},
+		"AGENT_PERMISSION_MODE":       {"acceptEdits", false},
+		"AGENT_CLI_VERSION":           {"unused", false},
+		"OTEL_EXPORTER_OTLP_ENDPOINT": {"off", false},
+		"GITHUB_API_BASE_URL":         {"http://fixture:8080", false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawJSON, err := yaml.YAMLToJSON(rendered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deployment appsapi.Deployment
+	if err := json.Unmarshal(rawJSON, &deployment); err != nil {
+		t.Fatal(err)
+	}
+	pod := deployment.Spec.Template.Spec
+	if pod.ServiceAccountName != "runner-controller" ||
+		pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Errorf("controller identity = %q/%v", pod.ServiceAccountName,
+			pod.AutomountServiceAccountToken)
 	}
 }
 
