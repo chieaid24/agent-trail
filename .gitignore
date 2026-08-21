@@ -24,4 +24,5 @@ next-env.d.ts
 coverage/
 apps/web/e2e/.artifacts/
 apps/web/e2e/screenshots/
+apps/web/test-results/
 apps/api/internal/bench/.artifacts/

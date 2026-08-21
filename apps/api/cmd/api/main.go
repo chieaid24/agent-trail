@@ -80,7 +80,8 @@ func run() error {
 		evidenceReports = evidence.NewStore(db)
 		apiOptions = append(apiOptions,
 			httpapi.WithDashboard(dashboard.NewStore(db)),
-			httpapi.WithConflicts(conflict.NewStore(db)))
+			httpapi.WithConflicts(conflict.NewStore(db)),
+			httpapi.WithTraces(observability.NewTraceStore(db)))
 	}
 
 	// Sessions live in the database; refuse a half-configured session

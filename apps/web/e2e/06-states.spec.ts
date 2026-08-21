@@ -45,6 +45,162 @@ async function mockTaskList(page: Page, tasks: unknown[]): Promise<void> {
   );
 }
 
+const traceTaskId = "3b241101-e2bb-4255-8caf-4136c566a920";
+
+async function mockTraceTask(page: Page): Promise<void> {
+  const task = wireTask({
+    id: traceTaskId,
+    title: "Trace the release workflow",
+    status: "completed",
+    phase: "terminal",
+    agent_provider: "claude-code",
+    agent_model: "claude-sonnet-5",
+    started_at: "2026-08-21T12:00:00Z",
+    completed_at: "2026-08-21T12:00:12Z",
+  });
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}`, (route) =>
+    route.fulfill({ json: task }),
+  );
+  await page.route(
+    `**/backend/api/v1/tasks/${traceTaskId}/validations`,
+    (route) => route.fulfill({ json: { validations: [] } }),
+  );
+  await page.route(
+    `**/backend/api/v1/tasks/${traceTaskId}/conflicts`,
+    (route) => route.fulfill({ json: { conflicts: [] } }),
+  );
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/evidence`, (route) =>
+    route.fulfill({ status: 404, json: { error: "not found" } }),
+  );
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/stream*`, (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: [
+        "id: 1:1",
+        `data: ${JSON.stringify({
+          id: "3b241101-e2bb-4255-8caf-4136c566a921",
+          task_attempt_id: "3b241101-e2bb-4255-8caf-4136c566a922",
+          attempt_number: 1,
+          sequence_number: 1,
+          event_type: "agent.cost_update",
+          source: "agent",
+          timestamp: "2026-08-21T12:00:10Z",
+          payload: { total_cost_usd: 0.0425 },
+          redaction_status: "none",
+          created_at: "2026-08-21T12:00:10Z",
+        })}`,
+        "",
+        "event: done",
+        'data: {"status":"completed"}',
+        "",
+      ].join("\n"),
+    }),
+  );
+}
+
+test("trace loading state", async ({ page }) => {
+  await mockTraceTask(page);
+  await page.route(
+    `**/backend/api/v1/tasks/${traceTaskId}/trace`,
+    async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await route.fulfill({ json: { spans: [] } });
+    },
+  );
+  await page.goto(`/tasks/${traceTaskId}`);
+  await page.getByRole("tab", { name: "Trace" }).click();
+  await expect(page.getByLabel("Loading trace")).toBeVisible();
+  await shoot(page, "task-trace-loading");
+});
+
+test("trace empty state", async ({ page }) => {
+  await mockTraceTask(page);
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
+    route.fulfill({ json: { spans: [] } }),
+  );
+  await page.goto(`/tasks/${traceTaskId}`);
+  await page.getByRole("tab", { name: "Trace" }).click();
+  await expect(page.getByText("No spans recorded yet")).toBeVisible();
+  await shoot(page, "task-trace-empty");
+});
+
+test("trace error state", async ({ page }) => {
+  await mockTraceTask(page);
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
+    route.fulfill({ status: 500, json: { error: "trace read failed" } }),
+  );
+  await page.goto(`/tasks/${traceTaskId}`);
+  await page.getByRole("tab", { name: "Trace" }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Trace data is unavailable" }),
+  ).toBeVisible();
+  await shoot(page, "task-trace-error");
+});
+
+test("trace waterfall and run cost", async ({ page }) => {
+  await mockTraceTask(page);
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
+    route.fulfill({
+      json: {
+        spans: [
+          {
+            trace_id: "0123456789abcdef0123456789abcdef",
+            span_id: "0123456789abcdef",
+            parent_span_id: null,
+            task_attempt_id: "3b241101-e2bb-4255-8caf-4136c566a922",
+            name: "runner.attempt",
+            kind: "internal",
+            start_time: "2026-08-21T12:00:00Z",
+            end_time: "2026-08-21T12:00:12Z",
+            attributes: {},
+            status_code: "Ok",
+            status_message: "",
+          },
+          {
+            trace_id: "0123456789abcdef0123456789abcdef",
+            span_id: "fedcba9876543210",
+            parent_span_id: "0123456789abcdef",
+            task_attempt_id: "3b241101-e2bb-4255-8caf-4136c566a922",
+            name: "agent.session",
+            kind: "internal",
+            start_time: "2026-08-21T12:00:02Z",
+            end_time: "2026-08-21T12:00:09Z",
+            attributes: {},
+            status_code: "Ok",
+            status_message: "",
+          },
+          {
+            trace_id: "0123456789abcdef0123456789abcdef",
+            span_id: "aaaaaaaaaaaaaaaa",
+            parent_span_id: "0123456789abcdef",
+            task_attempt_id: "3b241101-e2bb-4255-8caf-4136c566a922",
+            name: "validation.run",
+            kind: "internal",
+            start_time: "2026-08-21T12:00:09Z",
+            end_time: "2026-08-21T12:00:11Z",
+            attributes: {},
+            status_code: "Ok",
+            status_message: "",
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`/tasks/${traceTaskId}`);
+  await expect(
+    page.getByRole("definition").filter({ hasText: "$0.0425" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Cost breakdown")).toContainText(
+    "attempt 1: $0.0425",
+  );
+  await page.getByRole("tab", { name: /Trace/ }).click();
+  await expect(
+    page.getByRole("list", { name: "Trace waterfall" }),
+  ).toBeVisible();
+  await expect(page.getByText("agent.session")).toBeVisible();
+  await shootBothViewports(page, "task-trace-waterfall");
+});
+
 test("empty state", async ({ page }) => {
   await mockTaskList(page, []);
   await page.route("**/backend/api/v1/runners", (route) =>

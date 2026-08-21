@@ -6,8 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -27,8 +29,24 @@ type Telemetry struct {
 	shutdowns []func(context.Context) error
 }
 
+type setupOptions struct {
+	spanExporter sdktrace.SpanExporter
+}
+
+// SetupOption configures optional local telemetry consumers.
+type SetupOption func(*setupOptions)
+
+// WithSpanExporter adds an exporter alongside the configured OTLP exporter.
+func WithSpanExporter(exporter sdktrace.SpanExporter) SetupOption {
+	return func(options *setupOptions) { options.spanExporter = exporter }
+}
+
 // Setup wires Prometheus plus optional plaintext OTLP/gRPC export.
-func Setup(service, endpoint string, logger *slog.Logger) (*Telemetry, error) {
+func Setup(service, endpoint string, logger *slog.Logger, options ...SetupOption) (*Telemetry, error) {
+	var configured setupOptions
+	for _, option := range options {
+		option(&configured)
+	}
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
 		logger.LogAttrs(context.Background(), slog.LevelWarn, "telemetry export error",
 			slog.String("event", "otel_error"),
@@ -66,24 +84,75 @@ func Setup(service, endpoint string, logger *slog.Logger) (*Telemetry, error) {
 	tel.Metrics = reg
 	tel.shutdowns = append(tel.shutdowns, reg.shutdown)
 
-	if !exportOff {
-		traceExp, err := otlptracegrpc.New(context.Background(),
-			otlptracegrpc.WithEndpoint(endpoint),
-			otlptracegrpc.WithInsecure(),
-		)
-		if err != nil {
-			return nil, err
+	if !exportOff || configured.spanExporter != nil {
+		providerOptions := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
+		if configured.spanExporter != nil {
+			batcher := sdktrace.NewBatchSpanProcessor(configured.spanExporter)
+			providerOptions = append(providerOptions,
+				sdktrace.WithSpanProcessor(newTaskContextProcessor(batcher)))
 		}
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithBatcher(traceExp),
-			sdktrace.WithResource(res),
-		)
+		if !exportOff {
+			traceExp, err := otlptracegrpc.New(context.Background(),
+				otlptracegrpc.WithEndpoint(endpoint),
+				otlptracegrpc.WithInsecure(),
+			)
+			if err != nil {
+				return nil, err
+			}
+			providerOptions = append(providerOptions, sdktrace.WithBatcher(traceExp))
+		}
+		tp := sdktrace.NewTracerProvider(providerOptions...)
 		otel.SetTracerProvider(tp)
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
 		tel.shutdowns = append(tel.shutdowns, tp.Shutdown)
 	}
 	return &tel, nil
+}
+
+type taskContextProcessor struct {
+	next  sdktrace.SpanProcessor
+	mu    sync.RWMutex
+	attrs map[trace.TraceID][]attribute.KeyValue
+}
+
+func newTaskContextProcessor(next sdktrace.SpanProcessor) sdktrace.SpanProcessor {
+	return &taskContextProcessor{
+		next: next, attrs: make(map[trace.TraceID][]attribute.KeyValue),
+	}
+}
+
+func (p *taskContextProcessor) OnStart(parent context.Context, span sdktrace.ReadWriteSpan) {
+	var taskAttrs []attribute.KeyValue
+	for _, value := range span.Attributes() {
+		if value.Key == "task.id" || value.Key == "task.attempt_id" {
+			taskAttrs = append(taskAttrs, value)
+		}
+	}
+	traceID := span.SpanContext().TraceID()
+	if len(taskAttrs) > 0 {
+		p.mu.Lock()
+		p.attrs[traceID] = taskAttrs
+		p.mu.Unlock()
+	} else {
+		p.mu.RLock()
+		inherited := p.attrs[traceID]
+		p.mu.RUnlock()
+		span.SetAttributes(inherited...)
+	}
+	p.next.OnStart(parent, span)
+}
+
+func (p *taskContextProcessor) OnEnd(span sdktrace.ReadOnlySpan) {
+	p.next.OnEnd(span)
+}
+
+func (p *taskContextProcessor) Shutdown(ctx context.Context) error {
+	return p.next.Shutdown(ctx)
+}
+
+func (p *taskContextProcessor) ForceFlush(ctx context.Context) error {
+	return p.next.ForceFlush(ctx)
 }
 
 // Shutdown flushes pending telemetry; call on binary exit.

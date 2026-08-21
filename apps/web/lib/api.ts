@@ -14,6 +14,7 @@ import type {
   StoredEvidence,
   Task,
   TaskConflict,
+  TaskTrace,
   TaskStatus,
   ValidationResult,
 } from "./types";
@@ -150,6 +151,10 @@ export function getRunner(runnerId: string): Promise<RunnerDetail> {
 
 export function getTask(taskId: string): Promise<Task> {
   return request<Task>(`/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export function getTaskTrace(taskId: string): Promise<TaskTrace> {
+  return request<TaskTrace>(`/tasks/${encodeURIComponent(taskId)}/trace`);
 }
 
 export function cancelTask(taskId: string, reason?: string): Promise<Task> {
