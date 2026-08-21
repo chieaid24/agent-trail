@@ -9,14 +9,17 @@ import { EvidencePanel } from "@/components/EvidencePanel";
 import { LogViewer } from "@/components/LogViewer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Timeline } from "@/components/Timeline";
+import { TraceWaterfall, type TraceState } from "@/components/TraceWaterfall";
 import { ValidationList } from "@/components/ValidationList";
 import {
   ApiError,
   getEvidence,
   getTask,
+  getTaskTrace,
   listConflicts,
   listValidations,
 } from "@/lib/api";
+import { aggregateCost, type CostSummary } from "@/lib/cost";
 import {
   formatDateTime,
   formatDuration,
@@ -35,7 +38,8 @@ import { isTerminal } from "@/lib/types";
 
 const TASK_POLL_MS = 10_000;
 
-type TabKey = "timeline" | "logs" | "validations" | "evidence" | "files";
+type TabKey =
+  "timeline" | "trace" | "logs" | "validations" | "evidence" | "files";
 
 type TaskState =
   | { phase: "loading" }
@@ -70,6 +74,7 @@ export default function TaskPage({
   const [conflicts, setConflicts] = useState<ConflictState>({
     phase: "loading",
   });
+  const [trace, setTrace] = useState<TraceState>({ phase: "loading" });
   const [tab, setTab] = useState<TabKey>("timeline");
   const stream = useTaskStream(taskId);
 
@@ -110,15 +115,25 @@ export default function TaskPage({
     }
   }, [taskId]);
 
+  const loadTrace = useCallback(async () => {
+    try {
+      const result = await getTaskTrace(taskId);
+      setTrace({ phase: "ready", spans: result.spans });
+    } catch {
+      setTrace({ phase: "error" });
+    }
+  }, [taskId]);
+
   useEffect(() => {
     const initial = setTimeout(() => {
       void loadTask();
       void loadValidations();
       void loadEvidence();
       void loadConflicts();
+      void loadTrace();
     }, 0);
     return () => clearTimeout(initial);
-  }, [loadTask, loadValidations, loadEvidence, loadConflicts]);
+  }, [loadTask, loadValidations, loadEvidence, loadConflicts, loadTrace]);
 
   // The stream drives freshness: a lifecycle event refetches the task, a
   // validation or evidence event refetches its view.
@@ -159,6 +174,12 @@ export default function TaskPage({
     return () => clearTimeout(refresh);
   }, [conflictEventCount, loadConflicts]);
 
+  useEffect(() => {
+    if (stream.state !== "done") return;
+    const refresh = setTimeout(() => void loadTrace(), 1000);
+    return () => clearTimeout(refresh);
+  }, [stream.state, loadTrace]);
+
   // Poll for sibling publishes, which do not reach this task's stream.
   const running = state.phase === "ready" && !isTerminal(state.task.status);
   useEffect(() => {
@@ -166,12 +187,14 @@ export default function TaskPage({
     const t = setInterval(() => {
       void loadTask();
       void loadConflicts();
+      void loadTrace();
     }, TASK_POLL_MS);
     return () => clearInterval(t);
-  }, [running, loadTask, loadConflicts]);
+  }, [running, loadTask, loadConflicts, loadTrace]);
 
   const files = useMemo(() => changedFiles(stream.events), [stream.events]);
   const plan = useMemo(() => latestPlan(stream.events), [stream.events]);
+  const cost = useMemo(() => aggregateCost(stream.events), [stream.events]);
 
   return (
     <AppShell>
@@ -191,6 +214,7 @@ export default function TaskPage({
             streamState={stream.state}
             plan={plan}
             conflicts={conflicts}
+            cost={cost}
             onRetryConflicts={loadConflicts}
             onTaskChanged={(t) => setState({ phase: "ready", task: t })}
           >
@@ -199,6 +223,7 @@ export default function TaskPage({
               onSelect={setTab}
               counts={{
                 timeline: stream.events.length,
+                trace: trace.phase === "ready" ? trace.spans.length : null,
                 logs: null,
                 validations: validations.length,
                 evidence: null,
@@ -207,6 +232,7 @@ export default function TaskPage({
             />
             <div role="tabpanel" className="mt-4">
               {tab === "timeline" && <Timeline events={stream.events} />}
+              {tab === "trace" && <TraceWaterfall state={trace} />}
               {tab === "logs" && <LogViewer events={stream.events} />}
               {tab === "validations" && (
                 <ValidationList results={validations} />
@@ -226,6 +252,7 @@ function TaskDetail({
   streamState,
   plan,
   conflicts,
+  cost,
   onRetryConflicts,
   onTaskChanged,
   children,
@@ -234,6 +261,7 @@ function TaskDetail({
   streamState: StreamState;
   plan: string | null;
   conflicts: ConflictState;
+  cost: CostSummary;
   onRetryConflicts: () => void;
   onTaskChanged: (t: Task) => void;
   children: React.ReactNode;
@@ -334,11 +362,22 @@ function TaskDetail({
           {runtime !== null && (
             <Meta label="runtime" value={formatDuration(runtime)} />
           )}
+          <Meta label="cost" value={`$${cost.totalUsd.toFixed(4)}`} />
           {task.max_cost_usd !== null && (
             <Meta label="cost cap" value={`$${task.max_cost_usd.toFixed(2)}`} />
           )}
           <Meta label="created" value={formatDateTime(task.created_at)} />
         </dl>
+        {cost.attempts.length > 0 && (
+          <p aria-label="Cost breakdown" className="mt-2 text-xs text-muted">
+            {cost.attempts
+              .map(
+                (attempt) =>
+                  `attempt ${attempt.attemptNumber}: $${attempt.totalUsd.toFixed(4)}`,
+              )
+              .join(" / ")}
+          </p>
+        )}
 
         <Instructions text={task.instructions} />
         {plan && (
@@ -420,6 +459,7 @@ function StreamChip({ state }: { state: StreamState }) {
 
 const TAB_LABELS: Record<TabKey, string> = {
   timeline: "Timeline",
+  trace: "Trace",
   logs: "Logs",
   validations: "Validations",
   evidence: "Evidence",

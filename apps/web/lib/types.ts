@@ -80,6 +80,24 @@ export interface ActivityEvent {
   created_at: string;
 }
 
+export interface TaskSpan {
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string | null;
+  task_attempt_id: string | null;
+  name: string;
+  kind: string;
+  start_time: string;
+  end_time: string;
+  attributes: Record<string, unknown>;
+  status_code: "Unset" | "Error" | "Ok";
+  status_message: string;
+}
+
+export interface TaskTrace {
+  spans: TaskSpan[];
+}
+
 export type ValidationStatus = "passed" | "failed" | "timed_out" | "error";
 
 export type ValidationCategory =

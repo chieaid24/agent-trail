@@ -114,7 +114,7 @@ export function describeEvent(e: ActivityEvent): TimelineRow {
         monoDetail: true,
       };
     case "agent.cost_update": {
-      const cost = num(p, "cost_usd");
+      const cost = num(p, "total_cost_usd") ?? num(p, "cost_usd");
       return {
         label: "cost update",
         detail: cost !== undefined ? `$${cost.toFixed(4)}` : undefined,

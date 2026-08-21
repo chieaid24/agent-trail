@@ -54,6 +54,13 @@ describe("describeEvent", () => {
     expect(row.detail).toBe("go -> exit 0");
   });
 
+  it("renders cumulative provider cost updates", () => {
+    const row = describeEvent(
+      event("agent.cost_update", { total_cost_usd: 0.0425 }),
+    );
+    expect(row.detail).toBe("$0.0425");
+  });
+
   it("flags untrusted validation checks as agent claims", () => {
     const row = describeEvent(
       event("validation.check.completed", {
