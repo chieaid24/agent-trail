@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,8 +14,10 @@ import (
 	appsapi "k8s.io/api/apps/v1"
 	batchapi "k8s.io/api/batch/v1"
 	coreapi "k8s.io/api/core/v1"
+	networkapi "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/yaml"
 )
@@ -181,6 +184,32 @@ func TestControllerManifestRenders(t *testing.T) {
 		pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
 		t.Errorf("controller identity = %q/%v", pod.ServiceAccountName,
 			pod.AutomountServiceAccountToken)
+	}
+}
+
+func TestNetworkPolicyRestrictsControllerToAPICIDR(t *testing.T) {
+	template, err := os.ReadFile("../../../../deploy/k8s/runner/networkpolicy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := strings.ReplaceAll(string(template), "${KUBERNETES_API_CIDR}", "10.96.0.1/32")
+	decoder := k8syaml.NewYAMLOrJSONDecoder(bytes.NewBufferString(rendered), 4096)
+	policies := map[string]networkapi.NetworkPolicy{}
+	for {
+		var policy networkapi.NetworkPolicy
+		if err := decoder.Decode(&policy); err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		policies[policy.Name] = policy
+	}
+	policy := policies["allow-runner-controller-kubernetes-api"]
+	if len(policy.Spec.Egress) != 1 || len(policy.Spec.Egress[0].To) != 1 ||
+		policy.Spec.Egress[0].To[0].IPBlock == nil ||
+		policy.Spec.Egress[0].To[0].IPBlock.CIDR != "10.96.0.1/32" {
+		t.Errorf("controller API egress = %+v", policy.Spec.Egress)
 	}
 }
 
