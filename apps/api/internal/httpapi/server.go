@@ -26,6 +26,7 @@ type Server struct {
 	evidence    EvidenceService   // nil when DATABASE_URL is not configured
 	dashboard   DashboardService  // nil when DATABASE_URL is not configured
 	conflicts   ConflictService   // nil when DATABASE_URL is not configured
+	traces      TraceService      // nil when DATABASE_URL is not configured
 	webhook     http.Handler      // nil when the GitHub integration is not configured
 	metrics     http.Handler      // nil disables GET /metrics
 	auth        AuthService       // nil when OAuth credentials are not configured
@@ -52,6 +53,11 @@ func WithDashboard(service DashboardService) Option {
 // WithConflicts enables task conflict endpoints.
 func WithConflicts(service ConflictService) Option {
 	return func(s *Server) { s.conflicts = service }
+}
+
+// WithTraces enables task trace reads.
+func WithTraces(service TraceService) Option {
+	return func(s *Server) { s.traces = service }
 }
 
 // New returns a Server. Nil dependencies degrade cleanly: readiness reports
@@ -86,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/conflicts", s.handleTaskConflicts)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/trace", s.handleTaskTrace)
 	api.HandleFunc("GET /api/v1/organizations", s.handleListOrganizations)
 	api.HandleFunc("GET /api/v1/organizations/{organizationId}", s.handleGetOrganization)
 	api.HandleFunc("GET /api/v1/organizations/{organizationId}/repositories", s.handleOrganizationRepositories)

@@ -27,8 +27,24 @@ type Telemetry struct {
 	shutdowns []func(context.Context) error
 }
 
+type setupOptions struct {
+	spanExporter sdktrace.SpanExporter
+}
+
+// SetupOption configures optional local telemetry consumers.
+type SetupOption func(*setupOptions)
+
+// WithSpanExporter adds an exporter alongside the configured OTLP exporter.
+func WithSpanExporter(exporter sdktrace.SpanExporter) SetupOption {
+	return func(options *setupOptions) { options.spanExporter = exporter }
+}
+
 // Setup wires Prometheus plus optional plaintext OTLP/gRPC export.
-func Setup(service, endpoint string, logger *slog.Logger) (*Telemetry, error) {
+func Setup(service, endpoint string, logger *slog.Logger, options ...SetupOption) (*Telemetry, error) {
+	var configured setupOptions
+	for _, option := range options {
+		option(&configured)
+	}
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
 		logger.LogAttrs(context.Background(), slog.LevelWarn, "telemetry export error",
 			slog.String("event", "otel_error"),
@@ -66,18 +82,22 @@ func Setup(service, endpoint string, logger *slog.Logger) (*Telemetry, error) {
 	tel.Metrics = reg
 	tel.shutdowns = append(tel.shutdowns, reg.shutdown)
 
-	if !exportOff {
-		traceExp, err := otlptracegrpc.New(context.Background(),
-			otlptracegrpc.WithEndpoint(endpoint),
-			otlptracegrpc.WithInsecure(),
-		)
-		if err != nil {
-			return nil, err
+	if !exportOff || configured.spanExporter != nil {
+		providerOptions := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
+		if configured.spanExporter != nil {
+			providerOptions = append(providerOptions, sdktrace.WithBatcher(configured.spanExporter))
 		}
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithBatcher(traceExp),
-			sdktrace.WithResource(res),
-		)
+		if !exportOff {
+			traceExp, err := otlptracegrpc.New(context.Background(),
+				otlptracegrpc.WithEndpoint(endpoint),
+				otlptracegrpc.WithInsecure(),
+			)
+			if err != nil {
+				return nil, err
+			}
+			providerOptions = append(providerOptions, sdktrace.WithBatcher(traceExp))
+		}
+		tp := sdktrace.NewTracerProvider(providerOptions...)
 		otel.SetTracerProvider(tp)
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))

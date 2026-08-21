@@ -58,7 +58,9 @@ func run() error {
 
 	store := runner.NewStore(db)
 	tasks := task.NewStore(db)
-	telemetry, err := observability.Setup("worker", cfg.OTLPEndpoint, logger)
+	traceStore := observability.NewTraceStore(db)
+	telemetry, err := observability.Setup("worker", cfg.OTLPEndpoint, logger,
+		observability.WithSpanExporter(traceStore))
 	if err != nil {
 		return err
 	}
