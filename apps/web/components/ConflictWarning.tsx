@@ -7,6 +7,7 @@ const KIND_LABELS: Record<ConflictKind, string> = {
   merge_conflict: "merge conflict",
   migration: "migration collision",
   dependency: "dependency file",
+  semantic: "semantic conflict",
 };
 
 export function conflictKindLabel(kind: ConflictKind): string {
@@ -48,6 +49,21 @@ export function ConflictWarning({ conflicts }: { conflicts: TaskConflict[] }) {
               <p className="mt-0.5 font-mono text-xs break-all text-muted">
                 {c.files.join("  ")}
               </p>
+            )}
+            {c.semantic_explanation && (
+              <div className="mt-1 rounded bg-warning/10 px-2 py-1.5 text-xs text-foreground">
+                <p>
+                  <span className="font-semibold capitalize">
+                    {c.semantic_severity}
+                  </span>{" "}
+                  {c.semantic_explanation}
+                </p>
+                {c.semantic_evidence.length > 0 && (
+                  <p className="mt-0.5 font-mono break-all text-muted">
+                    {c.semantic_evidence.join("  ")}
+                  </p>
+                )}
+              </div>
             )}
           </li>
         ))}

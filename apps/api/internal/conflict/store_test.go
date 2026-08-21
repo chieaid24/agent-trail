@@ -183,6 +183,34 @@ func TestListForTaskHidesTerminalPairs(t *testing.T) {
 	}
 }
 
+func TestStorePersistsSemanticVerdict(t *testing.T) {
+	db := dbtest.Open(t)
+	ctx := context.Background()
+	s := NewStore(db)
+	repoID := createRepository(t, db)
+	a := createRepoTask(t, db, repoID, "task a", "")
+	b := createRepoTask(t, db, repoID, "task b", "")
+
+	want := Detection{
+		OtherTaskID: b.ID, Kinds: []Kind{KindSemantic},
+		SemanticSeverity:    SeverityHigh,
+		SemanticExplanation: "Both changes redefine auth.Session.",
+		SemanticEvidence:    []string{"auth.Session"},
+	}
+	if err := s.Reconcile(ctx, repoID, a.ID, []Detection{want}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	got, err := s.ListForTask(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SemanticSeverity != SeverityHigh ||
+		got[0].SemanticExplanation != want.SemanticExplanation ||
+		!reflect.DeepEqual(got[0].SemanticEvidence, want.SemanticEvidence) {
+		t.Fatalf("conflicts = %+v", got)
+	}
+}
+
 func TestReconcileRollsBackTheWholeTaskSet(t *testing.T) {
 	db := dbtest.Open(t)
 	ctx := context.Background()

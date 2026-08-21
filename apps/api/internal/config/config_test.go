@@ -19,6 +19,8 @@ func clearEnv(t *testing.T) {
 		"WORKSPACE_ROOT",
 		"AGENT_PROVIDER", "AGENT_CLI_PATH", "AGENT_MODEL",
 		"AGENT_PERMISSION_MODE", "AGENT_CLI_VERSION", "AGENT_TIMEOUT_SECONDS",
+		"CONFLICT_LLM_ENABLED", "CONFLICT_LLM_PROVIDER", "CONFLICT_LLM_MODEL",
+		"ANTHROPIC_API_KEY",
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
 		"GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET",
 		"GITHUB_OAUTH_BASE_URL", "GITHUB_APP_SLUG",
@@ -59,11 +61,38 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AgentModel != "" || cfg.AgentCLIVersion != "" {
 		t.Errorf("agent model/version = %q/%q, want empty", cfg.AgentModel, cfg.AgentCLIVersion)
 	}
+	if cfg.ConflictLLMEnabled || cfg.ConflictLLMProvider != "fake" ||
+		cfg.ConflictLLMModel != "claude-sonnet-4-6" {
+		t.Errorf("conflict LLM defaults = %v/%q/%q", cfg.ConflictLLMEnabled,
+			cfg.ConflictLLMProvider, cfg.ConflictLLMModel)
+	}
 	if cfg.DefaultTaskRuntime != 2700*time.Second {
 		t.Errorf("DefaultTaskRuntime = %v, want 2700s", cfg.DefaultTaskRuntime)
 	}
 	if cfg.OTLPEndpoint != "localhost:4317" {
 		t.Errorf("OTLPEndpoint = %q, want localhost:4317", cfg.OTLPEndpoint)
+	}
+}
+
+func TestLoadConflictLLM(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("CONFLICT_LLM_ENABLED", "true")
+	t.Setenv("CONFLICT_LLM_PROVIDER", "anthropic")
+	t.Setenv("CONFLICT_LLM_MODEL", "pinned-model")
+	t.Setenv("ANTHROPIC_API_KEY", "secret")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.ConflictLLMEnabled || cfg.ConflictLLMProvider != "anthropic" ||
+		cfg.ConflictLLMModel != "pinned-model" || cfg.AnthropicAPIKey != "secret" {
+		t.Fatalf("conflict LLM config = %+v", cfg)
+	}
+
+	clearEnv(t)
+	t.Setenv("CONFLICT_LLM_PROVIDER", "unknown")
+	if _, err := Load(); err == nil {
+		t.Fatal("unknown conflict provider accepted")
 	}
 }
 

@@ -17,17 +17,31 @@ const (
 	KindMigration Kind = "migration"
 	// KindDependency marks a shared dependency file.
 	KindDependency Kind = "dependency"
+	// KindSemantic marks a model-detected behavioral collision.
+	KindSemantic Kind = "semantic"
+)
+
+// Severity ranks a semantic conflict's expected impact.
+type Severity string
+
+const (
+	SeverityLow    Severity = "low"
+	SeverityMedium Severity = "medium"
+	SeverityHigh   Severity = "high"
 )
 
 // TaskConflict is a stored warning oriented toward the other task.
 type TaskConflict struct {
-	ID             string    `json:"id"`
-	OtherTaskID    string    `json:"other_task_id"`
-	OtherTaskTitle string    `json:"other_task_title"`
-	Kinds          []Kind    `json:"kinds"`
-	Files          []string  `json:"files"`
-	DetectedAt     time.Time `json:"detected_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	OtherTaskID         string    `json:"other_task_id"`
+	OtherTaskTitle      string    `json:"other_task_title"`
+	Kinds               []Kind    `json:"kinds"`
+	Files               []string  `json:"files"`
+	SemanticSeverity    Severity  `json:"semantic_severity,omitempty"`
+	SemanticExplanation string    `json:"semantic_explanation,omitempty"`
+	SemanticEvidence    []string  `json:"semantic_evidence"`
+	DetectedAt          time.Time `json:"detected_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // Sibling is an active repository task with a published diff.
@@ -40,8 +54,11 @@ type Sibling struct {
 
 // Detection is one conflicting task pair.
 type Detection struct {
-	OtherTaskID    string
-	OtherTaskTitle string
-	Kinds          []Kind
-	Files          []string
+	OtherTaskID         string
+	OtherTaskTitle      string
+	Kinds               []Kind
+	Files               []string
+	SemanticSeverity    Severity
+	SemanticExplanation string
+	SemanticEvidence    []string
 }

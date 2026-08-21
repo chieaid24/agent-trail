@@ -2,6 +2,7 @@ package conflict
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -14,6 +15,17 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
+
+type recordingSemantic struct {
+	verdict SemanticVerdict
+	err     error
+	calls   []SemanticRequest
+}
+
+func (s *recordingSemantic) Assess(_ context.Context, req SemanticRequest) (SemanticVerdict, error) {
+	s.calls = append(s.calls, req)
+	return s.verdict, s.err
+}
 
 type edit struct {
 	path    string
@@ -91,7 +103,7 @@ func TestDetectorFixtureSet(t *testing.T) {
 			}}
 			d := &Detector{Git: f.manager, Records: records, Logger: testLogger()}
 
-			detections, err := d.Detect(ctx, f.repo, "repo-uuid", "task-a", f.base, f.finalA)
+			detections, err := d.Detect(ctx, f.repo, "repo-uuid", "task-a", "self", f.base, f.finalA)
 			if err != nil {
 				t.Fatalf("Detect: %v", err)
 			}
@@ -140,7 +152,7 @@ func TestDetectorSkipsSiblingMissingFromMirror(t *testing.T) {
 	}}
 	d := &Detector{Git: f.manager, Records: records, Logger: testLogger()}
 
-	detections, err := d.Detect(ctx, f.repo, "repo-uuid", "task-a", f.base, f.finalA)
+	detections, err := d.Detect(ctx, f.repo, "repo-uuid", "task-a", "self", f.base, f.finalA)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
@@ -163,7 +175,7 @@ func TestDetectorRefreshesRemoteAgentBranches(t *testing.T) {
 	}}}
 	d := &Detector{Git: f.manager, Records: records, Logger: testLogger()}
 
-	detections, err := d.Detect(ctx, f.repo, "repo-uuid", "task-a", f.base, f.finalA)
+	detections, err := d.Detect(ctx, f.repo, "repo-uuid", "task-a", "self", f.base, f.finalA)
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
@@ -174,12 +186,64 @@ func TestDetectorRefreshesRemoteAgentBranches(t *testing.T) {
 
 func TestDetectorNoSiblings(t *testing.T) {
 	records := &fakeRecords{}
-	d := &Detector{Records: records, Logger: testLogger()}
+	semantic := &recordingSemantic{}
+	d := &Detector{Records: records, Logger: testLogger(), Semantic: semantic}
 	detections, err := d.Detect(context.Background(),
-		gitworkspace.RepoRef{ID: "r"}, "repo-uuid", "task-a",
+		gitworkspace.RepoRef{ID: "r"}, "repo-uuid", "task-a", "self",
 		strings.Repeat("a", 40), strings.Repeat("b", 40))
 	if err != nil || detections != nil {
 		t.Fatalf("no siblings must be a no-op, got %v, %v", detections, err)
+	}
+	if len(semantic.calls) != 0 {
+		t.Fatalf("semantic calls = %d, want none", len(semantic.calls))
+	}
+}
+
+func TestDetectorFindsSemanticConflictWithoutFileOverlap(t *testing.T) {
+	requireGit(t)
+	f := buildFixture(t, fixtureCase{
+		a: []edit{{path: "policy-a.go", content: []string{"// semantic-contract: auth.failure=deny"}}},
+		b: []edit{{path: "policy-b.go", content: []string{"// semantic-contract: auth.failure=allow"}}},
+	})
+	records := &fakeRecords{siblings: []Sibling{{
+		TaskID: "task-b", Title: "change auth fallback", BaseSHA: f.base, FinalSHA: f.finalB,
+	}}}
+	semantic := &recordingSemantic{verdict: SemanticVerdict{
+		Conflicts: true, Severity: SeverityHigh,
+		Explanation: "The auth failure paths disagree.", Evidence: []string{"auth.failure"},
+	}}
+	d := &Detector{Git: f.manager, Records: records, Logger: testLogger(), Semantic: semantic}
+
+	detections, err := d.Detect(context.Background(), f.repo, "repo-uuid",
+		"task-a", "harden auth", f.base, f.finalA)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if len(semantic.calls) != 1 {
+		t.Fatalf("semantic calls = %d, want one active sibling", len(semantic.calls))
+	}
+	if len(detections) != 1 || !reflect.DeepEqual(detections[0].Kinds, []Kind{KindSemantic}) ||
+		detections[0].SemanticExplanation == "" {
+		t.Fatalf("detections = %+v", detections)
+	}
+}
+
+func TestDetectorSwallowsSemanticFailureAndKeepsDeterministicResult(t *testing.T) {
+	requireGit(t)
+	f := buildFixture(t, fixtureCases()[1])
+	records := &fakeRecords{siblings: []Sibling{{
+		TaskID: "task-b", Title: "sibling", BaseSHA: f.base, FinalSHA: f.finalB,
+	}}}
+	d := &Detector{Git: f.manager, Records: records, Logger: testLogger(),
+		Semantic: &recordingSemantic{err: errors.New("provider unavailable")}}
+
+	detections, err := d.Detect(context.Background(), f.repo, "repo-uuid",
+		"task-a", "self", f.base, f.finalA)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if len(detections) != 1 || !reflect.DeepEqual(detections[0].Kinds, []Kind{KindFileOverlap}) {
+		t.Fatalf("detections = %+v", detections)
 	}
 }
 

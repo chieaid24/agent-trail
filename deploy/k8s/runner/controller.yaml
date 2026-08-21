@@ -51,6 +51,12 @@ spec:
               value: "${AGENT_PERMISSION_MODE}"
             - name: AGENT_CLI_VERSION
               value: "${AGENT_CLI_VERSION}"
+            - name: CONFLICT_LLM_ENABLED
+              value: "${CONFLICT_LLM_ENABLED}"
+            - name: CONFLICT_LLM_PROVIDER
+              value: "${CONFLICT_LLM_PROVIDER}"
+            - name: CONFLICT_LLM_MODEL
+              value: "${CONFLICT_LLM_MODEL}"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
             - name: GITHUB_API_BASE_URL

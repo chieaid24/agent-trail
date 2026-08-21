@@ -11,6 +11,7 @@ const conflict: TaskConflict = {
   other_task_title: "Upgrade the TLS library",
   kinds: ["file_overlap", "merge_conflict"],
   files: ["go.mod", "internal/tls/dial.go"],
+  semantic_evidence: [],
   detected_at: "2026-07-30T12:00:00Z",
   updated_at: "2026-07-30T12:00:00Z",
 };
@@ -47,4 +48,27 @@ test("pluralizes for several conflicts", () => {
     />,
   );
   expect(screen.getByText("Overlaps active tasks")).toBeDefined();
+});
+
+test("explains semantic conflicts with cited evidence", () => {
+  render(
+    <ConflictWarning
+      conflicts={[
+        {
+          ...conflict,
+          kinds: ["semantic"],
+          files: [],
+          semantic_severity: "high",
+          semantic_explanation: "Both changes redefine session expiry.",
+          semantic_evidence: ["auth.Session.ExpiresAt", "sessionTTL"],
+        },
+      ]}
+    />,
+  );
+
+  expect(screen.getByText("semantic conflict")).toBeDefined();
+  expect(
+    screen.getByText(/Both changes redefine session expiry/),
+  ).toBeDefined();
+  expect(screen.getByText(/auth\.Session\.ExpiresAt/)).toBeDefined();
 });

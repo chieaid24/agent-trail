@@ -250,7 +250,8 @@ export type ConflictKind =
   | "adjacent_lines"
   | "merge_conflict"
   | "migration"
-  | "dependency";
+  | "dependency"
+  | "semantic";
 
 export interface TaskConflict {
   id: string;
@@ -258,6 +259,9 @@ export interface TaskConflict {
   other_task_title: string;
   kinds: ConflictKind[];
   files: string[];
+  semantic_severity?: "low" | "medium" | "high";
+  semantic_explanation?: string;
+  semantic_evidence: string[];
   detected_at: string;
   updated_at: string;
 }

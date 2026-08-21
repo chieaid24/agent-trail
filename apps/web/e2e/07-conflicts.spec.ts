@@ -52,6 +52,40 @@ test("a task without stored conflicts shows no warning", async ({ page }) => {
   await shootBothViewports(page, "07-conflict-empty");
 });
 
+test("semantic warning shows severity, explanation, and evidence", async ({
+  page,
+}) => {
+  const a = await apiTaskByTitle(TASK_A);
+  await page.route("**/backend/api/v1/tasks/*/conflicts", (route) =>
+    route.fulfill({
+      json: {
+        conflicts: [
+          {
+            id: "3b241101-e2bb-4255-8caf-4136c566a970",
+            other_task_id: "3b241101-e2bb-4255-8caf-4136c566a971",
+            other_task_title: TASK_B,
+            kinds: ["semantic"],
+            files: [],
+            semantic_severity: "high",
+            semantic_explanation:
+              "Both changes assign incompatible expiry behavior.",
+            semantic_evidence: ["auth.Session.ExpiresAt", "sessionTTL"],
+            detected_at: "2026-08-21T12:00:00Z",
+            updated_at: "2026-08-21T12:00:00Z",
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto(`/tasks/${a.id}`);
+
+  const warning = page.getByLabel("Conflict warnings");
+  await expect(warning.getByText("semantic conflict")).toBeVisible();
+  await expect(warning.getByText(/^High/)).toBeVisible();
+  await expect(warning.getByText(/auth\.Session\.ExpiresAt/)).toBeVisible();
+  await shootBothViewports(page, "07-semantic-conflict-warning");
+});
+
 test("conflict warning loading state", async ({ page }) => {
   const a = await apiTaskByTitle(TASK_A);
   await page.route("**/backend/api/v1/tasks/*/conflicts", async (route) => {
@@ -102,6 +136,7 @@ test("conflict warning handles long content", async ({ page }) => {
             files: [
               "apps/api/internal/authentication/legacy-integrations/regional-rollouts/extremely-long-policy-filename.go",
             ],
+            semantic_evidence: [],
             detected_at: "2026-07-31T12:00:00Z",
             updated_at: "2026-07-31T12:00:00Z",
           },
