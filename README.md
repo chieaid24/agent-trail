@@ -2,7 +2,7 @@
 
 Agent Trail is a control plane for coding agents. Comment `/agent-trail run` on a GitHub issue and it creates a durable task, runs a coding agent in an isolated workspace with scoped credentials, streams every action to a dashboard, independently validates the result, and opens a draft pull request with an evidence report. A human approves the merge.
 
-Status: the issue-to-PR path runs end to end. A signed GitHub webhook creates a durable task; the worker claims it from a PostgreSQL queue, runs an agent (a no-cost fake, or the Claude Code CLI behind `AGENT_PROVIDER`) in an isolated Git worktree, validates the result outside the agent's session, and opens a draft pull request backed by an evidence report, streaming every step to the dashboard over SSE. Process execution remains the default. With `RUNNER_TYPE=kubernetes`, a controller creates one hardened Kubernetes Job per task attempt and watches it through completion. Terraform defines the AWS network, compute, database, queue, artifact, identity, and monitoring foundations; apply the Kubernetes workloads, policies, and Secrets separately.
+Status: the issue-to-PR path runs end to end. A signed GitHub webhook creates a durable task; the worker claims it from a PostgreSQL queue, runs an agent (a no-cost fake, or the Claude Code CLI behind `AGENT_PROVIDER`) in an isolated Git worktree, validates the result outside the agent's session, and opens a draft pull request backed by an evidence report. The dashboard streams each step over Server-Sent Events (SSE), renders completed OpenTelemetry spans as a trace waterfall, and totals agent cost updates per run. Process execution remains the default. With `RUNNER_TYPE=kubernetes`, a controller creates one hardened Kubernetes Job per task attempt and watches it through completion. Terraform defines the AWS network, compute, database, queue, artifact, identity, and monitoring foundations; apply the Kubernetes workloads, policies, and Secrets separately.
 
 ## Quickstart
 
@@ -16,6 +16,10 @@ make hooks    # activate the pre-commit hook (once per clone)
 
 `make dev` serves the API on :8080 and the dashboard on :3000. See the
 [Makefile](Makefile) for every target and port.
+
+## Observability data
+
+The worker exports spans to the configured OpenTelemetry Protocol (OTLP) collector and stores task-scoped spans in PostgreSQL for the dashboard. `GET /api/v1/tasks/{id}/trace` returns the stored waterfall. The task header derives its cost total and per-attempt breakdown from `agent.cost_update` events, so the values update through the existing SSE stream.
 
 ## Kubernetes backend
 
