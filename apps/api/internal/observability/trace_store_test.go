@@ -56,7 +56,7 @@ func TestTraceStoreExportsAndListsTaskSpans(t *testing.T) {
 		*childSpan.TaskAttemptID != attemptID {
 		t.Fatalf("child span = %+v", childSpan)
 	}
-	if childSpan.Attributes["runner.id"] != "runner-1" {
+	if childSpan.Attributes["task.id"] != created.ID {
 		t.Fatalf("child attributes = %+v", childSpan.Attributes)
 	}
 }
