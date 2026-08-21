@@ -127,7 +127,7 @@ func Load() (Config, error) {
 		TaskAttemptID:           os.Getenv("TASK_ATTEMPT_ID"),
 		RunnerImage:             os.Getenv("RUNNER_IMAGE"),
 		RunnerJobTemplate:       envOr("RUNNER_JOB_TEMPLATE", "/etc/agent-trail/runner-job.yaml"),
-		RunnerNamespace:         envOr("RUNNER_NAMESPACE", "agent-trail-runners"),
+		RunnerNamespace:         "agent-trail-runners",
 		AgentProvider:           envOr("AGENT_PROVIDER", "fake"),
 		AgentCLIPath:            envOr("AGENT_CLI_PATH", "claude"),
 		AgentModel:              os.Getenv("AGENT_MODEL"),

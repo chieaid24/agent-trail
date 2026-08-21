@@ -19,11 +19,11 @@ make hooks    # activate the pre-commit hook (once per clone)
 
 ## Kubernetes backend
 
-Set `RUNNER_TYPE=kubernetes` and provide a version-pinned `RUNNER_IMAGE` to run the worker as an in-cluster controller. Apply `deploy/k8s/runner/namespace.yaml` and `serviceaccount.yaml`, render `networkpolicy.yaml` with the Kubernetes API service CIDR, create the Secrets below, and then render `controller.yaml`. The controller ServiceAccount can manage Jobs only.
+Set `RUNNER_TYPE=kubernetes` and provide a version-pinned `RUNNER_IMAGE` to run the worker as an in-cluster controller. Apply `deploy/k8s/runner/namespace.yaml` and `serviceaccount.yaml`, render `networkpolicy.yaml` with the Kubernetes API Service ClusterIP as a `/32`, create the Secrets below, and then render `controller.yaml`. The controller ServiceAccount can manage Jobs only.
 
 - `runner-database`: `url`
 - `runner-github`: `webhook-secret`, `app-id`, and `key.pem`
-- `runner-agent` (optional): `anthropic-api-key` or `claude-code-oauth-token`
+- `runner-agent`: optional for the fake provider; Claude Code requires `anthropic-api-key` or `claude-code-oauth-token`
 
 The repository runner image supports the fake provider used by `scripts/verify-k8s-runner.sh`. For `AGENT_PROVIDER=claude-code`, build the pinned Claude CLI into the runner image and set `AGENT_CLI_VERSION`. The kind verifier creates the controller, checks its RBAC, runs one task to `awaiting_review`, and confirms TTL cleanup.
 
