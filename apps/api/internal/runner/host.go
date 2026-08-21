@@ -20,6 +20,7 @@ type Host struct {
 	// RunnerType and HostnameOrPod identify this runner in the registry.
 	RunnerType    string
 	HostnameOrPod string
+	AttemptID     string
 
 	Lease     time.Duration // claim lease duration
 	Heartbeat time.Duration // registry heartbeat and reap cadence
@@ -65,7 +66,13 @@ func (h *Host) Run(ctx context.Context) error {
 	executed := 0
 	idleSince := time.Now()
 	for ctx.Err() == nil {
-		claim, err := h.Store.Claim(ctx, self.ID, h.Lease)
+		var claim *Claim
+		var err error
+		if h.AttemptID == "" {
+			claim, err = h.Store.Claim(ctx, self.ID, h.Lease)
+		} else {
+			claim, err = h.Store.ClaimAttempt(ctx, self.ID, h.AttemptID, h.Lease)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				break
@@ -78,6 +85,9 @@ func (h *Host) Run(ctx context.Context) error {
 			continue
 		}
 		if claim == nil {
+			if h.AttemptID != "" {
+				break
+			}
 			if h.IdleExit > 0 && time.Since(idleSince) >= h.IdleExit {
 				log.LogAttrs(ctx, slog.LevelInfo, "idle exit",
 					slog.String("event", "runner_idle_exit"),

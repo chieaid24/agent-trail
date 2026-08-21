@@ -59,6 +59,13 @@ type Claim struct {
 	LeaseExpiresAt time.Time
 }
 
+// DispatchAttempt is an unleased attempt a remote backend may schedule.
+type DispatchAttempt struct {
+	AttemptID  string
+	TaskID     string
+	MaxRuntime time.Duration
+}
+
 // claimableStatuses are the task statuses whose active attempt a runner may
 // own: queued (fresh) plus every status the runner itself drives, so an
 // expired lease anywhere mid-flight is recoverable. awaiting_review is
@@ -219,6 +226,18 @@ func (s *Store) LeasedAttemptIDs(ctx context.Context, runnerID string) ([]string
 // claims race-free: the row a winner holds is invisible to everyone else,
 // and the lease it writes keeps it invisible after commit.
 func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.Duration) (*Claim, error) {
+	return s.claim(ctx, runnerID, leaseDuration, "")
+}
+
+// ClaimAttempt leases one exact attempt for a dedicated runner.
+func (s *Store) ClaimAttempt(ctx context.Context, runnerID, attemptID string, leaseDuration time.Duration) (*Claim, error) {
+	if !task.IsUUID(attemptID) {
+		return nil, nil
+	}
+	return s.claim(ctx, runnerID, leaseDuration, attemptID)
+}
+
+func (s *Store) claim(ctx context.Context, runnerID string, leaseDuration time.Duration, attemptID string) (*Claim, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin: %w", err)
@@ -227,17 +246,24 @@ func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.D
 
 	var c Claim
 	var status string
-	err = tx.QueryRowContext(ctx, `
+	query := `
 		SELECT a.id, a.attempt_number, t.id, t.status, t.title, t.instructions,
 			t.created_at
 		FROM task_attempts a
 		JOIN tasks t ON t.id = a.task_id
 		WHERE a.status = 'active'
 		  AND (a.lease_expires_at IS NULL OR a.lease_expires_at < now())
-		  AND `+claimableWhere+`
-		ORDER BY t.priority DESC, t.created_at
+		  AND ` + claimableWhere + `
+	`
+	args := []any{}
+	if attemptID != "" {
+		query += ` AND a.id = $1`
+		args = append(args, attemptID)
+	}
+	query += ` ORDER BY t.priority DESC, t.created_at
 		FOR UPDATE OF a SKIP LOCKED
-		LIMIT 1`).
+		LIMIT 1`
+	err = tx.QueryRowContext(ctx, query, args...).
 		Scan(&c.AttemptID, &c.AttemptNumber, &c.TaskID, &status,
 			&c.Title, &c.Instructions, &c.TaskCreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -264,6 +290,42 @@ func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.D
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return &c, nil
+}
+
+// DispatchableAttempts lists unleased work without claiming it. Kubernetes
+// Job creation provides the scheduling CAS; each Job claims its exact row.
+func (s *Store) DispatchableAttempts(ctx context.Context, defaultRuntime time.Duration, limit int) ([]DispatchAttempt, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT a.id, t.id, COALESCE(t.max_runtime_seconds, $1)
+		FROM task_attempts a
+		JOIN tasks t ON t.id = a.task_id
+		WHERE a.status = 'active'
+		  AND (a.lease_expires_at IS NULL OR a.lease_expires_at < now())
+		  AND `+claimableWhere+`
+		ORDER BY t.priority DESC, t.created_at
+		LIMIT $2`, int(defaultRuntime.Seconds()), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list dispatchable attempts: %w", err)
+	}
+	defer rows.Close()
+
+	attempts := []DispatchAttempt{}
+	for rows.Next() {
+		var a DispatchAttempt
+		var runtimeSeconds int
+		if err := rows.Scan(&a.AttemptID, &a.TaskID, &runtimeSeconds); err != nil {
+			return nil, fmt.Errorf("scan dispatchable attempt: %w", err)
+		}
+		a.MaxRuntime = time.Duration(runtimeSeconds) * time.Second
+		attempts = append(attempts, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list dispatchable attempts: %w", err)
+	}
+	return attempts, nil
 }
 
 // RecordAttemptBase stores the base commit the attempt's workspace was cut

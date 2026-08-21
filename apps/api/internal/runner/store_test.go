@@ -70,6 +70,54 @@ func TestRegisterDefaultsAndHeartbeat(t *testing.T) {
 	}
 }
 
+func TestClaimAttemptSelectsOnlyItsTarget(t *testing.T) {
+	db, s, ts := testStores(t)
+	first := mustCreateTask(t, ts)
+	second := mustCreateTask(t, ts)
+	r := mustRegister(t, s)
+	ctx := context.Background()
+
+	var secondAttempt string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM task_attempts WHERE task_id = $1`, second.ID).Scan(&secondAttempt); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := s.ClaimAttempt(ctx, r.ID, secondAttempt, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim == nil || claim.TaskID != second.ID {
+		t.Fatalf("claim = %+v, want task %s", claim, second.ID)
+	}
+	if claim.TaskID == first.ID {
+		t.Fatal("specific claim selected the wrong task")
+	}
+	if claim, err := s.ClaimAttempt(ctx, r.ID, "not-a-uuid", time.Minute); err != nil || claim != nil {
+		t.Fatalf("invalid specific claim = %+v, %v", claim, err)
+	}
+}
+
+func TestDispatchableAttemptsExcludesLeasedWork(t *testing.T) {
+	_, s, ts := testStores(t)
+	mustCreateTask(t, ts)
+	r := mustRegister(t, s)
+	ctx := context.Background()
+
+	attempts, err := s.DispatchableAttempts(ctx, 17*time.Minute, 10)
+	if err != nil || len(attempts) != 1 {
+		t.Fatalf("dispatchable = %+v, %v", attempts, err)
+	}
+	if attempts[0].MaxRuntime != 17*time.Minute {
+		t.Errorf("MaxRuntime = %v, want 17m", attempts[0].MaxRuntime)
+	}
+	if _, err := s.ClaimAttempt(ctx, r.ID, attempts[0].AttemptID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	attempts, err = s.DispatchableAttempts(ctx, 17*time.Minute, 10)
+	if err != nil || len(attempts) != 0 {
+		t.Fatalf("leased dispatchable = %+v, %v", attempts, err)
+	}
+}
+
 func TestHeartbeatRevivesLostButNotOffline(t *testing.T) {
 	db, s, _ := testStores(t)
 	ctx := context.Background()

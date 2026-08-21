@@ -31,6 +31,7 @@ FROM alpine:3.23 AS runner
 RUN apk add --no-cache ca-certificates git \
     && addgroup -g 65532 nonroot && adduser -D -u 65532 -G nonroot nonroot
 COPY --from=build /out/worker /usr/local/bin/worker
+COPY deploy/k8s/runner/job.yaml /etc/agent-trail/runner-job.yaml
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/worker"]
 

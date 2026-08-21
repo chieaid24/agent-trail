@@ -58,3 +58,9 @@ jobs:
       # docs-sync) run pre-merge on the agent side.
       - name: Gate
         run: bash scripts/gate.sh
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@v0.30.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Verify Kubernetes runner
+        run: bash scripts/verify-k8s-runner.sh

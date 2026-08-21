@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 // Config holds the settings shared by the api, worker, and migrate commands.
@@ -38,9 +40,15 @@ type Config struct {
 	// DefaultTaskRuntime applies when a task omits max_runtime_seconds
 	// (AGENT_TIMEOUT_SECONDS).
 	DefaultTaskRuntime time.Duration
-	// RunnerType identifies how this worker is hosted in the runner
-	// registry: process, docker, or kubernetes (RUNNER_TYPE).
+	// RunnerType selects the execution backend: process or kubernetes.
 	RunnerType string
+	// TaskAttemptID restricts a Kubernetes Job runner to one attempt.
+	TaskAttemptID string
+	// Kubernetes controller settings.
+	RunnerImage       string
+	RunnerJobTemplate string
+	RunnerNamespace   string
+	RunnerJobTTL      time.Duration
 	// WorkerMaxTasks caps attempts executed before the worker exits; zero
 	// runs forever (WORKER_MAX_TASKS). A Kubernetes Job runner sets 1 so
 	// the Job completes and TTL cleanup applies.
@@ -116,6 +124,10 @@ func Load() (Config, error) {
 		AuthPublicOrigin:        envOr("AUTH_PUBLIC_ORIGIN", "http://localhost:3000"),
 		WorkspaceRoot:           envOr("WORKSPACE_ROOT", "/var/lib/agent-trail"),
 		RunnerType:              envOr("RUNNER_TYPE", "process"),
+		TaskAttemptID:           os.Getenv("TASK_ATTEMPT_ID"),
+		RunnerImage:             os.Getenv("RUNNER_IMAGE"),
+		RunnerJobTemplate:       envOr("RUNNER_JOB_TEMPLATE", "/etc/agent-trail/runner-job.yaml"),
+		RunnerNamespace:         "agent-trail-runners",
 		AgentProvider:           envOr("AGENT_PROVIDER", "fake"),
 		AgentCLIPath:            envOr("AGENT_CLI_PATH", "claude"),
 		AgentModel:              os.Getenv("AGENT_MODEL"),
@@ -142,11 +154,22 @@ func Load() (Config, error) {
 	}
 	cfg.AuthCookieSecure = secure
 	switch cfg.RunnerType {
-	case "process", "docker", "kubernetes":
+	case "process", "kubernetes":
 	default:
-		return Config{}, fmt.Errorf("RUNNER_TYPE %q: want process, docker, or kubernetes",
+		return Config{}, fmt.Errorf("RUNNER_TYPE %q: want process or kubernetes",
 			cfg.RunnerType)
 	}
+	if cfg.RunnerType == "kubernetes" && cfg.TaskAttemptID == "" && cfg.RunnerImage == "" {
+		return Config{}, fmt.Errorf("RUNNER_IMAGE is required for the kubernetes controller")
+	}
+	if cfg.TaskAttemptID != "" && !task.IsUUID(cfg.TaskAttemptID) {
+		return Config{}, fmt.Errorf("TASK_ATTEMPT_ID must be a UUID")
+	}
+	ttl, err := envSeconds("RUNNER_TTL_SECONDS", 300)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.RunnerJobTTL = ttl
 	maxTasks, err := envNonNegativeInt("WORKER_MAX_TASKS", 0)
 	if err != nil {
 		return Config{}, err

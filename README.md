@@ -2,7 +2,7 @@
 
 Agent Trail is a control plane for coding agents. Comment `/agent-trail run` on a GitHub issue and it creates a durable task, runs a coding agent in an isolated workspace with scoped credentials, streams every action to a dashboard, independently validates the result, and opens a draft pull request with an evidence report. A human approves the merge.
 
-Status: the issue-to-PR path runs end to end. A signed GitHub webhook creates a durable task; the worker claims it from a PostgreSQL queue, runs an agent (a no-cost fake, or the Claude Code CLI behind `AGENT_PROVIDER`) in an isolated Git worktree, validates the result outside the agent's session, and opens a draft pull request backed by an evidence report, streaming every step to the dashboard over SSE. Conflict detection, OpenTelemetry, and a hardened Kubernetes runner Job (verified in a local kind cluster) are in place. The full AWS stack - an ECS Fargate control plane, an EKS runner cluster, RDS PostgreSQL, SQS dispatch, and the surrounding VPC, load balancing, Route 53 and ACM TLS, Secrets Manager, and CloudWatch and SNS observability - is defined end to end in Terraform.
+Status: the issue-to-PR path runs end to end. A signed GitHub webhook creates a durable task; the worker claims it from a PostgreSQL queue, runs an agent (a no-cost fake, or the Claude Code CLI behind `AGENT_PROVIDER`) in an isolated Git worktree, validates the result outside the agent's session, and opens a draft pull request backed by an evidence report, streaming every step to the dashboard over SSE. Process execution remains the default. With `RUNNER_TYPE=kubernetes`, a controller creates one hardened Kubernetes Job per task attempt and watches it through completion. Terraform defines the AWS network, compute, database, queue, artifact, identity, and monitoring foundations; apply the Kubernetes workloads, policies, and Secrets separately.
 
 ## Quickstart
 
@@ -17,9 +17,19 @@ make hooks    # activate the pre-commit hook (once per clone)
 `make dev` serves the API on :8080 and the dashboard on :3000. See the
 [Makefile](Makefile) for every target and port.
 
+## Kubernetes backend
+
+Set `RUNNER_TYPE=kubernetes` and provide a version-pinned `RUNNER_IMAGE` to run the worker as an in-cluster controller. Apply `deploy/k8s/runner/namespace.yaml` and `serviceaccount.yaml`, render `networkpolicy.yaml` with the Kubernetes API Service ClusterIP as a `/32`, create the Secrets below, and then render `controller.yaml`. The controller ServiceAccount can manage Jobs only.
+
+- `runner-database`: `url`
+- `runner-github`: `webhook-secret`, `app-id`, and `key.pem`
+- `runner-agent`: optional for the fake provider; Claude Code requires `anthropic-api-key` or `claude-code-oauth-token`
+
+The repository runner image supports the fake provider used by `scripts/verify-k8s-runner.sh`. For `AGENT_PROVIDER=claude-code`, build the pinned Claude CLI into the runner image and set `AGENT_CLI_VERSION`. The kind verifier creates the controller, checks its RBAC, runs one task to `awaiting_review`, and confirms TTL cleanup.
+
 ## Layout
 
-- `apps/api/` - Go control plane: `api` (HTTP), `worker` (runner host), `migrate` (goose)
+- `apps/api/` - Go control plane: `api` (HTTP), `worker` (process runner or Kubernetes controller), `migrate` (goose)
 - `apps/web/` - Next.js dashboard
 - `deploy/dev/` - compose configs for the local infrastructure
 - `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner)
