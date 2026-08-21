@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 // Config holds the settings shared by the api, worker, and migrate commands.
@@ -159,6 +161,9 @@ func Load() (Config, error) {
 	}
 	if cfg.RunnerType == "kubernetes" && cfg.TaskAttemptID == "" && cfg.RunnerImage == "" {
 		return Config{}, fmt.Errorf("RUNNER_IMAGE is required for the kubernetes controller")
+	}
+	if cfg.TaskAttemptID != "" && !task.IsUUID(cfg.TaskAttemptID) {
+		return Config{}, fmt.Errorf("TASK_ATTEMPT_ID must be a UUID")
 	}
 	ttl, err := envSeconds("RUNNER_TTL_SECONDS", 300)
 	if err != nil {

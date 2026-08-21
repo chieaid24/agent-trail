@@ -2,8 +2,8 @@ package runner
 
 import "context"
 
-// Backend runs the configured attempt execution strategy.
-type Backend interface {
+// RunnerBackend runs the configured attempt execution strategy.
+type RunnerBackend interface {
 	Run(context.Context) error
 }
 

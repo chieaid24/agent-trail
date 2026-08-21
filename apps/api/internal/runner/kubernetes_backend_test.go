@@ -6,12 +6,14 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	appsapi "k8s.io/api/apps/v1"
 	batchapi "k8s.io/api/batch/v1"
 	coreapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/yaml"
@@ -44,6 +46,7 @@ func testKubernetesBackend(t *testing.T) (*KubernetesBackend, *fake.Clientset, s
 		Poll:           20 * time.Millisecond,
 		WorkerIdleExit: 2 * time.Minute,
 		AgentProvider:  "fake",
+		AgentCLIPath:   "claude",
 		PermissionMode: "acceptEdits",
 		OTLPEndpoint:   "off",
 		GitHubAPIBase:  "http://fixture:8080",
@@ -152,21 +155,20 @@ func TestControllerManifestRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rendered, err := renderJobTemplate(template, map[string]templateValue{
-		"RUNNER_IMAGE":                {"agent-trail/runner:test", false},
-		"TTL_SECONDS":                 {"300", false},
-		"WORKER_IDLE_EXIT_SECONDS":    {"120", false},
-		"AGENT_PROVIDER":              {"fake", false},
-		"AGENT_MODEL":                 {"fake-model", false},
-		"AGENT_PERMISSION_MODE":       {"acceptEdits", false},
-		"AGENT_CLI_VERSION":           {"unused", false},
-		"OTEL_EXPORTER_OTLP_ENDPOINT": {"off", false},
-		"GITHUB_API_BASE_URL":         {"http://fixture:8080", false},
-	})
-	if err != nil {
-		t.Fatal(err)
+	rendered := string(template)
+	for key, value := range map[string]string{
+		"RUNNER_IMAGE": "agent-trail/runner:test", "TTL_SECONDS": "300",
+		"WORKER_IDLE_EXIT_SECONDS": "120", "AGENT_PROVIDER": "fake",
+		"AGENT_CLI_PATH": "claude", "AGENT_MODEL": "fake-model",
+		"AGENT_PERMISSION_MODE": "acceptEdits", "AGENT_CLI_VERSION": "unused",
+		"OTEL_EXPORTER_OTLP_ENDPOINT": "off", "GITHUB_API_BASE_URL": "http://fixture:8080",
+	} {
+		rendered = strings.ReplaceAll(rendered, "${"+key+"}", value)
 	}
-	rawJSON, err := yaml.YAMLToJSON(rendered)
+	if strings.Contains(rendered, "${") {
+		t.Fatal("controller manifest has an unset variable")
+	}
+	rawJSON, err := yaml.YAMLToJSON([]byte(rendered))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,4 +200,26 @@ func TestJobStateReportsTerminalConditions(t *testing.T) {
 			t.Errorf("jobState(%s) = %q/%q", tc.condition, got, reason)
 		}
 	}
+}
+
+func TestKubernetesBackendDeletesFailedJobForLeaseRecovery(t *testing.T) {
+	backend, client, taskID := testKubernetesBackend(t)
+	ctx := context.Background()
+	if err := backend.dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := client.BatchV1().Jobs("agent-trail-runners").List(ctx, metav1.ListOptions{})
+	if err != nil || len(jobs.Items) != 1 {
+		t.Fatalf("Jobs = %d, %v", len(jobs.Items), err)
+	}
+	job := jobs.Items[0]
+	job.Status.Conditions = []batchapi.JobCondition{{
+		Type: batchapi.JobFailed, Status: coreapi.ConditionTrue, Reason: "observed",
+	}}
+	backend.observe(ctx, &job)
+	_, err = client.BatchV1().Jobs("agent-trail-runners").Get(ctx, job.Name, metav1.GetOptions{})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("failed Job still exists: %v", err)
+	}
+	assertSubsequence(t, timelineTypes(t, backend.Tasks, taskID), []string{"runner.job_failed"})
 }

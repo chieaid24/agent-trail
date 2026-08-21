@@ -79,7 +79,11 @@ rm -f "$IMAGES_TAR"
 
 log "Applying namespaces, service accounts, and network policies"
 "${KUBECTL[@]}" apply -f deploy/k8s/local/namespace.yaml -f deploy/k8s/runner/namespace.yaml >/dev/null
-"${KUBECTL[@]}" apply -f deploy/k8s/runner/serviceaccount.yaml -f deploy/k8s/runner/networkpolicy.yaml -f deploy/k8s/local/networkpolicy.yaml >/dev/null
+"${KUBECTL[@]}" apply -f deploy/k8s/runner/serviceaccount.yaml -f deploy/k8s/local/networkpolicy.yaml >/dev/null
+KUBERNETES_API_IP="$("${KUBECTL[@]}" -n default get service kubernetes -o jsonpath='{.spec.clusterIP}')"
+render deploy/k8s/runner/networkpolicy.yaml \
+  "KUBERNETES_API_CIDR=${KUBERNETES_API_IP}/32" \
+  | "${KUBECTL[@]}" apply -f - >/dev/null
 
 log "Creating per-run secrets"
 PGPW="$(openssl rand -hex 16)"
@@ -114,6 +118,7 @@ render deploy/k8s/runner/controller.yaml \
   "TTL_SECONDS=20" \
   "WORKER_IDLE_EXIT_SECONDS=120" \
   "AGENT_PROVIDER=fake" \
+  "AGENT_CLI_PATH=claude" \
   "AGENT_MODEL=fake-model" \
   "AGENT_PERMISSION_MODE=acceptEdits" \
   "AGENT_CLI_VERSION=unused" \
@@ -124,10 +129,14 @@ render deploy/k8s/runner/controller.yaml \
 
 log "Verifying least-privilege controller RBAC"
 CONTROLLER_USER="system:serviceaccount:agent-trail-runners:runner-controller"
-[ "$("${KUBECTL[@]}" auth can-i create jobs.batch -n agent-trail-runners --as="$CONTROLLER_USER")" = "yes" ] \
-  || fail "runner-controller cannot create Jobs"
-[ "$("${KUBECTL[@]}" auth can-i create secrets -n agent-trail-runners --as="$CONTROLLER_USER")" = "no" ] \
-  || fail "runner-controller can create secrets"
+for verb in create get list watch delete; do
+  [ "$("${KUBECTL[@]}" auth can-i "$verb" jobs.batch -n agent-trail-runners --as="$CONTROLLER_USER")" = "yes" ] \
+    || fail "runner-controller cannot $verb Jobs"
+done
+for resource in secrets pods serviceaccounts roles.rbac.authorization.k8s.io; do
+  [ "$("${KUBECTL[@]}" auth can-i get "$resource" -n agent-trail-runners --as="$CONTROLLER_USER")" = "no" ] \
+    || fail "runner-controller can read $resource"
+done
 
 log "Waiting for the controller-created runner Job"
 JOB_NAME=""

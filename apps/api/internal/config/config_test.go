@@ -309,8 +309,14 @@ func TestLoadRunnerTypeAndWorkerCaps(t *testing.T) {
 
 	clearEnv(t)
 	t.Setenv("RUNNER_TYPE", "kubernetes")
-	t.Setenv("TASK_ATTEMPT_ID", "attempt-id")
+	t.Setenv("TASK_ATTEMPT_ID", "00000000-0000-0000-0000-000000000001")
 	if _, err := Load(); err != nil {
 		t.Fatalf("kubernetes task runner config: %v", err)
+	}
+
+	clearEnv(t)
+	t.Setenv("TASK_ATTEMPT_ID", "attempt-id")
+	if _, err := Load(); err == nil {
+		t.Error("malformed TASK_ATTEMPT_ID accepted")
 	}
 }

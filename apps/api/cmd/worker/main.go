@@ -98,7 +98,7 @@ func run() error {
 
 func buildBackend(cfg config.Config, db *sql.DB, store *runner.Store, tasks *task.Store,
 	logger *slog.Logger, metrics *observability.Registry, runnerMetrics *runner.Metrics,
-) (runner.Backend, error) {
+) (runner.RunnerBackend, error) {
 	if cfg.RunnerType == "kubernetes" && cfg.TaskAttemptID == "" {
 		template, err := os.ReadFile(cfg.RunnerJobTemplate)
 		if err != nil {
@@ -125,6 +125,7 @@ func buildBackend(cfg config.Config, db *sql.DB, store *runner.Store, tasks *tas
 			Poll:            cfg.WorkerPoll,
 			WorkerIdleExit:  cfg.WorkerIdleExit,
 			AgentProvider:   cfg.AgentProvider,
+			AgentCLIPath:    cfg.AgentCLIPath,
 			AgentModel:      cfg.AgentModel,
 			PermissionMode:  cfg.AgentPermissionMode,
 			AgentCLIVersion: cfg.AgentCLIVersion,

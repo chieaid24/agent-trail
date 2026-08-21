@@ -40,6 +40,7 @@ type KubernetesBackend struct {
 	Poll            time.Duration
 	WorkerIdleExit  time.Duration
 	AgentProvider   string
+	AgentCLIPath    string
 	AgentModel      string
 	PermissionMode  string
 	AgentCLIVersion string
@@ -206,6 +207,16 @@ func (b *KubernetesBackend) observe(ctx context.Context, job *batchapi.Job) {
 			slog.String("task_attempt_id", attemptID),
 			slog.String("error", err.Error()))
 	}
+	if state == "failed" {
+		// Lease expiry gates replacement; the executor owns task state.
+		if err := b.Jobs.Delete(ctx, job.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			b.Logger.LogAttrs(ctx, slog.LevelWarn, "failed runner Job deletion failed",
+				slog.String("event", "runner_job_delete_failed"),
+				slog.String("task_attempt_id", attemptID),
+				slog.String("job", job.Name),
+				slog.String("error", err.Error()))
+		}
+	}
 }
 
 func jobState(job *batchapi.Job) (string, string) {
@@ -239,6 +250,7 @@ func (b *KubernetesBackend) jobFor(attempt DispatchAttempt) (*batchapi.Job, erro
 		"ACTIVE_DEADLINE_SECONDS":     {strconv.FormatInt(int64((runtime+time.Minute)/time.Second), 10), true},
 		"WORKER_IDLE_EXIT_SECONDS":    {strconv.FormatInt(int64(b.WorkerIdleExit/time.Second), 10), false},
 		"AGENT_PROVIDER":              {b.AgentProvider, false},
+		"AGENT_CLI_PATH":              {b.AgentCLIPath, false},
 		"AGENT_MODEL":                 {b.AgentModel, false},
 		"AGENT_PERMISSION_MODE":       {b.PermissionMode, false},
 		"AGENT_CLI_VERSION":           {b.AgentCLIVersion, false},

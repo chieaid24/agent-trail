@@ -25,7 +25,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: controller
-          image: ${RUNNER_IMAGE}
+          image: "${RUNNER_IMAGE}"
           imagePullPolicy: IfNotPresent
           env:
             - name: DATABASE_URL
@@ -36,23 +36,25 @@ spec:
             - name: RUNNER_TYPE
               value: kubernetes
             - name: RUNNER_IMAGE
-              value: ${RUNNER_IMAGE}
+              value: "${RUNNER_IMAGE}"
             - name: RUNNER_TTL_SECONDS
-              value: ${TTL_SECONDS}
+              value: "${TTL_SECONDS}"
             - name: WORKER_IDLE_EXIT_SECONDS
-              value: ${WORKER_IDLE_EXIT_SECONDS}
+              value: "${WORKER_IDLE_EXIT_SECONDS}"
             - name: AGENT_PROVIDER
-              value: ${AGENT_PROVIDER}
+              value: "${AGENT_PROVIDER}"
+            - name: AGENT_CLI_PATH
+              value: "${AGENT_CLI_PATH}"
             - name: AGENT_MODEL
-              value: ${AGENT_MODEL}
+              value: "${AGENT_MODEL}"
             - name: AGENT_PERMISSION_MODE
-              value: ${AGENT_PERMISSION_MODE}
+              value: "${AGENT_PERMISSION_MODE}"
             - name: AGENT_CLI_VERSION
-              value: ${AGENT_CLI_VERSION}
+              value: "${AGENT_CLI_VERSION}"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+              value: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
             - name: GITHUB_API_BASE_URL
-              value: ${GITHUB_API_BASE_URL}
+              value: "${GITHUB_API_BASE_URL}"
           resources:
             requests:
               cpu: "100m"

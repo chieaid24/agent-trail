@@ -4,7 +4,8 @@
 # reclaims the Job and its pod. envsubst variables: JOB_NAME,
 # TASK_ATTEMPT_ID, RUNNER_IMAGE,
 # TTL_SECONDS, ACTIVE_DEADLINE_SECONDS, GITHUB_API_BASE_URL,
-# WORKER_IDLE_EXIT_SECONDS, AGENT_PROVIDER, OTEL_EXPORTER_OTLP_ENDPOINT.
+# WORKER_IDLE_EXIT_SECONDS, AGENT_PROVIDER, AGENT_CLI_PATH, AGENT_MODEL,
+# AGENT_PERMISSION_MODE, AGENT_CLI_VERSION, OTEL_EXPORTER_OTLP_ENDPOINT.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -58,6 +59,8 @@ spec:
               value: /workspace
             - name: AGENT_PROVIDER
               value: ${AGENT_PROVIDER}
+            - name: AGENT_CLI_PATH
+              value: ${AGENT_CLI_PATH}
             - name: AGENT_MODEL
               value: ${AGENT_MODEL}
             - name: AGENT_PERMISSION_MODE
@@ -80,6 +83,18 @@ spec:
                 secretKeyRef:
                   name: runner-github
                   key: webhook-secret
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: runner-agent
+                  key: anthropic-api-key
+                  optional: true
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: runner-agent
+                  key: claude-code-oauth-token
+                  optional: true
           resources:
             requests:
               cpu: "500m"
