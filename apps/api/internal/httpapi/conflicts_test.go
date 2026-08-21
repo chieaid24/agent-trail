@@ -40,10 +40,11 @@ func TestTaskConflictsRejectsBadID(t *testing.T) {
 func TestTaskConflictsList(t *testing.T) {
 	f := &fakeConflicts{conflicts: []conflict.TaskConflict{{
 		ID: "c-1", OtherTaskID: "t-2", OtherTaskTitle: "sibling task",
-		Kinds:      []conflict.Kind{conflict.KindFileOverlap, conflict.KindMergeConflict},
-		Files:      []string{"app.go"},
-		DetectedAt: time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
-		UpdatedAt:  time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
+		Kinds:            []conflict.Kind{conflict.KindFileOverlap, conflict.KindMergeConflict},
+		Files:            []string{"app.go"},
+		SemanticEvidence: []string{},
+		DetectedAt:       time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:        time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC),
 	}}}
 	h := New(testLogger(), nil, nil, nil, nil, nil, nil,
 		WithConflicts(f)).Handler()
@@ -54,10 +55,11 @@ func TestTaskConflictsList(t *testing.T) {
 	}
 	var body struct {
 		Conflicts []struct {
-			OtherTaskID    string   `json:"other_task_id"`
-			OtherTaskTitle string   `json:"other_task_title"`
-			Kinds          []string `json:"kinds"`
-			Files          []string `json:"files"`
+			OtherTaskID      string   `json:"other_task_id"`
+			OtherTaskTitle   string   `json:"other_task_title"`
+			Kinds            []string `json:"kinds"`
+			Files            []string `json:"files"`
+			SemanticEvidence []string `json:"semantic_evidence"`
 		} `json:"conflicts"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

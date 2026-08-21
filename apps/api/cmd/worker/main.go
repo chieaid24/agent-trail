@@ -113,24 +113,27 @@ func buildBackend(cfg config.Config, db *sql.DB, store *runner.Store, tasks *tas
 			return nil, fmt.Errorf("create Kubernetes client: %w", err)
 		}
 		return &runner.KubernetesBackend{
-			Jobs:            client.BatchV1().Jobs(cfg.RunnerNamespace),
-			Store:           store,
-			Tasks:           tasks,
-			Logger:          logger,
-			Template:        template,
-			Namespace:       cfg.RunnerNamespace,
-			RunnerImage:     cfg.RunnerImage,
-			JobTTL:          cfg.RunnerJobTTL,
-			DefaultRuntime:  cfg.DefaultTaskRuntime,
-			Poll:            cfg.WorkerPoll,
-			WorkerIdleExit:  cfg.WorkerIdleExit,
-			AgentProvider:   cfg.AgentProvider,
-			AgentCLIPath:    cfg.AgentCLIPath,
-			AgentModel:      cfg.AgentModel,
-			PermissionMode:  cfg.AgentPermissionMode,
-			AgentCLIVersion: cfg.AgentCLIVersion,
-			OTLPEndpoint:    cfg.OTLPEndpoint,
-			GitHubAPIBase:   cfg.GitHubAPIBaseURL,
+			Jobs:                client.BatchV1().Jobs(cfg.RunnerNamespace),
+			Store:               store,
+			Tasks:               tasks,
+			Logger:              logger,
+			Template:            template,
+			Namespace:           cfg.RunnerNamespace,
+			RunnerImage:         cfg.RunnerImage,
+			JobTTL:              cfg.RunnerJobTTL,
+			DefaultRuntime:      cfg.DefaultTaskRuntime,
+			Poll:                cfg.WorkerPoll,
+			WorkerIdleExit:      cfg.WorkerIdleExit,
+			AgentProvider:       cfg.AgentProvider,
+			AgentCLIPath:        cfg.AgentCLIPath,
+			AgentModel:          cfg.AgentModel,
+			PermissionMode:      cfg.AgentPermissionMode,
+			AgentCLIVersion:     cfg.AgentCLIVersion,
+			ConflictLLMEnabled:  cfg.ConflictLLMEnabled,
+			ConflictLLMProvider: cfg.ConflictLLMProvider,
+			ConflictLLMModel:    cfg.ConflictLLMModel,
+			OTLPEndpoint:        cfg.OTLPEndpoint,
+			GitHubAPIBase:       cfg.GitHubAPIBaseURL,
 		}, nil
 	}
 
@@ -175,10 +178,20 @@ func buildBackend(cfg config.Config, db *sql.DB, store *runner.Store, tasks *tas
 		}
 		publishAPI = client
 		repos = github.NewStore(db)
+		semantic, err := conflict.NewSemantic(conflict.SemanticOptions{
+			Enabled:  cfg.ConflictLLMEnabled,
+			Provider: cfg.ConflictLLMProvider,
+			APIKey:   cfg.AnthropicAPIKey,
+			Model:    cfg.ConflictLLMModel,
+		})
+		if err != nil {
+			return nil, err
+		}
 		conflicts = &conflict.Detector{
-			Git:     workspaces,
-			Records: conflict.NewStore(db),
-			Logger:  logger,
+			Git:      workspaces,
+			Records:  conflict.NewStore(db),
+			Logger:   logger,
+			Semantic: semantic,
 		}
 	}
 

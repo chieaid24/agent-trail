@@ -122,6 +122,9 @@ render deploy/k8s/runner/controller.yaml \
   "AGENT_MODEL=fake-model" \
   "AGENT_PERMISSION_MODE=acceptEdits" \
   "AGENT_CLI_VERSION=unused" \
+  "CONFLICT_LLM_ENABLED=false" \
+  "CONFLICT_LLM_PROVIDER=fake" \
+  "CONFLICT_LLM_MODEL=claude-sonnet-4-6" \
   "OTEL_EXPORTER_OTLP_ENDPOINT=off" \
   "GITHUB_API_BASE_URL=http://fixture.agent-trail-local.svc.cluster.local:8080" \
   | "${KUBECTL[@]}" apply -f - >/dev/null

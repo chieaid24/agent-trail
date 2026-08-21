@@ -15,6 +15,7 @@ type GitOps interface {
 	HasCommit(ctx context.Context, repo gitworkspace.RepoRef, sha string) (bool, error)
 	ChangedFiles(ctx context.Context, repo gitworkspace.RepoRef, base, head string) ([]string, error)
 	DiffHunks(ctx context.Context, repo gitworkspace.RepoRef, base, head string) (map[string][]gitworkspace.LineRange, error)
+	Diff(ctx context.Context, repo gitworkspace.RepoRef, base, head string) (string, error)
 	MergeTree(ctx context.Context, repo gitworkspace.RepoRef, commitA, commitB string) (bool, []string, error)
 }
 
@@ -26,13 +27,14 @@ type Records interface {
 
 // Detector compares and stores active-task overlaps.
 type Detector struct {
-	Git     GitOps
-	Records Records
-	Logger  *slog.Logger
+	Git      GitOps
+	Records  Records
+	Logger   *slog.Logger
+	Semantic SemanticAssessor
 }
 
 // Detect refreshes taskID's warnings against active siblings.
-func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, repositoryID, taskID, base, final string) ([]Detection, error) {
+func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, repositoryID, taskID, taskTitle, base, final string) ([]Detection, error) {
 	siblings, err := d.Records.ActiveSiblings(ctx, repositoryID, taskID)
 	if err != nil {
 		return nil, err
@@ -47,6 +49,13 @@ func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, reposi
 	self, err := d.changeSet(ctx, repo, base, final)
 	if err != nil {
 		return nil, err
+	}
+	var selfDiff string
+	if d.Semantic != nil {
+		selfDiff, err = d.Git.Diff(ctx, repo, base, final)
+		if err != nil {
+			d.logSemanticFailure(ctx, taskID, "", err)
+		}
 	}
 
 	var detections []Detection
@@ -80,12 +89,38 @@ func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, reposi
 			files = mergeSorted(files, conflicted)
 		}
 
+		var semantic SemanticVerdict
+		if d.Semantic != nil && selfDiff != "" {
+			otherDiff, diffErr := d.Git.Diff(ctx, repo, sib.BaseSHA, sib.FinalSHA)
+			if diffErr != nil {
+				d.logSemanticFailure(ctx, taskID, sib.TaskID, diffErr)
+			} else {
+				semantic, diffErr = d.Semantic.Assess(ctx, SemanticRequest{
+					TaskID: taskID, TaskTitle: taskTitle, TaskDiff: selfDiff,
+					OtherTaskID: sib.TaskID, OtherTaskTitle: sib.Title, OtherTaskDiff: otherDiff,
+				})
+				if diffErr == nil {
+					diffErr = validateVerdict(semantic)
+				}
+				if diffErr != nil {
+					d.logSemanticFailure(ctx, taskID, sib.TaskID, diffErr)
+					semantic = SemanticVerdict{}
+				}
+			}
+		}
+		if semantic.Conflicts {
+			kinds = append(kinds, KindSemantic)
+		}
+
 		if len(kinds) > 0 {
 			detections = append(detections, Detection{
-				OtherTaskID:    sib.TaskID,
-				OtherTaskTitle: sib.Title,
-				Kinds:          kinds,
-				Files:          files,
+				OtherTaskID:         sib.TaskID,
+				OtherTaskTitle:      sib.Title,
+				Kinds:               kinds,
+				Files:               files,
+				SemanticSeverity:    semantic.Severity,
+				SemanticExplanation: semantic.Explanation,
+				SemanticEvidence:    semantic.Evidence,
 			})
 		}
 	}
@@ -93,6 +128,19 @@ func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, reposi
 		return nil, err
 	}
 	return detections, nil
+}
+
+func (d *Detector) logSemanticFailure(ctx context.Context, taskID, siblingTaskID string, err error) {
+	if d.Logger == nil {
+		return
+	}
+	d.Logger.LogAttrs(ctx, slog.LevelWarn, "semantic conflict detection failed",
+		slog.String("event", "semantic_conflict_detection_failed"),
+		slog.String("trace_id", observability.TraceIDFrom(ctx)),
+		slog.String("task_id", taskID),
+		slog.String("sibling_task_id", siblingTaskID),
+		slog.String("error", err.Error()),
+	)
 }
 
 func (d *Detector) changeSet(ctx context.Context, repo gitworkspace.RepoRef, base, final string) (ChangeSet, error) {

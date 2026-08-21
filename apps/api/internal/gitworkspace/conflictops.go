@@ -88,6 +88,22 @@ func (m *Manager) DiffHunks(ctx context.Context, repo RepoRef, base, head string
 	return parseHunks(out)
 }
 
+// Diff returns the patch between two commits without rename detection.
+func (m *Manager) Diff(ctx context.Context, repo RepoRef, base, head string) (string, error) {
+	mirror, err := m.diffTarget(repo, base, head)
+	if err != nil {
+		return "", err
+	}
+	lock := m.lockFor(repo.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	out, err := m.git.run(ctx, mirror, "diff", "--unified=3", "--no-renames", base, head)
+	if err != nil {
+		return "", fmt.Errorf("gitworkspace: diff: %w", err)
+	}
+	return out, nil
+}
+
 // MergeTree reports whether two commits merge and names conflicted paths.
 func (m *Manager) MergeTree(ctx context.Context, repo RepoRef, commitA, commitB string) (bool, []string, error) {
 	mirror, err := m.diffTarget(repo, commitA, commitB)

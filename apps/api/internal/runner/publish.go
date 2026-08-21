@@ -449,7 +449,7 @@ func (e *Executor) detectConflicts(ctx context.Context, log *slog.Logger, c *Cla
 	}
 	detector := *e.Conflicts
 	detector.Logger = log
-	detections, err := detector.Detect(ctx, repo, *t.RepositoryID, t.ID, baseSHA, finalSHA)
+	detections, err := detector.Detect(ctx, repo, *t.RepositoryID, t.ID, t.Title, baseSHA, finalSHA)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -462,10 +462,13 @@ func (e *Executor) detectConflicts(ctx context.Context, log *slog.Logger, c *Cla
 	}
 	for _, det := range detections {
 		if err := e.append(ctx, c, "conflict.detected", "runner", map[string]any{
-			"other_task_id":    det.OtherTaskID,
-			"other_task_title": det.OtherTaskTitle,
-			"kinds":            det.Kinds,
-			"files":            det.Files,
+			"other_task_id":        det.OtherTaskID,
+			"other_task_title":     det.OtherTaskTitle,
+			"kinds":                det.Kinds,
+			"files":                det.Files,
+			"semantic_severity":    det.SemanticSeverity,
+			"semantic_explanation": det.SemanticExplanation,
+			"semantic_evidence":    det.SemanticEvidence,
 		}); err != nil {
 			return err
 		}

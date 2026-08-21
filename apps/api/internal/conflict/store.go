@@ -127,12 +127,31 @@ func (s *Store) Reconcile(ctx context.Context, repositoryID, taskID string, dete
 		if err != nil {
 			return fmt.Errorf("conflict: encode files: %w", err)
 		}
+		evidence := detection.SemanticEvidence
+		if evidence == nil {
+			evidence = []string{}
+		}
+		evidenceJSON, err := json.Marshal(evidence)
+		if err != nil {
+			return fmt.Errorf("conflict: encode semantic evidence: %w", err)
+		}
+		var severity, explanation any
+		if detection.SemanticSeverity != "" {
+			severity = detection.SemanticSeverity
+			explanation = detection.SemanticExplanation
+		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO task_conflicts (repository_id, task_a_id, task_b_id, kinds, files)
-			VALUES ($1, LEAST($2::uuid, $3::uuid), GREATEST($2::uuid, $3::uuid), $4, $5)
+			INSERT INTO task_conflicts (repository_id, task_a_id, task_b_id, kinds, files,
+				semantic_severity, semantic_explanation, semantic_evidence)
+			VALUES ($1, LEAST($2::uuid, $3::uuid), GREATEST($2::uuid, $3::uuid),
+				$4, $5, $6, $7, $8)
 			ON CONFLICT ON CONSTRAINT task_conflicts_pair_key
 			DO UPDATE SET kinds = EXCLUDED.kinds, files = EXCLUDED.files,
-				updated_at = now()`, repositoryID, taskID, otherTaskID, kindsJSON, filesJSON); err != nil {
+				semantic_severity = EXCLUDED.semantic_severity,
+				semantic_explanation = EXCLUDED.semantic_explanation,
+				semantic_evidence = EXCLUDED.semantic_evidence,
+				updated_at = now()`, repositoryID, taskID, otherTaskID, kindsJSON, filesJSON,
+			severity, explanation, evidenceJSON); err != nil {
 			return fmt.Errorf("conflict: upsert pair: %w", err)
 		}
 	}
@@ -153,7 +172,9 @@ func (s *Store) ListForTask(ctx context.Context, taskID string) ([]TaskConflict,
 		return nil, task.ErrNotFound
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT c.id, o.id, o.title, c.kinds, c.files, c.detected_at, c.updated_at
+		SELECT c.id, o.id, o.title, c.kinds, c.files,
+			COALESCE(c.semantic_severity, ''), COALESCE(c.semantic_explanation, ''),
+			c.semantic_evidence, c.detected_at, c.updated_at
 		FROM task_conflicts c
 		JOIN tasks self ON self.id = $1
 		JOIN tasks o ON o.id = CASE WHEN c.task_a_id = $1
@@ -169,9 +190,10 @@ func (s *Store) ListForTask(ctx context.Context, taskID string) ([]TaskConflict,
 	conflicts := []TaskConflict{}
 	for rows.Next() {
 		var tc TaskConflict
-		var kindsJSON, filesJSON []byte
+		var kindsJSON, filesJSON, evidenceJSON []byte
 		if err := rows.Scan(&tc.ID, &tc.OtherTaskID, &tc.OtherTaskTitle,
-			&kindsJSON, &filesJSON, &tc.DetectedAt, &tc.UpdatedAt); err != nil {
+			&kindsJSON, &filesJSON, &tc.SemanticSeverity, &tc.SemanticExplanation,
+			&evidenceJSON, &tc.DetectedAt, &tc.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("conflict: scan conflict: %w", err)
 		}
 		if err := json.Unmarshal(kindsJSON, &tc.Kinds); err != nil {
@@ -179,6 +201,9 @@ func (s *Store) ListForTask(ctx context.Context, taskID string) ([]TaskConflict,
 		}
 		if err := json.Unmarshal(filesJSON, &tc.Files); err != nil {
 			return nil, fmt.Errorf("conflict: decode files: %w", err)
+		}
+		if err := json.Unmarshal(evidenceJSON, &tc.SemanticEvidence); err != nil {
+			return nil, fmt.Errorf("conflict: decode semantic evidence: %w", err)
 		}
 		conflicts = append(conflicts, tc)
 	}

@@ -28,24 +28,27 @@ const (
 
 // KubernetesBackend schedules one Kubernetes Job per dispatchable attempt.
 type KubernetesBackend struct {
-	Jobs            batchclient.JobInterface
-	Store           *Store
-	Tasks           *task.Store
-	Logger          *slog.Logger
-	Template        []byte
-	Namespace       string
-	RunnerImage     string
-	JobTTL          time.Duration
-	DefaultRuntime  time.Duration
-	Poll            time.Duration
-	WorkerIdleExit  time.Duration
-	AgentProvider   string
-	AgentCLIPath    string
-	AgentModel      string
-	PermissionMode  string
-	AgentCLIVersion string
-	OTLPEndpoint    string
-	GitHubAPIBase   string
+	Jobs                batchclient.JobInterface
+	Store               *Store
+	Tasks               *task.Store
+	Logger              *slog.Logger
+	Template            []byte
+	Namespace           string
+	RunnerImage         string
+	JobTTL              time.Duration
+	DefaultRuntime      time.Duration
+	Poll                time.Duration
+	WorkerIdleExit      time.Duration
+	AgentProvider       string
+	AgentCLIPath        string
+	AgentModel          string
+	PermissionMode      string
+	AgentCLIVersion     string
+	ConflictLLMEnabled  bool
+	ConflictLLMProvider string
+	ConflictLLMModel    string
+	OTLPEndpoint        string
+	GitHubAPIBase       string
 
 	observed map[string]string
 }
@@ -254,6 +257,9 @@ func (b *KubernetesBackend) jobFor(attempt DispatchAttempt) (*batchapi.Job, erro
 		"AGENT_MODEL":                 {b.AgentModel, false},
 		"AGENT_PERMISSION_MODE":       {b.PermissionMode, false},
 		"AGENT_CLI_VERSION":           {b.AgentCLIVersion, false},
+		"CONFLICT_LLM_ENABLED":        {strconv.FormatBool(b.ConflictLLMEnabled), false},
+		"CONFLICT_LLM_PROVIDER":       {b.ConflictLLMProvider, false},
+		"CONFLICT_LLM_MODEL":          {b.ConflictLLMModel, false},
 		"OTEL_EXPORTER_OTLP_ENDPOINT": {b.OTLPEndpoint, false},
 		"GITHUB_API_BASE_URL":         {b.GitHubAPIBase, false},
 	}

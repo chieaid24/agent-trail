@@ -37,22 +37,25 @@ func testKubernetesBackend(t *testing.T) (*KubernetesBackend, *fake.Clientset, s
 	tk := mustCreateTask(t, tasks)
 	client := fake.NewSimpleClientset()
 	backend := &KubernetesBackend{
-		Jobs:           client.BatchV1().Jobs("agent-trail-runners"),
-		Store:          store,
-		Tasks:          tasks,
-		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Template:       testJobTemplate(t),
-		Namespace:      "agent-trail-runners",
-		RunnerImage:    "agent-trail/runner:test",
-		JobTTL:         5 * time.Minute,
-		DefaultRuntime: 45 * time.Minute,
-		Poll:           20 * time.Millisecond,
-		WorkerIdleExit: 2 * time.Minute,
-		AgentProvider:  "fake",
-		AgentCLIPath:   "claude",
-		PermissionMode: "acceptEdits",
-		OTLPEndpoint:   "off",
-		GitHubAPIBase:  "http://fixture:8080",
+		Jobs:                client.BatchV1().Jobs("agent-trail-runners"),
+		Store:               store,
+		Tasks:               tasks,
+		Logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Template:            testJobTemplate(t),
+		Namespace:           "agent-trail-runners",
+		RunnerImage:         "agent-trail/runner:test",
+		JobTTL:              5 * time.Minute,
+		DefaultRuntime:      45 * time.Minute,
+		Poll:                20 * time.Millisecond,
+		WorkerIdleExit:      2 * time.Minute,
+		AgentProvider:       "fake",
+		AgentCLIPath:        "claude",
+		PermissionMode:      "acceptEdits",
+		ConflictLLMEnabled:  true,
+		ConflictLLMProvider: "fake",
+		ConflictLLMModel:    "pinned-model",
+		OTLPEndpoint:        "off",
+		GitHubAPIBase:       "http://fixture:8080",
 	}
 	return backend, client, tk.ID
 }
@@ -97,6 +100,10 @@ func TestKubernetesBackendCreatesOneHardenedJobPerAttempt(t *testing.T) {
 	}
 	if env["TASK_ATTEMPT_ID"] != job.Labels[attemptIDLabel] || env["RUNNER_TYPE"] != "kubernetes" {
 		t.Errorf("target env = %v", env)
+	}
+	if env["CONFLICT_LLM_ENABLED"] != "true" ||
+		env["CONFLICT_LLM_PROVIDER"] != "fake" || env["CONFLICT_LLM_MODEL"] != "pinned-model" {
+		t.Errorf("semantic conflict env = %v", env)
 	}
 	assertSubsequence(t, timelineTypes(t, backend.Tasks, taskID), []string{"runner.job_created"})
 }
@@ -164,6 +171,8 @@ func TestControllerManifestRenders(t *testing.T) {
 		"WORKER_IDLE_EXIT_SECONDS": "120", "AGENT_PROVIDER": "fake",
 		"AGENT_CLI_PATH": "claude", "AGENT_MODEL": "fake-model",
 		"AGENT_PERMISSION_MODE": "acceptEdits", "AGENT_CLI_VERSION": "unused",
+		"CONFLICT_LLM_ENABLED": "false", "CONFLICT_LLM_PROVIDER": "fake",
+		"CONFLICT_LLM_MODEL":          "claude-sonnet-4-6",
 		"OTEL_EXPORTER_OTLP_ENDPOINT": "off", "GITHUB_API_BASE_URL": "http://fixture:8080",
 	} {
 		rendered = strings.ReplaceAll(rendered, "${"+key+"}", value)

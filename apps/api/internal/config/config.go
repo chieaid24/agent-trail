@@ -98,6 +98,14 @@ type Config struct {
 	// AgentCLIVersion, when set, pins the CLI version: it must appear in
 	// `claude --version` or the worker refuses to start (AGENT_CLI_VERSION).
 	AgentCLIVersion string
+	// ConflictLLMEnabled is the hard switch for semantic conflict analysis.
+	ConflictLLMEnabled bool
+	// ConflictLLMProvider selects "fake" or "anthropic".
+	ConflictLLMProvider string
+	// ConflictLLMModel is the pinned Anthropic model identifier.
+	ConflictLLMModel string
+	// AnthropicAPIKey is read from the environment and never logged.
+	AnthropicAPIKey string
 	// OTLPEndpoint is the plaintext OTLP/gRPC target; "off" disables export.
 	OTLPEndpoint string
 }
@@ -133,6 +141,9 @@ func Load() (Config, error) {
 		AgentModel:              os.Getenv("AGENT_MODEL"),
 		AgentPermissionMode:     envOr("AGENT_PERMISSION_MODE", "acceptEdits"),
 		AgentCLIVersion:         os.Getenv("AGENT_CLI_VERSION"),
+		ConflictLLMProvider:     envOr("CONFLICT_LLM_PROVIDER", "fake"),
+		ConflictLLMModel:        envOr("CONFLICT_LLM_MODEL", "claude-sonnet-4-6"),
+		AnthropicAPIKey:         os.Getenv("ANTHROPIC_API_KEY"),
 		OTLPEndpoint:            envOr("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
 	}
 
@@ -153,6 +164,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.AuthCookieSecure = secure
+	conflictLLMEnabled, err := envBool("CONFLICT_LLM_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.ConflictLLMEnabled = conflictLLMEnabled
 	switch cfg.RunnerType {
 	case "process", "kubernetes":
 	default:
@@ -185,6 +201,12 @@ func Load() (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("AGENT_PROVIDER %q: want fake or claude-code",
 			cfg.AgentProvider)
+	}
+	switch cfg.ConflictLLMProvider {
+	case "fake", "anthropic":
+	default:
+		return Config{}, fmt.Errorf("CONFLICT_LLM_PROVIDER %q: want fake or anthropic",
+			cfg.ConflictLLMProvider)
 	}
 	switch cfg.AgentPermissionMode {
 	case "default", "acceptEdits", "plan", "bypassPermissions":
