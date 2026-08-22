@@ -1,6 +1,3 @@
-// Process helpers for the harness: daemons logging into the artifacts dir,
-// polling waits, and the restart used by the reconnection spec.
-
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -44,9 +41,7 @@ export function processAlive(pid: number): boolean {
   }
 }
 
-// SIGTERM and wait for exit; the pid belongs to this harness alone. A
-// process that ignores the term deadline is force-killed so one hung
-// daemon cannot wedge the suite.
+// force-kill after term deadline so one hung daemon cannot wedge the suite
 export async function stopProcess(pid: number): Promise<void> {
   if (!processAlive(pid)) return;
   try {

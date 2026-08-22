@@ -1,6 +1,3 @@
-// Screenshot helper for the audit: named, full-page shots at the
-// two mandated viewports (1280 primary, 1024 functional floor).
-
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { screenshotsDir } from "./env";

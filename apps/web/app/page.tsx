@@ -38,7 +38,7 @@ export default function Home() {
       const message =
         err instanceof ApiError ? err.message : "unexpected failure";
       setState((prev) =>
-        // Keep showing data through a transient poll failure.
+        // keep showing data through a transient poll failure
         prev.phase === "ready" ? prev : { phase: "error", message },
       );
     }
@@ -215,8 +215,6 @@ function OperationalEmpty({
   );
 }
 
-// One quiet sentence of computed facts; deliberately not metric cards.
-// At the fetch cap the figures describe a truncated window and say so.
 function Summary({ tasks }: { tasks: Task[] }) {
   const s = overviewStats(tasks);
   const atCap = tasks.length >= 200;

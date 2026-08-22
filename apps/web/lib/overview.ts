@@ -1,6 +1,3 @@
-// Pure grouping and stats for the dashboard overview. Every number is
-// computed from the fetched task list; nothing is invented.
-
 import type { Task } from "./types";
 
 export type GroupKey = "running" | "review" | "queued" | "finished";
@@ -26,8 +23,6 @@ function groupKey(t: Task): GroupKey {
 
 const mtime = (v: string | null) => (v ? new Date(v).getTime() : 0);
 
-// groupTasks orders groups by operator attention: what runs now, what waits
-// on review, what is queued, what finished.
 export function groupTasks(tasks: Task[]): OverviewGroup[] {
   const groups: Record<GroupKey, Task[]> = {
     running: [],
@@ -39,7 +34,6 @@ export function groupTasks(tasks: Task[]): OverviewGroup[] {
 
   groups.running.sort((a, b) => mtime(b.started_at) - mtime(a.started_at));
   groups.review.sort((a, b) => mtime(b.updated_at) - mtime(a.updated_at));
-  // Queue order: higher priority first, then oldest first.
   groups.queued.sort(
     (a, b) =>
       b.priority - a.priority || mtime(a.created_at) - mtime(b.created_at),
@@ -60,12 +54,8 @@ export interface OverviewStats {
   review: number;
   queued: number;
   failed: number;
-  // completed / (completed + failed + timed_out); cancellation is an
-  // operator choice, not an outcome, so it is excluded. Null until an
-  // outcome exists.
+  // completed / (completed + failed + timed_out); cancelled is not an outcome
   completionRate: number | null;
-  // Median runtime of finished tasks with measured bounds. Null until one
-  // exists.
   medianRuntimeMs: number | null;
 }
 

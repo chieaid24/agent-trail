@@ -1,9 +1,3 @@
-// Boots the full stack for the e2e suite: a dedicated postgres (compose
-// project namespaced away from dev infra), migrations, seed data, and the
-// api + fake-adapter worker as real processes. The worker executes the
-// seeded queued task, so specs run against a genuinely executed timeline
-// with trusted validation results and an evidence report.
-
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -23,7 +17,6 @@ import {
 } from "./env";
 import { spawnDaemon, waitFor } from "./procs";
 
-// The seeded task the worker picks up and drives to completion.
 export const EXECUTED_TASK_TITLE = "Add pagination to the audit log";
 
 function compose(...args: string[]): void {
@@ -39,7 +32,7 @@ export default async function globalSetup(): Promise<void> {
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(screenshotsDir, { recursive: true });
 
-  // Fresh database every run; the seed refuses a non-empty one.
+  // fresh database every run; the seed refuses a non-empty one
   compose("down", "-v", "--remove-orphans");
   compose("up", "-d", "--wait", "postgres");
 
@@ -58,8 +51,6 @@ export default async function globalSetup(): Promise<void> {
   execFileSync(path.join(binDir, "migrate"), ["up"], { env: dbEnv });
   execFileSync(path.join(binDir, "seed"), [], { env: dbEnv });
 
-  // The suite runs with the session layer on: the api's GitHub base URLs
-  // point at the local fake, and every spec carries the session minted below.
   const fakeGithub = spawnDaemon(process.execPath, "fake-github.log", {}, [
     path.join(webDir, "e2e", "harness", "fake-github.mjs"),
     String(E2E.fakeGithubPort),
@@ -101,10 +92,7 @@ export default async function globalSetup(): Promise<void> {
     sessionCookie,
   });
 
-  // The fake adapter finishes in seconds. The worker takes the seeded
-  // queued task and also recovers the seeded mid-flight one, so wait until
-  // Awaiting-review seed tasks are settled and remain unclaimed. The tasks
-  // read authenticates like every spec.
+  // wait until the worker settles every seeded task, including the recovered mid-flight one
   const settled = new Set([
     "completed",
     "failed",
@@ -128,11 +116,7 @@ export default async function globalSetup(): Promise<void> {
   });
 }
 
-// Drives the OAuth flow against the api and the fake GitHub with plain
-// fetches (the web server is not up yet), returning the session token.
-// The callback is called on the api directly rather than through the
-// /backend proxy the browser would use; the api never checks which host
-// carried the request, only the state cookie and the code.
+// plain fetches straight at the api; web server is not up yet
 async function loginThroughFakeGitHub(): Promise<string> {
   const start = await fetch(`${apiBaseUrl}/auth/github/start`, {
     redirect: "manual",
@@ -180,8 +164,6 @@ function readCookie(res: Response, name: string): string | null {
   return null;
 }
 
-// Playwright storage state: every browser context starts signed in; the
-// signed-out specs opt out with an empty storageState.
 function writeStorageState(sessionCookie: string): void {
   fs.writeFileSync(
     storageStatePath,

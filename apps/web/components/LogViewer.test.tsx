@@ -32,7 +32,6 @@ test("windows long transcripts instead of rendering every line", () => {
   render(<LogViewer events={events} />);
 
   expect(screen.getByText("500 lines")).toBeDefined();
-  // The window starts at the top: early lines are mounted, the tail is not.
   expect(screen.getByText("line 0")).toBeDefined();
   expect(screen.queryByText("line 499")).toBeNull();
 });

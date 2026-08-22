@@ -4,9 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { deriveLogLines, filterLogLines, type LogLine } from "@/lib/logs";
 import type { ActivityEvent } from "@/lib/types";
 
-// Virtualized terminal-style log viewer (mono 13px, follow mode
-// pinned to bottom, visible redaction markers). Windowing is hand-rolled:
-// fixed row height, spacer above and below the rendered slice.
 const ROW_HEIGHT = 20;
 const OVERSCAN = 20;
 const PANE_HEIGHT = 480;
@@ -23,8 +20,6 @@ export function LogViewer({ events }: { events: ActivityEvent[] }) {
   const [follow, setFollow] = useState(true);
   const [scrollTop, setScrollTop] = useState(0);
 
-  // Follow mode pins the pane to the bottom on every new line, with no
-  // animation.
   useEffect(() => {
     const pane = paneRef.current;
     if (follow && pane) pane.scrollTop = pane.scrollHeight;
@@ -36,7 +31,6 @@ export function LogViewer({ events }: { events: ActivityEvent[] }) {
     setScrollTop(pane.scrollTop);
     const atBottom =
       pane.scrollHeight - pane.scrollTop - pane.clientHeight < ROW_HEIGHT;
-    // Scrolling away releases follow; returning to the bottom re-arms it.
     setFollow(atBottom);
   };
 

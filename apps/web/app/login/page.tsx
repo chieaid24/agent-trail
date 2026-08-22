@@ -4,8 +4,6 @@ import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { LOGIN_URL } from "@/lib/api";
 
-// Callback failures land here as ?error=<code>; the codes are the API's
-// (apps/api/internal/httpapi/auth.go), details stay in the server logs.
 const errorMessages: Record<string, string> = {
   state_mismatch: "The sign-in attempt expired or did not match. Try again.",
   github_denied: "GitHub denied the authorization request.",

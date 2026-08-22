@@ -6,16 +6,13 @@ import { useEffect, useState } from "react";
 import { ApiError, getMe, logout } from "@/lib/api";
 import type { CurrentUser } from "@/lib/types";
 
-// The session user, or null while loading, signed out, or with auth not
-// configured (a /me 503); the chip simply hides in the null states and
-// api.ts redirects 401s to /login.
 function useCurrentUser(): CurrentUser | null {
   const [user, setUser] = useState<CurrentUser | null>(null);
   useEffect(() => {
     let cancelled = false;
     getMe()
       .then((me) => {
-        // Guard the shape: a proxy misroute must degrade, not crash.
+        // shape guard: proxy misroute must degrade, not crash
         if (!cancelled && typeof me?.user?.github_login === "string") {
           setUser(me.user);
         }
@@ -28,8 +25,6 @@ function useCurrentUser(): CurrentUser | null {
   return user;
 }
 
-// Fixed-sidebar app shell (container policy). Every screen
-// renders inside it; the main region owns scrolling.
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   const user = useCurrentUser();
@@ -89,7 +84,6 @@ function UserChip({ user }: { user: CurrentUser }) {
     <div>
       <div className="flex items-center gap-2">
         {user.avatar_url !== "" && (
-          // GitHub-hosted avatar; the image pipeline buys nothing at 24px.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={user.avatar_url}

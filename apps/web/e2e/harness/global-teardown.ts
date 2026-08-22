@@ -10,7 +10,7 @@ export default async function globalTeardown(): Promise<void> {
       workerPid?: number;
       fakeGithubPid?: number;
     };
-    // Only pids this harness spawned and recorded; never kill by name.
+    // only pids this harness spawned and recorded; never kill by name
     if (state.apiPid) await stopProcess(state.apiPid);
     if (state.workerPid) await stopProcess(state.workerPid);
     if (state.fakeGithubPid) await stopProcess(state.fakeGithubPid);

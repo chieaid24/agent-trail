@@ -65,6 +65,5 @@ test("a rejected cancel surfaces the server error inline", async () => {
   expect(
     await screen.findByText("Cancel failed: invalid transition."),
   ).toBeDefined();
-  // The idle control returns so the user can retry.
   expect(screen.getByRole("button", { name: "Cancel task" })).toBeDefined();
 });

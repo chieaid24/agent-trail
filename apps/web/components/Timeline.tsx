@@ -5,12 +5,8 @@ import { formatTime } from "@/lib/format";
 import { describeEvent } from "@/lib/timeline";
 import type { ActivityEvent } from "@/lib/types";
 
-// Live activity timeline, newest first so the latest state is visible
-// without scrolling. Rows that arrive after mount fade in with a background
-// tint (globals.css .row-appear).
 export function Timeline({ events }: { events: ActivityEvent[] }) {
-  // Cursor of the newest event present at first render; anything after it
-  // animates. The boundary must not move on re-render.
+  // rows after this cursor animate; boundary must not move on re-render
   const [initialCursor] = useState(() => {
     const last = events[events.length - 1];
     return last ? `${last.attempt_number}:${last.sequence_number}` : "";

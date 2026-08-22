@@ -4,9 +4,7 @@ import { readState, writeState } from "./harness/env";
 import { shoot } from "./harness/shots";
 import { stopProcess } from "./harness/procs";
 
-// Cancellation with inline confirmation. The worker is stopped first so the
-// created task stays queued and the flow is deterministic; later specs run
-// without a worker on purpose.
+// worker stopped so the task stays queued; later specs run workerless on purpose
 test("a queued task cancels after inline confirmation", async ({ page }) => {
   const state = readState();
   await stopProcess(state.workerPid);
@@ -19,16 +17,13 @@ test("a queued task cancels after inline confirmation", async ({ page }) => {
   await page.goto(`/tasks/${created.id}`);
   await expect(page.getByText("queued", { exact: true })).toBeVisible();
 
-  // First click arms the inline confirmation; nothing is cancelled yet.
   await page.getByRole("button", { name: "Cancel task" }).click();
   await expect(page.getByText("Cancel this task?")).toBeVisible();
   await shoot(page, "task-detail-cancel-confirm");
 
-  // Backing out returns to the idle control.
   await page.getByRole("button", { name: "Keep running" }).click();
   await expect(page.getByRole("button", { name: "Cancel task" })).toBeVisible();
 
-  // Confirming with a reason cancels and the timeline records it.
   await page.getByRole("button", { name: "Cancel task" }).click();
   await page.getByLabel("Cancellation reason").fill("e2e cancellation drill");
   await page.getByRole("button", { name: "Confirm cancel" }).click();

@@ -1,17 +1,11 @@
-// Pure derivation of terminal log lines from activity events. The platform
-// has no separate log store yet;
-// the transcript is rebuilt from command.* events.
-
 import type { ActivityEvent } from "./types";
 
 export type LogStream = "command" | "stdout" | "stderr" | "system";
 
 export interface LogLine {
-  // Stable key for list rendering: event id plus line index within it.
   key: string;
   stream: LogStream;
   text: string;
-  // Redacted lines render a visible marker, never a silent gap.
   redacted: boolean;
 }
 
@@ -32,8 +26,6 @@ function commandText(payload: Record<string, unknown>): string {
   return command;
 }
 
-// deriveLogLines rebuilds the terminal transcript: one `$` line per started
-// command, its output chunks split into lines, and its exit code.
 export function deriveLogLines(events: ActivityEvent[]): LogLine[] {
   const lines: LogLine[] = [];
   for (const e of events) {
@@ -55,8 +47,7 @@ export function deriveLogLines(events: ActivityEvent[]): LogLine[] {
         const stream: LogStream =
           str(e.payload, "stream") === "stderr" ? "stderr" : "stdout";
         const chunk = str(e.payload, "chunk") ?? "";
-        // A trailing newline ends the last line instead of opening an
-        // empty one.
+        // trailing newline ends last line, not an empty extra one
         const chunkLines = chunk.replace(/\n$/, "").split("\n");
         for (const [i, text] of chunkLines.entries()) {
           lines.push({ key: `${e.id}:${i}`, stream, text, redacted });
@@ -82,8 +73,6 @@ export function deriveLogLines(events: ActivityEvent[]): LogLine[] {
   return lines;
 }
 
-// filterLogLines is the log search: case-insensitive substring match.
-// Redacted lines never match text but stay visible when the query is empty.
 export function filterLogLines(lines: LogLine[], query: string): LogLine[] {
   const q = query.trim().toLowerCase();
   if (q === "") return lines;

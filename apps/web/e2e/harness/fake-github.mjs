@@ -1,8 +1,4 @@
-// Minimal fake of the two GitHub hosts the auth flow touches: github.com
-// (authorize redirect, code exchange) and api.github.com (user, user
-// installations). Runs as a harness daemon; the api points both base URLs
-// here. Account 118775203 mirrors cmd/seed so membership sync matches the
-// seeded organization.
+// fakes github.com + api.github.com; account 118775203 mirrors cmd/seed
 
 import http from "node:http";
 
