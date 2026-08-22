@@ -143,6 +143,6 @@ module "github_oidc_ci" {
   ecs_cluster_name = module.control_plane.cluster_name
   ecs_service_name = module.control_plane.service_name
 
-  # dev already created the account-wide GitHub OIDC provider.
+  # dev already created the account-wide github oidc provider
   create_oidc_provider = false
 }

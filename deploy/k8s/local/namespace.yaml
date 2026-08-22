@@ -1,6 +1,4 @@
-# Local verification stack (postgres + GitHub fixture). Baseline profile:
-# the postgres image needs more freedom than restricted allows; the runner
-# namespace is the one that enforces restricted.
+# baseline psa: the postgres image cannot run restricted
 apiVersion: v1
 kind: Namespace
 metadata:

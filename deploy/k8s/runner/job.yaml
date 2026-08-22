@@ -1,12 +1,4 @@
-# Hardened one-shot runner Job. The
-# worker claims one task attempt from the queue, executes it with the
-# configured agent, publishes, and exits; ttlSecondsAfterFinished then
-# reclaims the Job and its pod. envsubst variables: JOB_NAME,
-# TASK_ATTEMPT_ID, RUNNER_IMAGE,
-# TTL_SECONDS, ACTIVE_DEADLINE_SECONDS, GITHUB_API_BASE_URL,
-# WORKER_IDLE_EXIT_SECONDS, AGENT_PROVIDER, AGENT_CLI_PATH, AGENT_MODEL,
-# AGENT_PERMISSION_MODE, AGENT_CLI_VERSION, OTEL_EXPORTER_OTLP_ENDPOINT.
-# CONFLICT_LLM_ENABLED, CONFLICT_LLM_PROVIDER, CONFLICT_LLM_MODEL.
+# render vars: JOB_NAME TASK_ATTEMPT_ID RUNNER_IMAGE TTL_SECONDS ACTIVE_DEADLINE_SECONDS GITHUB_API_BASE_URL WORKER_IDLE_EXIT_SECONDS AGENT_PROVIDER AGENT_CLI_PATH AGENT_MODEL AGENT_PERMISSION_MODE AGENT_CLI_VERSION OTEL_EXPORTER_OTLP_ENDPOINT CONFLICT_LLM_ENABLED CONFLICT_LLM_PROVIDER CONFLICT_LLM_MODEL
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -34,7 +26,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
-        # Group-owns the secret volume so the 0440 key is readable.
+        # group-owns the secret volume so the 0440 key is readable
         fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault

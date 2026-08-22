@@ -7,7 +7,7 @@ resource "aws_ecr_repository" "this" {
 
   name = "${var.name}/${each.value}"
 
-  # Immutable tags: a runner Job always resolves to the exact image that was reviewed.
+  # immutable tags: jobs resolve the exact reviewed image
   image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {

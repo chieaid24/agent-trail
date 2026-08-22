@@ -1,9 +1,4 @@
-# Default posture for runner pods: no ingress, no egress. Every allowed
-# path is an explicit exception below or in an environment overlay.
-# deploy/k8s/local/networkpolicy.yaml allows the local verification stack;
-# each cloud environment must allow its database, artifact store, and git remotes.
-# Render KUBERNETES_API_CIDR as the API Service IP with a /32 mask.
-# Enforcement depends on the cluster's CNI.
+# render KUBERNETES_API_CIDR as the api service ip with a /32 mask; enforcement needs cni support
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

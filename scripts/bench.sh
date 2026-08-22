@@ -1,20 +1,5 @@
 #!/usr/bin/env bash
-# Reproducible benchmark and failure-injection run (issue: benchmarks and
-# failure injection; results in docs/testing/benchmark-results.md).
-#
-# Boots a dedicated Postgres (its own compose project and port, so parallel
-# dev stacks and lanes are untouched), migrates it, then runs the gated
-# tests in apps/api/internal/bench with AGENT_TRAIL_BENCH=1. The full-disk
-# injection additionally mounts a 1 MiB tmpfs and fills it, when
-# passwordless sudo is available; without it that one test skips.
-#
-#   scripts/bench.sh                 # full run
-#   BENCH_RUN=TestScheduler scripts/bench.sh   # one benchmark
-#   BENCH_KEEP=1 scripts/bench.sh    # keep the database up afterwards
-#
-# Ports/names are overridable for parallel lanes:
-#   BENCH_PROJECT (default agent-trail-bench)
-#   BENCH_POSTGRES_PORT (default 5493)
+# bench + failure injection on a dedicated postgres; full-disk test skips without passwordless sudo
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -50,8 +35,6 @@ POSTGRES_PORT="$PG_PORT" docker compose -p "$PROJECT" up -d --wait postgres
 log "migrating"
 (cd apps/api && DATABASE_URL="$DB_URL" go run ./cmd/migrate up)
 
-# Full-disk injection: a 1 MiB tmpfs filled to ENOSPC. Best effort - the
-# mount needs passwordless sudo; without it TestInjectFullDisk skips.
 if sudo -n true 2>/dev/null; then
   FULL_DISK_DIR="$(mktemp -d /tmp/agent-trail-bench-fulldisk.XXXXXX)"
   sudo -n mount -t tmpfs -o size=1m,mode=0777 tmpfs "$FULL_DISK_DIR"

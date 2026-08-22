@@ -24,8 +24,7 @@ resource "aws_vpc_security_group_ingress_rule" "postgres" {
   description                  = "Postgres from allowed security group"
 }
 
-# Master password lives in Secrets Manager, managed by RDS; Terraform state
-# never contains it and the control plane reads it at startup.
+# master password rds-managed in secrets manager, never in tf state
 resource "aws_db_instance" "this" {
   identifier = var.name
 

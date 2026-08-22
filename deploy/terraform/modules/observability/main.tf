@@ -1,6 +1,3 @@
-# Cloud-side observability: alerting on AWS service metrics. Application
-# metrics, dashboards, and OpenTelemetry wiring are specified in
-# docs/operations/observability.md and land with the runtime work.
 resource "aws_sns_topic" "alerts" {
   name = "${var.name}-alerts"
 
@@ -89,7 +86,7 @@ resource "aws_cloudwatch_metric_alarm" "db_storage" {
   statistic           = "Minimum"
   period              = 300
   evaluation_periods  = 2
-  threshold           = 2147483648 # 2 GiB
+  threshold           = 2147483648
   comparison_operator = "LessThanThreshold"
 
   dimensions = {

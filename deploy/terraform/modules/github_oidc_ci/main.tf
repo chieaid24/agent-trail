@@ -15,7 +15,6 @@ resource "aws_iam_openid_connect_provider" "github" {
   tags = var.tags
 }
 
-# Trust: only this repository, only the deploy ref. No long-lived keys in CI.
 data "aws_iam_policy_document" "ci_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]

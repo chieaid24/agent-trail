@@ -1,6 +1,3 @@
-# Per-run database for the local verification stack. Data lives in an
-# emptyDir and dies with the pod; the Secret is generated per run by
-# scripts/verify-k8s-runner.sh.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,8 +31,7 @@ spec:
               value: agent_trail
             - name: POSTGRES_DB
               value: agent_trail
-            # Subdirectory of the mount: initdb requires 0700 ownership the
-            # volume root cannot guarantee.
+            # initdb needs a 0700 subdir the volume root cannot guarantee
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
             - name: POSTGRES_PASSWORD

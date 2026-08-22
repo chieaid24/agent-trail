@@ -1,7 +1,4 @@
-# GitHub simulation for the local verification stack: fake REST API, the
-# sample repository over git smart HTTP, and /verify for the script's
-# assertions. Seeds one queued task at startup. envsubst variables:
-# TOOLS_IMAGE.
+# fake github api + sample repo over smart http; seeds one queued task; render var: TOOLS_IMAGE
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -114,7 +114,6 @@ data "aws_iam_policy_document" "ecs_assume" {
   }
 }
 
-# Execution role: pulls the image and injects secrets before the app starts.
 resource "aws_iam_role" "execution" {
   name               = "${var.name}-control-plane-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -140,8 +139,6 @@ resource "aws_iam_role_policy" "execution_secrets" {
   policy = data.aws_iam_policy_document.execution_secrets.json
 }
 
-# Task role: what the running control plane may do. Deliberately narrow -
-# no database admin, no IAM, no broad wildcards.
 resource "aws_iam_role" "task" {
   name               = "${var.name}-control-plane"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json

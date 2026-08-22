@@ -1,18 +1,10 @@
 #!/usr/bin/env bash
-# Deterministic pre-merge gate. Run by CI (the required `test` check) and by
-# the pre-commit hook. Mirrors the deterministic steps of the no-mistakes
-# pipeline (format, lint, test, build) plus the repo's docs ASCII check. The
-# AI gates (review, docs-sync) run separately on the agent side.
-#
-# Stack is auto-detected per directory: every go.mod module and every
-# package.json app gets its gates. Absent tooling skips cleanly and stays
-# green. Runs every gate, reports each, and exits non-zero if any failed.
+# deterministic gate for ci `test` check + pre-commit hook; absent tooling skips green
 set -uo pipefail
 
 failed=0
 
 gate() {
-  # gate <name> <cmd...>; runs the command, records pass/fail, never aborts early.
   local name=$1
   shift
   if "$@"; then
@@ -25,7 +17,6 @@ gate() {
 
 skip() { printf 'SKIP  %s (%s)\n' "$1" "$2"; }
 
-# --- docs: printable ASCII in markdown ---------------------------------------
 ascii_gate() {
   ! grep -rPn '[^\x20-\x7E\t]' --include='*.md' \
     --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.worktrees \
@@ -33,7 +24,6 @@ ascii_gate() {
 }
 gate "docs: markdown is printable ASCII" ascii_gate
 
-# --- go: format, vet, test, build (per module) -------------------------------
 go_fmt_gate() {
   local out
   out=$(cd "$1" && gofmt -l .)
@@ -53,7 +43,6 @@ done < <(find . -name go.mod \
   -not -path './.git/*' -not -path '*/node_modules/*' -not -path './.worktrees/*')
 [ "$found_go" = 1 ] || skip "go: format/vet/test/build" "no go.mod"
 
-# --- terraform: fmt and validate (authored, never applied) -------------------
 tf_validate_gate() {
   (cd "$1" && terraform init -backend=false -input=false -no-color >/dev/null &&
     terraform validate -no-color)
@@ -72,14 +61,12 @@ else
   skip "terraform: fmt/validate" "terraform not installed"
 fi
 
-# --- node: format-check, lint, test, build (per app) -------------------------
-npm_script() { # npm_script <dir> <script>
+npm_script() {
   (cd "$1" && node -e "process.exit(require('./package.json').scripts?.['$2']?0:1)" 2>/dev/null)
 }
 npm_in() { local dir=$1; shift; (cd "$dir" && "$@"); }
 
 node_modules_stale() {
-  # Missing node_modules, or a lockfile changed since the last install.
   [ ! -d "$1/node_modules" ] ||
     [ "$1/package-lock.json" -nt "$1/node_modules/.package-lock.json" ]
 }
