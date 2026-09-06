@@ -1,6 +1,3 @@
-// Package auth implements the dashboard session layer: GitHub OAuth user
-// authorization, persisted users and memberships, and database-backed
-// browser sessions.
 package auth
 
 import (
@@ -19,11 +16,10 @@ import (
 )
 
 const (
-	maxResponseSize = 1 << 20 // 1 MiB response cap
+	maxResponseSize = 1 << 20
 	requestTimeout  = 15 * time.Second
 )
 
-// GitHubUser is the slice of the GitHub user object a login stores.
 type GitHubUser struct {
 	ID        int64  `json:"id"`
 	Login     string `json:"login"`
@@ -31,31 +27,23 @@ type GitHubUser struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
-// InstallationAccount is one GitHub account whose app installation the
-// authorized user can access; logins map it to an organization row.
 type InstallationAccount struct {
 	ID    int64  `json:"id"`
 	Login string `json:"login"`
 	Type  string `json:"type"` // User or Organization
 }
 
-// OAuthClient drives the GitHub App web application flow: it builds the
-// authorize URL, exchanges the callback code, and reads the authorized
-// user. No SDK: the surface is three endpoints and the standard library
-// keeps the dependency tree flat (ADR-0006).
 type OAuthClient struct {
 	clientID     string
 	clientSecret string
-	oauthBaseURL string // https://github.com; overridden in tests
-	apiBaseURL   string // https://api.github.com; overridden in tests
+	oauthBaseURL string
+	apiBaseURL   string
 	httpc        *http.Client
 
-	requests *observability.Counter // agent_trail_auth_github_requests_total
-	errors   *observability.Counter // agent_trail_auth_github_errors_total
+	requests *observability.Counter
+	errors   *observability.Counter
 }
 
-// NewOAuthClient builds an OAuthClient. Empty base URLs mean the public
-// GitHub hosts.
 func NewOAuthClient(clientID, clientSecret, oauthBaseURL, apiBaseURL string, metrics *observability.Registry) *OAuthClient {
 	if oauthBaseURL == "" {
 		oauthBaseURL = "https://github.com"
@@ -76,7 +64,6 @@ func NewOAuthClient(clientID, clientSecret, oauthBaseURL, apiBaseURL string, met
 	}
 }
 
-// AuthorizeURL returns the GitHub authorize URL the login redirects to.
 func (c *OAuthClient) AuthorizeURL(state, redirectURI string) string {
 	query := url.Values{
 		"client_id":    {c.clientID},
@@ -86,9 +73,7 @@ func (c *OAuthClient) AuthorizeURL(state, redirectURI string) string {
 	return c.oauthBaseURL + "/login/oauth/authorize?" + query.Encode()
 }
 
-// ExchangeCode swaps the callback code for a user access token. GitHub
-// reports a spent or forged code as a 200 with an error field, so both
-// shapes reject.
+// github reports spent/forged codes as 200 with an error field, so both shapes reject
 func (c *OAuthClient) ExchangeCode(ctx context.Context, code, redirectURI string) (string, error) {
 	var resp struct {
 		AccessToken string `json:"access_token"`
@@ -106,8 +91,7 @@ func (c *OAuthClient) ExchangeCode(ctx context.Context, code, redirectURI string
 	}
 	if resp.Error != "" {
 		c.errors.Inc()
-		// The error code ("bad_verification_code") is safe to surface; the
-		// description is not logged to keep responses out of logs.
+		// error code is safe to surface; description never logged
 		return "", fmt.Errorf("auth: code exchange rejected: %s", resp.Error)
 	}
 	if resp.AccessToken == "" {
@@ -117,7 +101,6 @@ func (c *OAuthClient) ExchangeCode(ctx context.Context, code, redirectURI string
 	return resp.AccessToken, nil
 }
 
-// User returns the authorized user.
 func (c *OAuthClient) User(ctx context.Context, token string) (GitHubUser, error) {
 	var user GitHubUser
 	err := c.do(ctx, http.MethodGet, c.apiBaseURL+"/user", token, nil, &user)
@@ -130,8 +113,6 @@ func (c *OAuthClient) User(ctx context.Context, token string) (GitHubUser, error
 	return user, nil
 }
 
-// InstallationAccounts returns the accounts whose installations of this
-// app the user can access (GET /user/installations, paginated).
 func (c *OAuthClient) InstallationAccounts(ctx context.Context, token string) ([]InstallationAccount, error) {
 	const perPage = 100
 	var all []InstallationAccount
@@ -155,8 +136,6 @@ func (c *OAuthClient) InstallationAccounts(ctx context.Context, token string) ([
 	}
 }
 
-// do issues one request. token authenticates user-to-server calls; the
-// code exchange authenticates with the client secret in the body instead.
 func (c *OAuthClient) do(ctx context.Context, method, endpoint, token string, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
@@ -190,7 +169,7 @@ func (c *OAuthClient) do(ctx context.Context, method, endpoint, token string, bo
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		c.errors.Inc()
-		// Drain (bounded) so the connection is reused; never log the body.
+		// bounded drain for connection reuse; never log the body
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseSize))
 		return fmt.Errorf("auth: %s %s: status %d", method, req.URL.Path, resp.StatusCode)
 	}

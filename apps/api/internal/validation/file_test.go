@@ -32,8 +32,6 @@ validation:
     timeout_seconds: 600
 `
 
-// TestParseDocExample: the example is a
-// valid file.
 func TestParseDocExample(t *testing.T) {
 	f, err := Parse([]byte(docExample))
 	if err != nil {
@@ -128,9 +126,6 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-// TestLoadRejectsNonRegularFiles: the validation file is agent-editable
-// input - a symlink (wherever it points) is an invalid file, never a
-// readable one.
 func TestLoadRejectsNonRegularFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".agent-trail"), 0o755); err != nil {

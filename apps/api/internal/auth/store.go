@@ -12,12 +12,8 @@ import (
 	"time"
 )
 
-// ErrNoSession is returned when no live session matches the presented
-// token; the HTTP layer maps it to 401.
 var ErrNoSession = errors.New("no valid session")
 
-// User is one dashboard user row. DisplayName and AvatarURL are empty when
-// GitHub reports none.
 type User struct {
 	ID           string    `json:"id"`
 	GitHubUserID int64     `json:"github_user_id"`
@@ -28,18 +24,14 @@ type User struct {
 	LastLoginAt  time.Time `json:"last_login_at"`
 }
 
-// Store persists users, sessions, and memberships
-// (migration 00007_dashboard_auth.sql).
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// UpsertUser stores the GitHub user and stamps last_login_at.
 func (s *Store) UpsertUser(ctx context.Context, gh GitHubUser) (User, error) {
 	var u User
 	var displayName, avatarURL sql.NullString
@@ -64,8 +56,7 @@ func (s *Store) UpsertUser(ctx context.Context, gh GitHubUser) (User, error) {
 	return u, nil
 }
 
-// CreateSession mints a session token for the user and returns it. Only
-// the token's SHA-256 is stored; expired rows are reaped opportunistically.
+// only the token's sha-256 is stored; expired rows reaped opportunistically
 func (s *Store) CreateSession(ctx context.Context, userID string, ttl time.Duration) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -87,7 +78,6 @@ func (s *Store) CreateSession(ctx context.Context, userID string, ttl time.Durat
 	return token, nil
 }
 
-// SessionUser resolves a live session token to its user.
 func (s *Store) SessionUser(ctx context.Context, token string) (User, error) {
 	var u User
 	var displayName, avatarURL sql.NullString
@@ -111,7 +101,6 @@ func (s *Store) SessionUser(ctx context.Context, token string) (User, error) {
 	return u, nil
 }
 
-// DeleteSession revokes the session; a missing row is already logged out.
 func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	if _, err := s.db.ExecContext(ctx,
 		`DELETE FROM sessions WHERE token_hash = $1`, hashToken(token)); err != nil {
@@ -120,9 +109,6 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return nil
 }
 
-// SyncMemberships replaces the user's memberships with one per account
-// that has a synced organization row. Accounts without one (app installed
-// but no webhook received yet) are skipped until the next login.
 func (s *Store) SyncMemberships(ctx context.Context, userID string, accounts []InstallationAccount) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -149,8 +135,6 @@ func (s *Store) SyncMemberships(ctx context.Context, userID string, accounts []I
 	return nil
 }
 
-// MemberOfRepository reports whether the user belongs to the repository's
-// organization (resource authorization).
 func (s *Store) MemberOfRepository(ctx context.Context, userID, repositoryID string) (bool, error) {
 	var member bool
 	err := s.db.QueryRowContext(ctx, `

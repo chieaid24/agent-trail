@@ -16,10 +16,8 @@ func TestRunRequiresDatabaseURL(t *testing.T) {
 	}
 }
 
-// TestRunSeedsOnceAgainstRealDatabase exercises seeding and its idempotence
-// when a test database is available (make integration-test); otherwise skips.
 func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
-	db := dbtest.Open(t) // skips without TEST_DATABASE_URL
+	db := dbtest.Open(t)
 	t.Setenv("DATABASE_URL", os.Getenv("TEST_DATABASE_URL"))
 
 	want := len(seedTasks()) + 2
@@ -59,7 +57,6 @@ func TestRunSeedsOnceAgainstRealDatabase(t *testing.T) {
 		t.Fatalf("repositories = %d, want 2", count)
 	}
 
-	// Second run must not duplicate.
 	if err := run(); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}

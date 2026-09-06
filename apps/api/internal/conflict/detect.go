@@ -8,10 +8,9 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 )
 
-// Three lines matches the default diff context.
+// matches default diff context
 const adjacencyWindow = 3
 
-// dependencyManifests identifies high-contention dependency files.
 var dependencyManifests = map[string]bool{
 	"go.mod": true, "go.sum": true,
 	"package.json": true, "package-lock.json": true,
@@ -30,13 +29,11 @@ var dependencyManifests = map[string]bool{
 	"pubspec.yaml": true, "pubspec.lock": true,
 }
 
-// ChangeSet contains changed paths and base-side hunks.
 type ChangeSet struct {
 	Files []string
 	Hunks map[string][]gitworkspace.LineRange
 }
 
-// Overlap returns sorted path and hunk conflicts without repository access.
 func Overlap(a, b ChangeSet) ([]Kind, []string) {
 	var kinds []Kind
 	files := map[string]bool{}

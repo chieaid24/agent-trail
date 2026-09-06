@@ -1,12 +1,3 @@
-// Command slice runs the complete issue-to-PR vertical slice in one process:
-// a signed GitHub webhook creates a task, the fake agent edits
-// an isolated git worktree, trusted validation and evidence run, and
-// publishing commits, pushes, and opens one evidence-backed draft pull
-// request. GitHub itself is simulated by internal/githubfixture - a local
-// API server and a local bare repository - so the command needs only
-// PostgreSQL (DATABASE_URL) and git; every other component - webhook
-// verification, the task store, the runner, the GitHub client - is the
-// production code path.
 package main
 
 import (
@@ -111,8 +102,7 @@ func run(databaseURL string) error {
 	if err != nil {
 		return err
 	}
-	// A previous run leaves its task in awaiting_review; cancel it so
-	// the one-active-task-per-issue rule lets this run create a fresh one.
+	// cancel a previous run's task so one-active-per-issue allows a fresh one
 	if stale, active, err := tasks.ActiveTaskForIssue(ctx, repo.ID, fixtureIssueNumber); err != nil {
 		return err
 	} else if active {
@@ -208,8 +198,7 @@ func run(databaseURL string) error {
 	return nil
 }
 
-// claimTask claims until it owns the slice task (a local worker may be
-// polling the same database; those claims are for other tasks).
+// claims until it owns the slice task; a local worker may claim other tasks meanwhile
 func claimTask(ctx context.Context, store *runner.Store, runnerID, taskID string) (*runner.Claim, error) {
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -242,8 +231,6 @@ func indent(s, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-// seedRepository registers the fixture installation and repository the way
-// an installation webhook would.
 func seedRepository(ctx context.Context, s *github.Store, origin string) error {
 	err := s.UpsertInstallation(ctx, github.InstallationParams{
 		GitHubInstallationID: fixtureInstallationID,
@@ -262,8 +249,6 @@ func seedRepository(ctx context.Context, s *github.Store, origin string) error {
 	return s.SyncRepositories(ctx, fixtureInstallationID, []github.Repository{repo})
 }
 
-// deliverRunCommand posts a signed /agent-trail run issue comment to the
-// webhook handler, exactly as GitHub would.
 func deliverRunCommand(webhook http.Handler) error {
 	req, err := githubfixture.RunCommandRequest([]byte(webhookSecret),
 		fixtureInstallationID, fixtureRepositoryID, fixtureIssueNumber)
@@ -287,7 +272,6 @@ func (d *fixtureServer) Close() {
 	_ = d.server.Close()
 }
 
-// serve exposes the fixture on a loopback port for the GitHub client.
 func serve(h http.Handler) (*fixtureServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

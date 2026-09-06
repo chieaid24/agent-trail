@@ -7,7 +7,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 )
 
-// ConflictService reads stored warnings.
 type ConflictService interface {
 	ListForTask(ctx context.Context, taskID string) ([]conflict.TaskConflict, error)
 }

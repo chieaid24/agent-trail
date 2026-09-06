@@ -9,7 +9,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// GitOps provides conflict-related Git operations.
 type GitOps interface {
 	EnsureMirror(ctx context.Context, repo gitworkspace.RepoRef) (string, error)
 	HasCommit(ctx context.Context, repo gitworkspace.RepoRef, sha string) (bool, error)
@@ -19,13 +18,11 @@ type GitOps interface {
 	MergeTree(ctx context.Context, repo gitworkspace.RepoRef, commitA, commitB string) (bool, []string, error)
 }
 
-// Records reads sibling diffs and stores warnings.
 type Records interface {
 	ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID string) ([]Sibling, error)
 	Reconcile(ctx context.Context, repositoryID, taskID string, detections []Detection) error
 }
 
-// Detector compares and stores active-task overlaps.
 type Detector struct {
 	Git      GitOps
 	Records  Records
@@ -33,7 +30,6 @@ type Detector struct {
 	Semantic SemanticAssessor
 }
 
-// Detect refreshes taskID's warnings against active siblings.
 func (d *Detector) Detect(ctx context.Context, repo gitworkspace.RepoRef, repositoryID, taskID, taskTitle, base, final string) ([]Detection, error) {
 	siblings, err := d.Records.ActiveSiblings(ctx, repositoryID, taskID)
 	if err != nil {

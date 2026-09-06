@@ -1,4 +1,3 @@
-// Package migrations embeds the SQL migrations applied by cmd/migrate.
 package migrations
 
 import "embed"

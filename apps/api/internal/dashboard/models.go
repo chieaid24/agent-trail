@@ -1,9 +1,8 @@
-// Package dashboard serves read models for the operator dashboard.
 package dashboard
 
 import "time"
 
-// Err values let the HTTP layer map missing resources to 404 responses.
+// http layer maps these to 404
 var (
 	ErrOrganizationNotFound = resourceNotFound("organization not found")
 	ErrRepositoryNotFound   = resourceNotFound("repository not found")
@@ -14,7 +13,6 @@ type resourceNotFound string
 
 func (e resourceNotFound) Error() string { return string(e) }
 
-// Organization is one GitHub account with repository counts.
 type Organization struct {
 	ID                     string    `json:"id"`
 	Name                   string    `json:"name"`
@@ -27,13 +25,11 @@ type Organization struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
-// RepositorySettings is the stable subset of settings_json used by the UI.
 type RepositorySettings struct {
 	DefaultPolicy  string `json:"default_policy"`
 	ValidationFile string `json:"validation_file"`
 }
 
-// Repository is one synced GitHub repository with activity counts.
 type Repository struct {
 	ID                 string             `json:"id"`
 	OrganizationID     string             `json:"organization_id"`
@@ -51,7 +47,6 @@ type Repository struct {
 	UpdatedAt          time.Time          `json:"updated_at"`
 }
 
-// TaskSummary is the task subset used on repository and runner pages.
 type TaskSummary struct {
 	ID                string     `json:"id"`
 	Title             string     `json:"title"`
@@ -65,7 +60,6 @@ type TaskSummary struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
-// RepositoryMetrics summarizes all tasks assigned to one repository.
 type RepositoryMetrics struct {
 	TotalTasks          int      `json:"total_tasks"`
 	ActiveTasks         int      `json:"active_tasks"`
@@ -75,7 +69,6 @@ type RepositoryMetrics struct {
 	MedianRuntimeMillis *int64   `json:"median_runtime_millis"`
 }
 
-// RepositoryDetail backs the repository page.
 type RepositoryDetail struct {
 	Repository
 	Metrics     RepositoryMetrics `json:"metrics"`
@@ -83,14 +76,12 @@ type RepositoryDetail struct {
 	RecentTasks []TaskSummary     `json:"recent_tasks"`
 }
 
-// ResourceUsage is optional until runner heartbeats report each measurement.
 type ResourceUsage struct {
 	CPUPercent    *float64 `json:"cpu_percent"`
 	MemoryPercent *float64 `json:"memory_percent"`
 	DiskPercent   *float64 `json:"disk_percent"`
 }
 
-// Runner is one registered worker with its current utilization.
 type Runner struct {
 	ID              string            `json:"id"`
 	Type            string            `json:"runner_type"`
@@ -105,7 +96,6 @@ type Runner struct {
 	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
-// RunnerDetail backs the runner page.
 type RunnerDetail struct {
 	Runner
 	CurrentTasks   []TaskSummary `json:"current_tasks"`

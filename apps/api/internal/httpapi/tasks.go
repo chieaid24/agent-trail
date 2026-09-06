@@ -16,8 +16,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// TaskService is the slice of the task domain the HTTP API consumes;
-// implemented by *task.Store, faked in tests.
 type TaskService interface {
 	Create(ctx context.Context, p task.CreateParams) (task.Task, error)
 	Get(ctx context.Context, id string) (task.Task, error)
@@ -27,21 +25,16 @@ type TaskService interface {
 	EventsAfter(ctx context.Context, id string, afterAttempt int, afterSequence int64, limit int) ([]task.Event, error)
 }
 
-// ValidationService serves trusted validation results; implemented by
-// *validation.Store, faked in tests.
 type ValidationService interface {
 	ListForTask(ctx context.Context, taskID string) ([]validation.StoredResult, error)
 }
 
-// EvidenceService serves evidence reports; implemented by *evidence.Store,
-// faked in tests.
 type EvidenceService interface {
 	GetForTask(ctx context.Context, taskID string) (evidence.Stored, error)
 }
 
-const maxBodyBytes = 1 << 20 // 1 MiB request cap
+const maxBodyBytes = 1 << 20
 
-// createTaskRequest is the POST /api/v1/tasks body.
 type createTaskRequest struct {
 	Title             string   `json:"title"`
 	Instructions      string   `json:"instructions"`
@@ -51,7 +44,6 @@ type createTaskRequest struct {
 	MaxCostUSD        *float64 `json:"max_cost_usd"`
 }
 
-// cancelTaskRequest is the POST /api/v1/tasks/{taskId}/cancel body (optional).
 type cancelTaskRequest struct {
 	Reason string `json:"reason"`
 }
@@ -167,7 +159,6 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req cancelTaskRequest
-	// The cancel body is optional; an empty body means no reason.
 	if r.ContentLength != 0 && !s.decodeJSON(w, r, &req) {
 		return
 	}
@@ -181,8 +172,7 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		s.writeTaskError(w, r, err)
 		return
 	}
-	// "requested", not "cancelled": the call is idempotent and may be a no-op
-	// on an already-cancelled task; the activity timeline holds the truth.
+	// "requested", not "cancelled": call may be a no-op; timeline holds the truth
 	s.logger.LogAttrs(r.Context(), slog.LevelInfo, "task cancel requested",
 		slog.String("event", "task_cancel_requested"),
 		slog.String("trace_id", observability.TraceIDFrom(r.Context())),
@@ -250,7 +240,6 @@ func (s *Server) handleTaskEvidence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// pathTaskID validates the {taskId} path segment as a UUID.
 func pathTaskID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := r.PathValue("taskId")
 	if !task.IsUUID(id) {
@@ -260,7 +249,6 @@ func pathTaskID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return id, true
 }
 
-// queryLimit parses an optional positive ?limit= bounded by maxLimit.
 func queryLimit(w http.ResponseWriter, r *http.Request, maxLimit int) (int, bool) {
 	v := r.URL.Query().Get("limit")
 	if v == "" {
@@ -275,8 +263,6 @@ func queryLimit(w http.ResponseWriter, r *http.Request, maxLimit int) (int, bool
 	return n, true
 }
 
-// decodeJSON strictly decodes a bounded JSON body; on failure it writes a 400
-// and returns false.
 func (s *Server) decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
@@ -288,7 +274,6 @@ func (s *Server) decodeJSON(w http.ResponseWriter, r *http.Request, dst any) boo
 	return true
 }
 
-// writeTaskError maps domain errors to HTTP statuses.
 func (s *Server) writeTaskError(w http.ResponseWriter, r *http.Request, err error) {
 	var invalid *task.InvalidTransitionError
 	var conflict *task.VersionConflictError

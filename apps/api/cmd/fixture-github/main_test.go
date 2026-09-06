@@ -15,8 +15,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/githubfixture"
 )
 
-// gitClone runs git with an allowlisted environment so a pre-commit hook's
-// GIT_DIR cannot leak in.
+// allowlisted env so a pre-commit hook's GIT_DIR cannot leak in
 func gitClone(url, dest string) (string, error) {
 	cmd := exec.Command("git", "clone", "-q", url, dest)
 	cmd.Env = []string{
@@ -31,9 +30,6 @@ func gitClone(url, dest string) (string, error) {
 	return string(out), nil
 }
 
-// TestFixtureSeedsAndServes: seeding leaves one queued task, /verify reports
-// it, /healthz gates on readiness, and the repository clones over /git/.
-// dbtest.Open skips without TEST_DATABASE_URL.
 func TestFixtureSeedsAndServes(t *testing.T) {
 	db := dbtest.Open(t)
 	ctx := context.Background()

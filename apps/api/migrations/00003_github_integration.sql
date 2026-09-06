@@ -1,8 +1,4 @@
 -- +goose Up
--- GitHub integration: organizations, installations, repositories, and the
--- webhook delivery dedup ledger. Spec: docs/architecture/data-model.md,
--- docs/architecture/github-app.md. Tasks gain their organization and
--- repository foreign keys here (nullable since milestone 2).
 
 CREATE TABLE organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -52,9 +48,7 @@ CREATE TABLE repositories (
 
 CREATE INDEX repositories_organization_idx ON repositories (organization_id);
 
--- Delivery ledger: the UNIQUE github_delivery_id is the replay guard. Only
--- signature-valid deliveries are recorded (a forged request must not be able
--- to occupy a delivery id); invalid signatures are counted in metrics.
+-- unique delivery id is the replay guard; only signature-valid deliveries recorded
 CREATE TABLE github_webhook_deliveries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     github_delivery_id TEXT NOT NULL UNIQUE
@@ -80,8 +74,7 @@ ALTER TABLE tasks
     ADD CONSTRAINT tasks_repository_id_fkey
         FOREIGN KEY (repository_id) REFERENCES repositories (id);
 
--- One active task per issue (docs/architecture/github-app.md): enforced at
--- the database so two concurrent commands cannot both create one.
+-- one active task per issue, enforced at the db so concurrent commands cannot both create one
 CREATE UNIQUE INDEX tasks_one_active_per_issue_idx
     ON tasks (repository_id, source_issue_number)
     WHERE source_type = 'github_issue' AND phase <> 'terminal';

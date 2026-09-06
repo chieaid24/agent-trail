@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// Markdown renders the report as the human-readable evidence summary.
-// Trusted results and agent claims are
-// kept visibly apart: only platform-executed checks appear under
-// "Verified by Agent Trail".
 func Markdown(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Evidence: %s\n\n", r.Task.Title)
@@ -55,9 +51,7 @@ func Markdown(r Report) string {
 	return b.String()
 }
 
-// writeValidationSections renders the "Verified by Agent Trail" table and,
-// when present, the agent-reported claims table. Trusted results and agent
-// claims never share a table.
+// trusted results and agent claims never share a table
 func writeValidationSections(b *strings.Builder, r Report) {
 	trusted := make([]CheckResult, 0, len(r.Validation))
 	claimed := make([]CheckResult, 0)

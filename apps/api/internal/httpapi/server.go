@@ -1,4 +1,3 @@
-// Package httpapi wires the control-plane HTTP surface.
 package httpapi
 
 import (
@@ -12,56 +11,47 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// DBPinger is the slice of *sql.DB readiness needs; narrowed for tests.
 type DBPinger interface {
 	PingContext(ctx context.Context) error
 }
 
-// Server holds the HTTP API dependencies.
+// nil deps degrade cleanly; each is nil when its config is absent
 type Server struct {
 	logger      *slog.Logger
-	db          DBPinger          // nil when DATABASE_URL is not configured
-	tasks       TaskService       // nil when DATABASE_URL is not configured
-	validations ValidationService // nil when DATABASE_URL is not configured
-	evidence    EvidenceService   // nil when DATABASE_URL is not configured
-	dashboard   DashboardService  // nil when DATABASE_URL is not configured
-	conflicts   ConflictService   // nil when DATABASE_URL is not configured
-	traces      TraceService      // nil when DATABASE_URL is not configured
-	webhook     http.Handler      // nil when the GitHub integration is not configured
-	metrics     http.Handler      // nil disables GET /metrics
-	auth        AuthService       // nil when OAuth credentials are not configured
+	db          DBPinger
+	tasks       TaskService
+	validations ValidationService
+	evidence    EvidenceService
+	dashboard   DashboardService
+	conflicts   ConflictService
+	traces      TraceService
+	webhook     http.Handler
+	metrics     http.Handler
+	auth        AuthService
 
-	// Auth cookie settings; meaningful only with auth set.
 	authPublicOrigin string
 	authCookieSecure bool
 
-	// SSE stream cadence; defaulted in New, shortened in tests.
 	streamPollInterval time.Duration
 	streamHeartbeat    time.Duration
 }
 
 var _ DBPinger = (*sql.DB)(nil)
 
-// Option adds an optional HTTP API dependency.
 type Option func(*Server)
 
-// WithDashboard enables organization, repository, and runner read endpoints.
 func WithDashboard(service DashboardService) Option {
 	return func(s *Server) { s.dashboard = service }
 }
 
-// WithConflicts enables task conflict endpoints.
 func WithConflicts(service ConflictService) Option {
 	return func(s *Server) { s.conflicts = service }
 }
 
-// WithTraces enables task trace reads.
 func WithTraces(service TraceService) Option {
 	return func(s *Server) { s.traces = service }
 }
 
-// New returns a Server. Nil dependencies degrade cleanly: readiness reports
-// the database as not configured, and the task API and webhook answer 503.
 func New(logger *slog.Logger, db DBPinger, tasks TaskService,
 	validations ValidationService, ev EvidenceService,
 	webhook, metrics http.Handler, options ...Option) *Server {
@@ -78,9 +68,6 @@ func New(logger *slog.Logger, db DBPinger, tasks TaskService,
 	return s
 }
 
-// Handler returns the routed HTTP handler with observability middleware.
-// With auth configured, every /api/v1 route and /me require a session;
-// health, metrics, the webhook, and the auth flow itself stay open.
 func (s *Server) Handler() http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/v1/tasks", s.handleListTasks)
@@ -130,8 +117,6 @@ func (s *Server) Handler() http.Handler {
 	return observability.Middleware(s.logger)(mux)
 }
 
-// handleWebhook forwards to the GitHub webhook handler, or reports the
-// integration unconfigured.
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.webhook == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
@@ -142,13 +127,10 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	s.webhook.ServeHTTP(w, r)
 }
 
-// handleHealthz reports process liveness only.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleReadyz reports readiness to serve: the database must answer a ping
-// when one is configured.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
 		writeJSON(w, http.StatusOK, map[string]string{
@@ -181,6 +163,6 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// Bodies are maps and domain structs; encoding them cannot fail.
+	// bodies are maps and domain structs; encoding cannot fail
 	_ = json.NewEncoder(w).Encode(body)
 }

@@ -1,7 +1,3 @@
-// Command migrate applies the embedded SQL migrations with goose.
-//
-// Usage: migrate <up|status|version>
-// DATABASE_URL must be set.
 package main
 
 import (

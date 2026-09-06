@@ -11,10 +11,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// ErrNoReport marks a task that has no evidence report yet.
 var ErrNoReport = errors.New("no evidence report")
 
-// Stored is one evidence_reports row; JSON tags are the API wire shape.
 type Stored struct {
 	ID              string          `json:"id"`
 	TaskAttemptID   string          `json:"task_attempt_id"`
@@ -25,18 +23,15 @@ type Stored struct {
 	CreatedAt       time.Time       `json:"created_at"`
 }
 
-// Store persists evidence reports.
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Insert records the attempt's report. An attempt has exactly one report:
-// a replayed generation (recovered owner) is a no-op and the first wins.
+// one report per attempt: replayed generation is a no-op, first wins
 func (s *Store) Insert(ctx context.Context, attemptID string, r Report, markdown string) error {
 	body, err := json.Marshal(r)
 	if err != nil {
@@ -54,9 +49,6 @@ func (s *Store) Insert(ctx context.Context, attemptID string, r Report, markdown
 	return nil
 }
 
-// GetForTask returns the task's newest report (the latest attempt's).
-// Unknown tasks return task.ErrNotFound; a task without a report returns
-// ErrNoReport.
 func (s *Store) GetForTask(ctx context.Context, taskID string) (Stored, error) {
 	if !task.IsUUID(taskID) {
 		return Stored{}, task.ErrNotFound

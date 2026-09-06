@@ -58,8 +58,6 @@ func TestStoreInsertAndGet(t *testing.T) {
 	}
 }
 
-// TestStoreInsertReplayKeepsFirst: one report per attempt; a recovered
-// owner regenerating it is a no-op.
 func TestStoreInsertReplayKeepsFirst(t *testing.T) {
 	db := dbtest.Open(t)
 	ctx := context.Background()

@@ -10,8 +10,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// StoredResult is one validation_results row; JSON tags are the API wire
-// shape. AttemptNumber is joined from the owning attempt.
 type StoredResult struct {
 	ID               string          `json:"id"`
 	TaskAttemptID    string          `json:"task_attempt_id"`
@@ -27,19 +25,15 @@ type StoredResult struct {
 	CreatedAt        time.Time       `json:"created_at"`
 }
 
-// Store persists validation results.
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Insert records one result for the attempt. A replay of the same check
-// name (zombie owner past its lease) is a no-op: the first recording wins
-// and an exit code is never overwritten.
+// replay of same check name (zombie owner) is a no-op: first recording wins
 func (s *Store) Insert(ctx context.Context, attemptID string, r Result) error {
 	command, err := json.Marshal(r.Command)
 	if err != nil {
@@ -64,8 +58,6 @@ const storedResultColumns = `v.id, v.task_attempt_id, a.attempt_number,
 	v.name, v.category, v.command_json, v.status, v.exit_code,
 	v.duration_ms, v.summary, v.trusted_execution, v.created_at`
 
-// ListForTask returns every result across the task's attempts, ordered by
-// attempt then execution order. Unknown tasks return task.ErrNotFound.
 func (s *Store) ListForTask(ctx context.Context, taskID string) ([]StoredResult, error) {
 	if !task.IsUUID(taskID) {
 		return nil, task.ErrNotFound
@@ -91,7 +83,6 @@ func (s *Store) ListForTask(ctx context.Context, taskID string) ([]StoredResult,
 	return scanStoredResults(rows)
 }
 
-// ListForAttempt returns the attempt's results in execution order.
 func (s *Store) ListForAttempt(ctx context.Context, attemptID string) ([]StoredResult, error) {
 	if !task.IsUUID(attemptID) {
 		return nil, task.ErrAttemptNotFound

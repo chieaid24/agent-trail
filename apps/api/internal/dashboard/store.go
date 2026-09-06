@@ -12,12 +12,10 @@ import (
 const defaultPolicy = "platform default"
 const defaultValidationFile = ".agent-trail/validation.yaml"
 
-// Store builds dashboard read models from PostgreSQL.
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a dashboard Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
@@ -26,7 +24,6 @@ const organizationColumns = `o.id, o.name, o.slug, o.github_account_login,
 	o.github_account_type, count(r.id),
 	count(r.id) FILTER (WHERE r.is_enabled), o.created_at, o.updated_at`
 
-// ListOrganizations returns organizations ordered by name.
 func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+organizationColumns+`
@@ -53,7 +50,6 @@ func (s *Store) ListOrganizations(ctx context.Context) ([]Organization, error) {
 	return organizations, nil
 }
 
-// GetOrganization returns one organization by internal id.
 func (s *Store) GetOrganization(ctx context.Context, id string) (Organization, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT `+organizationColumns+`
@@ -86,7 +82,6 @@ const repositoryColumns = `r.id, r.organization_id, r.github_repository_id,
 	count(t.id) FILTER (WHERE t.updated_at >= now() - interval '30 days'),
 	r.created_at, r.updated_at`
 
-// ListRepositories returns repositories, optionally scoped to an organization.
 func (s *Store) ListRepositories(ctx context.Context, organizationID string, limit int) ([]Repository, error) {
 	if limit <= 0 {
 		limit = 20
@@ -128,7 +123,6 @@ func (s *Store) ListRepositories(ctx context.Context, organizationID string, lim
 	return repositories, nil
 }
 
-// GetRepository returns the repository page read model.
 func (s *Store) GetRepository(ctx context.Context, id string) (RepositoryDetail, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT `+repositoryColumns+`
@@ -162,9 +156,7 @@ func (s *Store) GetRepository(ctx context.Context, id string) (RepositoryDetail,
 	}, nil
 }
 
-// SetRepositoryEnabled flips the enablement flag and returns the updated
-// read model. One transaction, so the returned row is the state this call
-// wrote even under concurrent toggles.
+// one tx: returned row is the state this call wrote even under concurrent toggles
 func (s *Store) SetRepositoryEnabled(ctx context.Context, id string, enabled bool) (Repository, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -201,7 +193,6 @@ func (s *Store) SetRepositoryEnabled(ctx context.Context, id string, enabled boo
 	return repository, nil
 }
 
-// GetRepositorySettings returns the interpreted repository settings.
 func (s *Store) GetRepositorySettings(ctx context.Context, id string) (RepositorySettings, error) {
 	var raw []byte
 	err := s.db.QueryRowContext(ctx,
@@ -299,7 +290,6 @@ func (s *Store) repositoryTasks(ctx context.Context, id string, active bool) ([]
 	return scanTasks(rows)
 }
 
-// ListRunners returns every runner, freshest heartbeat first.
 func (s *Store) ListRunners(ctx context.Context) ([]Runner, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT r.id, r.runner_type, r.hostname_or_pod, r.status, r.capacity,
@@ -329,7 +319,6 @@ func (s *Store) ListRunners(ctx context.Context) ([]Runner, error) {
 	return runners, nil
 }
 
-// GetRunner returns the runner page read model.
 func (s *Store) GetRunner(ctx context.Context, id string) (RunnerDetail, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT r.id, r.runner_type, r.hostname_or_pod, r.status, r.capacity,

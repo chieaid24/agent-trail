@@ -1,4 +1,3 @@
-// Command api serves the Agent Trail control-plane HTTP API.
 package main
 
 import (
@@ -84,8 +83,7 @@ func run() error {
 			httpapi.WithTraces(observability.NewTraceStore(db)))
 	}
 
-	// Sessions live in the database; refuse a half-configured session
-	// layer instead of silently serving without one.
+	// refuse a half-configured session layer instead of silently serving without one
 	if cfg.AuthEnabled() && db == nil {
 		return errors.New(
 			"GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET are set " +
@@ -107,7 +105,6 @@ func run() error {
 	}
 	var webhook http.Handler
 	var processor *github.Processor
-	// The webhook needs both the GitHub credentials and the database.
 	if cfg.GitHubEnabled() && db != nil {
 		keyPEM, err := os.ReadFile(cfg.GitHubAppPrivateKeyPath)
 		if err != nil {
@@ -132,9 +129,7 @@ func run() error {
 		Handler: httpapi.New(logger, pinger, tasks, validations,
 			evidenceReports, webhook, metrics.Handler(), apiOptions...).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
-		// Request contexts derive from the signal context, so long-lived
-		// handlers (the SSE stream) end when shutdown starts instead of
-		// pinning Shutdown to its deadline.
+		// request contexts derive from signal ctx so sse handlers end when shutdown starts
 		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 

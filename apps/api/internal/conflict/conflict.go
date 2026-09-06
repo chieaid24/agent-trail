@@ -1,27 +1,18 @@
-// Package conflict detects overlap between active task diffs.
 package conflict
 
 import "time"
 
-// Kind identifies an overlap detector.
 type Kind string
 
 const (
-	// KindFileOverlap marks a shared changed file.
-	KindFileOverlap Kind = "file_overlap"
-	// KindAdjacentLines marks nearby base-side hunks.
+	KindFileOverlap   Kind = "file_overlap"
 	KindAdjacentLines Kind = "adjacent_lines"
-	// KindMergeConflict marks a failed trial merge.
 	KindMergeConflict Kind = "merge_conflict"
-	// KindMigration marks concurrent migration changes.
-	KindMigration Kind = "migration"
-	// KindDependency marks a shared dependency file.
-	KindDependency Kind = "dependency"
-	// KindSemantic marks a model-detected behavioral collision.
-	KindSemantic Kind = "semantic"
+	KindMigration     Kind = "migration"
+	KindDependency    Kind = "dependency"
+	KindSemantic      Kind = "semantic"
 )
 
-// Severity ranks a semantic conflict's expected impact.
 type Severity string
 
 const (
@@ -30,7 +21,7 @@ const (
 	SeverityHigh   Severity = "high"
 )
 
-// TaskConflict is a stored warning oriented toward the other task.
+// stored warning oriented toward the other task
 type TaskConflict struct {
 	ID                  string    `json:"id"`
 	OtherTaskID         string    `json:"other_task_id"`
@@ -44,7 +35,6 @@ type TaskConflict struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
-// Sibling is an active repository task with a published diff.
 type Sibling struct {
 	TaskID   string
 	Title    string
@@ -52,7 +42,6 @@ type Sibling struct {
 	FinalSHA string
 }
 
-// Detection is one conflicting task pair.
 type Detection struct {
 	OtherTaskID         string
 	OtherTaskTitle      string

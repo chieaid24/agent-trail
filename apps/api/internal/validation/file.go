@@ -1,9 +1,3 @@
-// Package validation implements trusted platform validation:
-// parsing the repository validation
-// file, running its checks in the attempt workspace after editing ends,
-// and storing the results. Platform-run results carry
-// trusted_execution=true; agent-reported checks never do, and no agent
-// output can change a recorded exit code.
 package validation
 
 import (
@@ -18,27 +12,18 @@ import (
 )
 
 const (
-	// FileName is the repository validation file, relative to the
-	// workspace root.
 	FileName = ".agent-trail/validation.yaml"
 
-	// MaxChecks bounds the command count per file.
-	MaxChecks = 20
-	// MaxCommandArgs bounds one check's argument-array length.
+	MaxChecks      = 20
 	MaxCommandArgs = 64
-	// MaxFileBytes bounds the validation file size.
-	MaxFileBytes = 1 << 20
+	MaxFileBytes   = 1 << 20
 
-	// DefaultTimeoutSeconds applies when a check omits timeout_seconds.
-	DefaultTimeoutSeconds = 300
-	// MaxTimeoutSeconds caps one check's timeout.
-	MaxTimeoutSeconds = 1800
-	// MaxTotalTimeoutSeconds caps the file's summed effective timeouts,
-	// bounding the whole trusted-validation phase.
+	DefaultTimeoutSeconds  = 300
+	MaxTimeoutSeconds      = 1800
 	MaxTotalTimeoutSeconds = 3600
 )
 
-// Categories mirrors the validation_results category CHECK constraint.
+// mirrors validation_results category check constraint
 var Categories = map[string]bool{
 	"unit_test":        true,
 	"integration_test": true,
@@ -54,7 +39,6 @@ var Categories = map[string]bool{
 
 var checkNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$`)
 
-// Check is one configured validation command.
 type Check struct {
 	Name           string   `yaml:"name"`
 	Category       string   `yaml:"category"`
@@ -62,8 +46,6 @@ type Check struct {
 	TimeoutSeconds int      `yaml:"timeout_seconds"`
 }
 
-// EffectiveTimeoutSeconds returns the check timeout with the default
-// applied.
 func (c Check) EffectiveTimeoutSeconds() int {
 	if c.TimeoutSeconds == 0 {
 		return DefaultTimeoutSeconds
@@ -71,13 +53,11 @@ func (c Check) EffectiveTimeoutSeconds() int {
 	return c.TimeoutSeconds
 }
 
-// File is the parsed repository validation file.
 type File struct {
 	Version    int     `yaml:"version"`
 	Validation []Check `yaml:"validation"`
 }
 
-// Parse strictly decodes and validates a repository validation file.
 func Parse(data []byte) (File, error) {
 	if len(data) > MaxFileBytes {
 		return File{}, fmt.Errorf("validation file exceeds %d bytes", MaxFileBytes)
@@ -94,11 +74,7 @@ func Parse(data []byte) (File, error) {
 	return f, nil
 }
 
-// Load reads and parses the validation file under workspaceDir. The second
-// return is false when the repository has no validation file; a present but
-// invalid file is an error. The file is agent-editable input: resolution is
-// confined to the workspace, only a regular file is accepted (no symlink
-// targets), and reads are bounded by MaxFileBytes.
+// file is agent-editable input: confined to workspace, regular file only, size-bounded
 func Load(workspaceDir string) (File, bool, error) {
 	root, err := os.OpenRoot(workspaceDir)
 	if err != nil {

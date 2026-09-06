@@ -1,7 +1,4 @@
 -- +goose Up
--- Dashboard authentication: users, browser sessions, and organization
--- memberships. Spec: docs/architecture/data-model.md,
--- docs/adr/0013-dashboard-sessions.md.
 
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -14,8 +11,7 @@ CREATE TABLE users (
     last_login_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Sessions store only the SHA-256 of the bearer token, so a database leak
--- cannot be replayed as a login.
+-- only sha-256 of the token stored, so a db leak cannot be replayed as a login
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users (id),
@@ -27,8 +23,7 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_user_idx ON sessions (user_id);
 CREATE INDEX sessions_expires_idx ON sessions (expires_at);
 
--- Membership is resynced from the user's GitHub installations at every
--- login; the pair is the identity (docs/architecture/data-model.md).
+-- resynced from github installations at every login; the pair is the identity
 CREATE TABLE memberships (
     organization_id UUID NOT NULL REFERENCES organizations (id),
     user_id UUID NOT NULL REFERENCES users (id),

@@ -25,7 +25,7 @@ func TestRunRejectsOAuthWithoutDatabase(t *testing.T) {
 }
 
 func TestRunReportsListenFailure(t *testing.T) {
-	// Occupy a port so ListenAndServe fails immediately.
+	// occupy a port so listenandserve fails immediately
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

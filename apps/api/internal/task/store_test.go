@@ -12,8 +12,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/dbtest"
 )
 
-// testDB returns the shared integration-test database (skips without
-// TEST_DATABASE_URL; make integration-test provides one).
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
 	return dbtest.Open(t)
@@ -174,7 +172,6 @@ func TestDuplicateTransitionMessageIsIdempotent(t *testing.T) {
 		t.Errorf("replay emitted an event: %v", got)
 	}
 
-	// The same key stays a no-op even after further transitions.
 	mustTransition(t, s, tk.ID, StatusPlanning)
 	replay, err := s.Transition(context.Background(), tk.ID, p)
 	if err != nil {
@@ -211,7 +208,6 @@ func TestExpectedVersionConflict(t *testing.T) {
 func TestCancelFromEveryNonTerminalStatus(t *testing.T) {
 	s := NewStore(testDB(t))
 
-	// Walk fresh tasks to each non-terminal status, then cancel.
 	paths := map[Status][]Status{
 		StatusQueued:            {},
 		StatusProvisioning:      {StatusProvisioning},
@@ -366,7 +362,6 @@ func TestActivityEventsAreAppendOnlyAtTheDatabase(t *testing.T) {
 		!strings.Contains(err.Error(), "append-only") {
 		t.Errorf("DELETE err = %v, want append-only rejection", err)
 	}
-	// Task deletion is blocked too: the cascade would delete history.
 	if _, err := db.Exec(`DELETE FROM tasks WHERE id = $1`, tk.ID); err == nil ||
 		!strings.Contains(err.Error(), "append-only") {
 		t.Errorf("task DELETE err = %v, want append-only rejection", err)
@@ -376,25 +371,21 @@ func TestActivityEventsAreAppendOnlyAtTheDatabase(t *testing.T) {
 func TestDatabaseRejectsInvalidRowsDirectly(t *testing.T) {
 	db := testDB(t)
 
-	// Unknown status.
 	_, err := db.Exec(`INSERT INTO tasks (title, instructions, status, phase)
 		VALUES ('x', 'y', 'sideways', 'pending')`)
 	if err == nil {
 		t.Error("unknown status accepted")
 	}
-	// Phase inconsistent with status.
 	_, err = db.Exec(`INSERT INTO tasks (title, instructions, status, phase)
 		VALUES ('x', 'y', 'executing', 'pending')`)
 	if err == nil {
 		t.Error("inconsistent phase accepted")
 	}
-	// Terminal status without completed_at.
 	_, err = db.Exec(`INSERT INTO tasks (title, instructions, status, phase)
 		VALUES ('x', 'y', 'completed', 'terminal')`)
 	if err == nil {
 		t.Error("terminal status without completed_at accepted")
 	}
-	// Empty title.
 	_, err = db.Exec(`INSERT INTO tasks (title, instructions) VALUES ('', 'y')`)
 	if err == nil {
 		t.Error("empty title accepted")
@@ -471,7 +462,6 @@ func TestEventsAfterReturnsSuffixAcrossAttempts(t *testing.T) {
 			len(all), all[len(all)-1].AttemptNumber)
 	}
 
-	// A cursor at any position must yield exactly the remaining suffix.
 	for i, e := range all {
 		after, err := s.EventsAfter(ctx, tk.ID, e.AttemptNumber, e.SequenceNumber, 0)
 		if err != nil {
@@ -489,7 +479,6 @@ func TestEventsAfterReturnsSuffixAcrossAttempts(t *testing.T) {
 		}
 	}
 
-	// Zero cursor replays the whole timeline.
 	fromStart, err := s.EventsAfter(ctx, tk.ID, 0, 0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -517,7 +506,6 @@ func TestEnsureGitContextFirstWriterWins(t *testing.T) {
 		t.Fatalf("EnsureGitContext = %q, %q, %v", base, branch, err)
 	}
 
-	// A recovered owner re-resolving keeps the original values.
 	sha2 := "2222222222222222222222222222222222222222"
 	base, branch, err = ts.EnsureGitContext(ctx, tk.ID, sha2, "agent-trail/second")
 	if err != nil || base != sha1 || branch != "agent-trail/first" {

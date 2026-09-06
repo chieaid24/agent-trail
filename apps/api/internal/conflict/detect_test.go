@@ -46,7 +46,7 @@ func TestOverlap(t *testing.T) {
 		{
 			label: "insertion adjacent to an edit",
 			a: ChangeSet{Files: []string{"app.go"}, Hunks: map[string][]gitworkspace.LineRange{
-				"app.go": {{Start: 4, End: 4}}, // pure insertion after line 4
+				"app.go": {{Start: 4, End: 4}},
 			}},
 			b: ChangeSet{Files: []string{"app.go"}, Hunks: map[string][]gitworkspace.LineRange{
 				"app.go": {{Start: 6, End: 6}},

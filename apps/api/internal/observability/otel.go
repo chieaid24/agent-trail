@@ -20,10 +20,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TracerName scopes every span the control plane emits.
 const TracerName = "agent-trail"
 
-// Telemetry owns one process's metrics and trace exporters.
 type Telemetry struct {
 	Metrics   *Registry
 	shutdowns []func(context.Context) error
@@ -33,15 +31,12 @@ type setupOptions struct {
 	spanExporter sdktrace.SpanExporter
 }
 
-// SetupOption configures optional local telemetry consumers.
 type SetupOption func(*setupOptions)
 
-// WithSpanExporter adds an exporter alongside the configured OTLP exporter.
 func WithSpanExporter(exporter sdktrace.SpanExporter) SetupOption {
 	return func(options *setupOptions) { options.spanExporter = exporter }
 }
 
-// Setup wires Prometheus plus optional plaintext OTLP/gRPC export.
 func Setup(service, endpoint string, logger *slog.Logger, options ...SetupOption) (*Telemetry, error) {
 	var configured setupOptions
 	for _, option := range options {
@@ -155,7 +150,6 @@ func (p *taskContextProcessor) ForceFlush(ctx context.Context) error {
 	return p.next.ForceFlush(ctx)
 }
 
-// Shutdown flushes pending telemetry; call on binary exit.
 func (t *Telemetry) Shutdown(ctx context.Context) error {
 	var errs []error
 	for _, fn := range t.shutdowns {
@@ -164,16 +158,14 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// Tracer returns the control-plane tracer; a no-op unless Setup ran.
 func Tracer() trace.Tracer { return otel.Tracer(TracerName) }
 
-// WithTraceParent binds ctx to an existing 32-hex correlation ID.
 func WithTraceParent(ctx context.Context, traceID string) context.Context {
 	tid, err := trace.TraceIDFromHex(traceID)
 	if err != nil {
 		return ctx
 	}
-	// A valid remote parent also needs a non-zero span ID.
+	// valid remote parent needs a non-zero span id
 	var sid trace.SpanID
 	binary.BigEndian.PutUint64(sid[:], binary.BigEndian.Uint64(tid[8:])|1)
 	return trace.ContextWithSpanContext(ctx, trace.NewSpanContext(trace.SpanContextConfig{

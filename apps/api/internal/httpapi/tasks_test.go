@@ -13,7 +13,6 @@ import (
 
 const testUUID = "3b241101-e2bb-4255-8caf-4136c566a962"
 
-// fakeTasks records calls and returns canned results per method.
 type fakeTasks struct {
 	task   task.Task
 	tasks  []task.Task
@@ -51,8 +50,6 @@ func (f *fakeTasks) Events(_ context.Context, id string, limit int) ([]task.Even
 	return f.events, f.err
 }
 
-// EventsAfter filters the canned events by the (attempt, sequence) cursor,
-// mirroring the store's ordering contract.
 func (f *fakeTasks) EventsAfter(_ context.Context, id string, afterAttempt int, afterSequence int64, limit int) ([]task.Event, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -202,7 +199,6 @@ func TestCancelTask(t *testing.T) {
 		t.Errorf("cancel call = %q %q", f.cancelID, f.cancelReason)
 	}
 
-	// Empty body is allowed.
 	rec = do(t, h, http.MethodPost, "/api/v1/tasks/"+testUUID+"/cancel", "")
 	if rec.Code != http.StatusOK {
 		t.Errorf("empty body status = %d, want 200", rec.Code)

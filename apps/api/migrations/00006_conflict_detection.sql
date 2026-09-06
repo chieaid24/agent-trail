@@ -27,8 +27,6 @@ CREATE TABLE task_conflicts (
         REFERENCES tasks (id, repository_id)
 );
 
--- Pair lookups by the first member use the unique pair index; this covers
--- lookups by the second.
 CREATE INDEX task_conflicts_task_b_idx ON task_conflicts (task_b_id);
 
 -- +goose Down

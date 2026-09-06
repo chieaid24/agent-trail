@@ -11,7 +11,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// fakeValidations returns canned validation results.
 type fakeValidations struct {
 	results []validation.StoredResult
 	err     error
@@ -21,7 +20,6 @@ func (f *fakeValidations) ListForTask(_ context.Context, taskID string) ([]valid
 	return f.results, f.err
 }
 
-// fakeEvidence returns a canned evidence report.
 type fakeEvidence struct {
 	stored evidence.Stored
 	err    error

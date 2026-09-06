@@ -11,7 +11,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// DashboardService serves the operator dashboard read models.
 type DashboardService interface {
 	ListOrganizations(ctx context.Context) ([]dashboard.Organization, error)
 	GetOrganization(ctx context.Context, id string) (dashboard.Organization, error)
@@ -131,10 +130,7 @@ func (s *Server) handleRepositoryDisable(w http.ResponseWriter, r *http.Request)
 	s.setRepositoryEnabled(w, r, false)
 }
 
-// setRepositoryEnabled flips repository enablement. With auth configured
-// the caller must belong to the repository's organization;
-// the structured log line is the audit
-// record the threat model requires for enablement changes.
+// caller must belong to the repo's org; the log line is the audit record for enablement changes
 func (s *Server) setRepositoryEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
 	if !s.dashboardAvailable(w) {
 		return

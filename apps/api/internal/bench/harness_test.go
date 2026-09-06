@@ -19,13 +19,9 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// benchPoolSize caps the shared *sql.DB pool: the webhook processor spawns
-// one goroutine per unique delivery, and an uncapped pool would exhaust
-// the database's max_connections under a 10k-delivery run.
+// uncapped pool would exhaust max_connections under a 10k-delivery run
 const benchPoolSize = 50
 
-// guard skips the test outside a benchmark run so the CI gate's plain
-// `go test ./...` never executes a load test.
 func guard(t *testing.T) {
 	t.Helper()
 	if os.Getenv("AGENT_TRAIL_BENCH") == "" {
@@ -33,8 +29,6 @@ func guard(t *testing.T) {
 	}
 }
 
-// openDB returns the migrated, truncated benchmark database with a bounded
-// connection pool.
 func openDB(t *testing.T) *sql.DB {
 	t.Helper()
 	guard(t)
@@ -47,18 +41,12 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// fleet is a set of in-process runner hosts working one shared queue. One
-// cmd/worker process hosts exactly one serial runner, so N concurrent
-// runners are N hosts.
 type fleet struct {
 	cancel context.CancelFunc
 	done   chan error
 	n      int
 }
 
-// startFleet launches n hosts against the shared stores. Each host is its
-// own registered runner with its own executor, exactly like n worker
-// processes pointed at one database.
 func startFleet(db *sql.DB, s *runner.Store, ts *task.Store, n int, adapter agent.Adapter, lease time.Duration, name string) *fleet {
 	ctx, cancel := context.WithCancel(context.Background())
 	f := &fleet{cancel: cancel, done: make(chan error, n), n: n}
@@ -87,7 +75,6 @@ func startFleet(db *sql.DB, s *runner.Store, ts *task.Store, n int, adapter agen
 	return f
 }
 
-// stop cancels the fleet and waits for every host to exit cleanly.
 func (f *fleet) stop(t *testing.T) {
 	t.Helper()
 	f.cancel()
@@ -104,7 +91,6 @@ func (f *fleet) stop(t *testing.T) {
 	}
 }
 
-// queryInt runs a single-int query.
 func queryInt(t *testing.T, db *sql.DB, query string, args ...any) int {
 	t.Helper()
 	var n int
@@ -115,7 +101,6 @@ func queryInt(t *testing.T, db *sql.DB, query string, args ...any) int {
 	return n
 }
 
-// waitInt polls query until it returns want or the timeout passes.
 func waitInt(t *testing.T, db *sql.DB, query string, want int, timeout time.Duration, what string, args ...any) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -131,7 +116,6 @@ func waitInt(t *testing.T, db *sql.DB, query string, want int, timeout time.Dura
 	}
 }
 
-// createTasks creates n tasks whose instructions come from gen(i).
 func createTasks(t *testing.T, ts *task.Store, n int, gen func(i int) task.CreateParams) []task.Task {
 	t.Helper()
 	tasks := make([]task.Task, 0, n)
@@ -145,9 +129,7 @@ func createTasks(t *testing.T, ts *task.Store, n int, gen func(i int) task.Creat
 	return tasks
 }
 
-// assertNoDoubleAssignment fails when any attempt recorded more than one
-// agent.started event: with no injected recovery, a second start on one
-// attempt means two runners executed it.
+// second agent.started on one attempt means two runners executed it
 func assertNoDoubleAssignment(t *testing.T, db *sql.DB) {
 	t.Helper()
 	doubled := queryInt(t, db, `
@@ -161,7 +143,6 @@ func assertNoDoubleAssignment(t *testing.T, db *sql.DB) {
 	}
 }
 
-// assertLeasesReleased fails when any attempt still holds a lease.
 func assertLeasesReleased(t *testing.T, db *sql.DB) {
 	t.Helper()
 	held := queryInt(t, db,
@@ -171,9 +152,6 @@ func assertLeasesReleased(t *testing.T, db *sql.DB) {
 	}
 }
 
-// stageTimings measures queue wait (task.queued -> workspace.provisioning)
-// and provisioning (workspace.provisioning -> workspace.ready) per task
-// from the recorded timeline.
 type stageTimings struct {
 	queueWait    []time.Duration
 	provisioning []time.Duration
@@ -215,7 +193,6 @@ func collectStageTimings(t *testing.T, db *sql.DB) stageTimings {
 	return out
 }
 
-// percentile returns the p-th percentile (0-100) of ds by nearest-rank.
 func percentile(ds []time.Duration, p float64) time.Duration {
 	if len(ds) == 0 {
 		return 0
@@ -232,7 +209,6 @@ func percentile(ds []time.Duration, p float64) time.Duration {
 	return sorted[rank]
 }
 
-// reportDurations logs one measured distribution in a grep-friendly form.
 func reportDurations(t *testing.T, name string, ds []time.Duration) {
 	t.Helper()
 	if len(ds) == 0 {

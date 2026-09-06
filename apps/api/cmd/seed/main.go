@@ -1,6 +1,4 @@
-// Command seed loads sample tasks in representative states so the dashboard
-// and API have data to show. Idempotent: it refuses to run against a
-// database that already has tasks. DATABASE_URL must be set.
+// refuses to run against a database that already has tasks
 package main
 
 import (
@@ -28,7 +26,6 @@ func main() {
 	}
 }
 
-// seedTask pairs create params with the statuses to walk the task through.
 type seedTask struct {
 	title        string
 	instructions string
@@ -53,7 +50,6 @@ func seedTasks() []seedTask {
 			title:        "Add pagination to the audit log",
 			instructions: "Add cursor pagination to the audit log endpoint.",
 			repository:   -1,
-			// Stays queued: shows the pending column.
 		},
 		{
 			title:        "Upgrade the TLS library",

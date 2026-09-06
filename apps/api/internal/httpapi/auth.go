@@ -15,19 +15,15 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// Cookie names. Both are host-scoped: the dashboard and the API share one
-// browser origin through the /backend proxy (apps/web/next.config.ts).
+// host-scoped cookies: dashboard and api share one origin via /backend proxy
 const (
 	sessionCookieName = "agent_trail_session"
 	stateCookieName   = "agent_trail_oauth_state"
 	stateCookieMaxAge = 10 * time.Minute
 )
 
-// callbackPath is where GitHub redirects the browser after authorization,
-// on the dashboard origin (the /backend prefix is the proxy's).
 const callbackPath = "/backend/auth/github/callback"
 
-// AuthService is the slice of auth.Service the HTTP layer needs.
 type AuthService interface {
 	AuthorizeURL(state, redirectURI string) string
 	CompleteLogin(ctx context.Context, code, redirectURI string) (auth.User, string, error)
@@ -38,9 +34,6 @@ type AuthService interface {
 	InstallURL() string
 }
 
-// WithAuth enables GitHub OAuth login and session enforcement across
-// /api/v1. publicOrigin is the browser-facing dashboard origin; secure
-// marks the cookies Secure.
 func WithAuth(service AuthService, publicOrigin string, secure bool) Option {
 	return func(s *Server) {
 		s.auth = service
@@ -55,16 +48,12 @@ func withUser(ctx context.Context, user auth.User) context.Context {
 	return context.WithValue(ctx, userContextKey{}, user)
 }
 
-// userFrom returns the session user requireSession stored on the context.
 func userFrom(ctx context.Context) (auth.User, bool) {
 	user, ok := ctx.Value(userContextKey{}).(auth.User)
 	return user, ok
 }
 
-// requireSession rejects requests without a live session cookie. It is
-// applied to /api/v1 and /me only when auth is configured; the SSE stream
-// sits under it too, which is why the session travels as a cookie
-// (EventSource cannot set headers).
+// session travels as a cookie because eventsource cannot set headers
 func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(sessionCookieName)
@@ -98,8 +87,6 @@ func (s *Server) authAvailable(w http.ResponseWriter) bool {
 	return false
 }
 
-// handleAuthStart begins the OAuth flow: it binds a random state to the
-// browser and redirects to GitHub.
 func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 	if !s.authAvailable(w) {
 		return
@@ -125,8 +112,6 @@ func (s *Server) handleAuthStart(w http.ResponseWriter, r *http.Request) {
 		http.StatusFound)
 }
 
-// handleAuthCallback finishes the OAuth flow. Failures redirect to the
-// login page with an error code; details stay in the logs.
 func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if !s.authAvailable(w) {
 		return
@@ -135,9 +120,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 	if query.Get("error") != "" {
-		// The user cancelled on GitHub, or GitHub rejected the request.
-		// Reported before the state check so a denial after the state
-		// cookie expired still reads as what it was.
+		// checked before state so a denial after state-cookie expiry still reads as denial
 		s.redirectLoginError(w, r, "github_denied")
 		return
 	}
@@ -173,8 +156,6 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, s.authPublicOrigin+"/", http.StatusFound)
 }
 
-// handleAuthLogout revokes the session; logging out twice is a 204 both
-// times.
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if !s.authAvailable(w) {
 		return
@@ -199,7 +180,6 @@ type meResponse struct {
 	InstallURL string    `json:"install_url,omitempty"`
 }
 
-// handleMe returns the session user; requireSession guards the route.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFrom(r.Context())
 	if !ok {
