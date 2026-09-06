@@ -1,8 +1,4 @@
-// Package githubfixture simulates the slice of GitHub the runner touches:
-// the handful of REST endpoints publishing calls, a bare git origin, and a
-// signed /agent-trail run webhook delivery. cmd/slice embeds it in-process;
-// cmd/fixture-github serves it over the network so a runner isolated in a
-// Kubernetes Job can exercise the full task pipeline without GitHub.
+// simulates the slice of github the runner touches: rest endpoints, bare origin, signed webhook
 package githubfixture
 
 import (
@@ -24,8 +20,6 @@ import (
 	"time"
 )
 
-// Server simulates the GitHub REST endpoints publishing calls, backed by a
-// bare origin repository on disk.
 type Server struct {
 	origin string
 
@@ -36,26 +30,22 @@ type Server struct {
 	comments []string
 }
 
-// NewServer returns a fixture for the bare repository at origin.
 func NewServer(origin string) *Server {
 	return &Server{origin: origin}
 }
 
-// PROpen reports whether a draft pull request was opened.
 func (g *Server) PROpen() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.prOpen
 }
 
-// PRBody returns the current pull request body.
 func (g *Server) PRBody() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.prBody
 }
 
-// CommentCount returns how many issue comments were posted.
 func (g *Server) CommentCount() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -137,9 +127,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// BuildOrigin creates the sample repository under dir: a bare origin with
-// one commit on main, anonymous push enabled for the fixture's smart-HTTP
-// serving. Returns the origin path and the base commit.
 func BuildOrigin(dir string) (origin, baseSHA string, err error) {
 	src := filepath.Join(dir, "src")
 	if err := os.MkdirAll(src, 0o750); err != nil {
@@ -167,15 +154,13 @@ func BuildOrigin(dir string) (origin, baseSHA string, err error) {
 	if _, err := gitIn(dir, "clone", "-q", "--bare", src, "origin.git"); err != nil {
 		return "", "", err
 	}
-	// Fixture-only: git http-backend refuses anonymous pushes otherwise.
+	// fixture-only: http-backend refuses anonymous pushes otherwise
 	if _, err := gitIn(origin, "config", "http.receivepack", "true"); err != nil {
 		return "", "", err
 	}
 	return origin, baseSHA, nil
 }
 
-// RunCommandRequest builds a signed /agent-trail run issue_comment webhook
-// request, exactly as GitHub would deliver it.
 func RunCommandRequest(secret []byte, installationID, repositoryID, issueNumber int) (*http.Request, error) {
 	payload := map[string]any{
 		"action": "created",
@@ -216,7 +201,6 @@ func RunCommandRequest(secret []byte, installationID, repositoryID, issueNumber 
 	return req, nil
 }
 
-// EphemeralKey generates a single-run RSA key for the app JWT.
 func EphemeralKey() ([]byte, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -227,9 +211,7 @@ func EphemeralKey() ([]byte, error) {
 	}), nil
 }
 
-// gitIn runs git in dir with an allowlisted environment, never os.Environ():
-// under a git hook the parent exports GIT_DIR/GIT_INDEX_FILE, and inheriting
-// them makes these commands operate on the invoking repository instead.
+// allowlisted env, never os.Environ: a parent git hook's GIT_DIR would redirect these commands
 func gitIn(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir

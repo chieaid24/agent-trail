@@ -18,14 +18,10 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// CheckRunName is the check run created for each GitHub-sourced task and
-// resolved at publish time.
 const CheckRunName = "Agent Trail Task"
 
-// processTimeout bounds the asynchronous handling of one delivery.
 const processTimeout = 30 * time.Second
 
-// Delivery identifies one accepted webhook delivery being processed.
 type Delivery struct {
 	ID        string
 	EventType string
@@ -33,16 +29,12 @@ type Delivery struct {
 	TraceID   string
 }
 
-// TaskService is the slice of the task domain the integration consumes;
-// implemented by *task.Store.
 type TaskService interface {
 	Create(ctx context.Context, p task.CreateParams) (task.Task, error)
 	ActiveTaskForIssue(ctx context.Context, repositoryID string, issueNumber int64) (task.Task, bool, error)
 	AppendEvent(ctx context.Context, taskID, eventType, source string, payload map[string]string) error
 }
 
-// API is the slice of the GitHub client the processor calls; implemented by
-// *Client, faked in tests.
 type API interface {
 	ListInstallationRepositories(ctx context.Context, installationID int64) ([]Repository, error)
 	CollaboratorPermission(ctx context.Context, installationID int64, owner, repo, username string) (string, error)
@@ -51,20 +43,17 @@ type API interface {
 	CreateCheckRun(ctx context.Context, installationID int64, owner, repo string, p CheckRunParams) (int64, error)
 }
 
-// Processor handles accepted deliveries asynchronously: installation and
-// repository sync, and the /agent-trail run command flow.
 type Processor struct {
 	store  *Store
 	tasks  TaskService
 	api    API
 	logger *slog.Logger
 
-	tasksCreated *observability.Counter // agent_trail_task_created_total
+	tasksCreated *observability.Counter
 
 	wg sync.WaitGroup
 }
 
-// NewProcessor wires a Processor.
 func NewProcessor(store *Store, tasks TaskService, api API, logger *slog.Logger, metrics *observability.Registry) *Processor {
 	return &Processor{
 		store:  store,
@@ -76,7 +65,6 @@ func NewProcessor(store *Store, tasks TaskService, api API, logger *slog.Logger,
 	}
 }
 
-// Dispatch processes the delivery off the webhook request goroutine.
 func (p *Processor) Dispatch(d Delivery, payload []byte) {
 	p.wg.Add(1)
 	go func() {
@@ -94,7 +82,6 @@ func (p *Processor) Dispatch(d Delivery, payload []byte) {
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), processTimeout)
 		defer cancel()
-		// Reuse the delivery correlation ID for logs and traces.
 		pctx := observability.WithTraceParent(
 			observability.WithTraceID(ctx, d.TraceID), d.TraceID)
 		pctx, span := observability.Tracer().Start(pctx, "webhook.process",
@@ -107,10 +94,8 @@ func (p *Processor) Dispatch(d Delivery, payload []byte) {
 	}()
 }
 
-// Wait blocks until every dispatched delivery finishes; called on shutdown.
 func (p *Processor) Wait() { p.wg.Wait() }
 
-// process routes one delivery and records its outcome in the ledger.
 func (p *Processor) process(ctx context.Context, d Delivery, payload []byte) {
 	status, err := p.handle(ctx, d, payload)
 	failure := ""
@@ -133,8 +118,7 @@ func (p *Processor) process(ctx context.Context, d Delivery, payload []byte) {
 			slog.String("status", status),
 		)
 	}
-	// Fresh deadline: if handle consumed the processing budget, the ledger
-	// update must still land or the row is stuck pending forever.
+	// fresh deadline: ledger update must land even if handle spent the budget, else row stuck pending forever
 	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := p.store.MarkDelivery(markCtx, d.ID, status, failure); err != nil {
@@ -147,8 +131,6 @@ func (p *Processor) process(ctx context.Context, d Delivery, payload []byte) {
 	}
 }
 
-// handle processes one delivery; the returned status is processed or
-// ignored.
 func (p *Processor) handle(ctx context.Context, d Delivery, payload []byte) (string, error) {
 	switch d.EventType {
 	case "installation":
@@ -158,13 +140,10 @@ func (p *Processor) handle(ctx context.Context, d Delivery, payload []byte) (str
 	case "issue_comment":
 		return p.handleIssueComment(ctx, d, payload)
 	default:
-		// ping, issues, pull_request, ... - subscribed for later
-		// milestones, recorded and skipped.
 		return "ignored", nil
 	}
 }
 
-// installationPayload is the slice of installation* events the sync uses.
 type installationPayload struct {
 	Action       string `json:"action"`
 	Installation struct {
@@ -210,9 +189,7 @@ func (p *Processor) handleInstallation(ctx context.Context, d Delivery, payload 
 	}
 }
 
-// syncInstallation upserts the installation and refreshes its repository
-// list from the API (webhook payloads lack default_branch and clone_url, so
-// the API list is the source of truth).
+// webhook payloads lack default_branch/clone_url; api list is source of truth
 func (p *Processor) syncInstallation(ctx context.Context, ev installationPayload) error {
 	err := p.store.UpsertInstallation(ctx, InstallationParams{
 		GitHubInstallationID: ev.Installation.ID,
@@ -240,15 +217,13 @@ func (p *Processor) handleInstallationRepositories(ctx context.Context, payload 
 	if ev.Installation.ID == 0 {
 		return "", errors.New("installation_repositories payload without installation id")
 	}
-	// added and removed both resync the full list.
+	// added and removed both resync the full list
 	if err := p.syncInstallation(ctx, ev); err != nil {
 		return "", err
 	}
 	return "processed", nil
 }
 
-// issueCommentPayload is the slice of issue_comment events the command flow
-// uses.
 type issueCommentPayload struct {
 	Action  string `json:"action"`
 	Comment struct {
@@ -264,7 +239,7 @@ type issueCommentPayload struct {
 		Number      int64           `json:"number"`
 		Title       string          `json:"title"`
 		Body        string          `json:"body"`
-		PullRequest json.RawMessage `json:"pull_request"` // non-nil on PR comments
+		PullRequest json.RawMessage `json:"pull_request"` // non-nil on pr comments
 	} `json:"issue"`
 	Repository struct {
 		ID    int64 `json:"id"`
@@ -287,8 +262,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 	if ev.Action != "created" {
 		return "ignored", nil
 	}
-	// A bot comment can never run commands; without this, the ack comment
-	// of a bot-authored command could loop.
+	// bot comments never run commands, else a bot-authored ack could loop
 	if ev.Comment.User.Type == "Bot" {
 		return "ignored", nil
 	}
@@ -302,9 +276,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 	if err != nil {
 		return "", err
 	}
-	// Known limitation: usage, PR, and disabled-repo replies post before the
-	// permission check, so any commenter can draw one bounded reply. Running
-	// a task stays gated on write access below.
+	// limitation: usage/pr/disabled replies post before the permission check, so any commenter can draw one bounded reply; running a task stays write-gated
 	reply := func(body string) error {
 		return p.api.CreateIssueComment(ctx, instID, repo.Owner, repo.Name,
 			ev.Issue.Number, body)
@@ -369,7 +341,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 		RepositoryID:      &repo.ID,
 	})
 	if errors.Is(err, task.ErrActiveTaskExists) {
-		// Lost a race with a concurrent command on the same issue.
+		// lost a race with a concurrent command on the same issue
 		existing, active, lookupErr := p.tasks.ActiveTaskForIssue(ctx, repo.ID, ev.Issue.Number)
 		if lookupErr != nil || !active {
 			return "", fmt.Errorf("issue already has an active task; lookup: %w", lookupErr)
@@ -393,8 +365,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 		slog.String("commenter", ev.Comment.User.Login),
 	)
 
-	// Side effects after the durable task: their failure is logged and
-	// recorded on the timeline, never unwinds the task.
+	// side effects after the durable task: failures logged, never unwind the task
 	p.createCheckRun(ctx, d, instID, repo, created)
 	ack := fmt.Sprintf(
 		"Agent Trail queued task `%s` for this issue (requested by @%s). "+
@@ -415,11 +386,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 	return "processed", nil
 }
 
-// repositoryForCommand resolves the comment's repository, self-healing a
-// missing row by resyncing the installation once (covers apps installed
-// before the webhook endpoint existed). The installation account is the
-// repository owner: an installation only ever covers its own account's
-// repositories.
+// self-heals a missing row by one installation resync; installation account is the repo owner
 func (p *Processor) repositoryForCommand(ctx context.Context, ev issueCommentPayload) (StoredRepository, error) {
 	repo, err := p.store.RepositoryByGitHubID(ctx, ev.Repository.ID)
 	if !errors.Is(err, ErrRepositoryNotFound) {
@@ -490,8 +457,6 @@ func activeTaskReply(taskID string) string {
 		"Cancel it before starting another.", taskID)
 }
 
-// composeInstructions builds the task instructions from the issue and the
-// triggering comment, bounded to the tasks.instructions limit.
 func composeInstructions(ev issueCommentPayload) string {
 	const limit = 100000
 	full := fmt.Sprintf("%s\n\n%s\n\n---\nTriggering comment by @%s:\n\n%s",
@@ -499,8 +464,7 @@ func composeInstructions(ev issueCommentPayload) string {
 	return truncateUTF8(full, limit)
 }
 
-// truncateUTF8 bounds s to max bytes without splitting a rune (the DB check
-// counts characters, and bytes >= characters).
+// byte bound without splitting a rune; db check counts chars and bytes >= chars
 func truncateUTF8(s string, max int) string {
 	if len(s) <= max {
 		return s

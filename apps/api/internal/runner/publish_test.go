@@ -30,14 +30,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// gitRun runs git for test fixtures with a fixed identity.
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	// Allowlist, never os.Environ(): under a git hook (the pre-commit gate)
-	// the parent exports GIT_DIR/GIT_INDEX_FILE, and inheriting them makes
-	// these commands operate on the invoking repository instead of dir.
+	// allowlist env, never os.environ: a parent hook's GIT_DIR would retarget these commands
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1",
@@ -52,7 +49,6 @@ func gitRun(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// buildPublishOrigin creates a bare origin with one commit on main.
 func buildPublishOrigin(t *testing.T) (originPath, baseSHA string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -72,7 +68,6 @@ func buildPublishOrigin(t *testing.T) (originPath, baseSHA string) {
 	return originPath, baseSHA
 }
 
-// fakePublish implements PublishGitHub in memory.
 type fakePublish struct {
 	mu          sync.Mutex
 	branchHeads map[string]string
@@ -87,8 +82,7 @@ type fakePublish struct {
 	commentSeen chan struct{}
 	commentDone chan struct{}
 	tokenErr    error
-	// cancelOnComment, when set, makes the next CreateIssueComment cancel
-	// the run and fail once: the "owner died mid-publish" simulation.
+	// next CreateIssueComment cancels the run and fails once: owner-died-mid-publish sim
 	cancelOnComment context.CancelFunc
 }
 
@@ -199,7 +193,6 @@ func (f *fakePublish) ListCheckRuns(_ context.Context, _ int64, _, _, ref, name 
 	return runs, nil
 }
 
-// stubAdapter runs a session that changes nothing (the no-change outcome).
 type stubAdapter struct{}
 
 func (stubAdapter) Name() string                                { return "stub" }
@@ -219,8 +212,6 @@ func (s stubSession) Wait(context.Context) (agent.Result, error) {
 	return agent.Result{Summary: "nothing to do"}, nil
 }
 
-// publishFixture is a claimable GitHub-sourced task wired for publishing
-// against a local bare origin and an in-memory GitHub API.
 type publishFixture struct {
 	db       *sql.DB
 	store    *Store
@@ -318,10 +309,6 @@ func (f *publishFixture) attemptRow(t *testing.T, attemptID string) (finalSHA sq
 	return finalSHA, prNumber
 }
 
-// TestPublishOpensOneDraftPR is the milestone acceptance happy path: the
-// fake agent's changes land as one commit on an agent-trail/ branch in the
-// origin, one draft PR whose body carries the verified-evidence table, one
-// completed check run, one issue comment, task at awaiting_review.
 func TestPublishOpensOneDraftPR(t *testing.T) {
 	f := newPublishFixture(t)
 	ctx := context.Background()
@@ -353,13 +340,11 @@ func TestPublishOpensOneDraftPR(t *testing.T) {
 		t.Fatalf("pull request number = %+v", prNumber)
 	}
 
-	// The branch is on the origin at the final commit.
 	pushed := gitRun(t, f.origin, "rev-parse", "refs/heads/"+*got.WorkingBranch)
 	if pushed != finalSHA.String {
 		t.Fatalf("origin branch at %s, want %s", pushed, finalSHA.String)
 	}
 
-	// One draft PR, evidence-backed body.
 	if f.fake.prsCreated != 1 {
 		t.Fatalf("prs created = %d, want 1", f.fake.prsCreated)
 	}
@@ -373,7 +358,6 @@ func TestPublishOpensOneDraftPR(t *testing.T) {
 		}
 	}
 
-	// One completed check run keyed to the attempt on the final commit.
 	if len(f.fake.checks) != 1 {
 		t.Fatalf("checks created = %d, want 1", len(f.fake.checks))
 	}
@@ -398,7 +382,6 @@ func TestPublishOpensOneDraftPR(t *testing.T) {
 		}
 	}
 
-	// The settled attempt released its worktree.
 	entries, err := os.ReadDir(filepath.Join(f.wsRoot, "workspaces"))
 	if err != nil {
 		t.Fatal(err)
@@ -556,11 +539,6 @@ func TestPublishContinuesWhenConflictDetectionFails(t *testing.T) {
 	}
 }
 
-// TestPublishRetryCreatesNoSecondPR is the idempotency acceptance: an owner
-// dies mid-publish (after commit, push, PR, and check, before the issue
-// comment and the transition), and the recovering owner reattaches the
-// surviving worktree and replays every step without creating a second
-// commit, PR, or check.
 func TestPublishRetryCreatesNoSecondPR(t *testing.T) {
 	f := newPublishFixture(t)
 	c := f.claim(t)
@@ -614,7 +592,6 @@ func TestPublishRetryCreatesNoSecondPR(t *testing.T) {
 	if after.Status != task.StatusAwaitingReview {
 		t.Fatalf("task status = %s, want awaiting_review", after.Status)
 	}
-	// The retry reused the first owner's commit: one commit past base.
 	secondFinal, prNumber := f.attemptRow(t, c.AttemptID)
 	if !secondFinal.Valid || secondFinal.String != firstFinal.String {
 		t.Fatalf("final commit changed on retry: %+v -> %+v", firstFinal, secondFinal)
@@ -846,9 +823,6 @@ func TestLeaseLostOwnerDoesNotRemoveSuccessorWorkspace(t *testing.T) {
 	}
 }
 
-// TestPublishNoChangeCreatesNoPR is the empty-diff acceptance: a session
-// that changes nothing opens no PR, resolves the check neutral on the base
-// commit, explains itself on the issue, and fails the task as no_change.
 func TestPublishNoChangeCreatesNoPR(t *testing.T) {
 	f := newPublishFixture(t)
 	ctx := context.Background()
@@ -885,12 +859,10 @@ func TestPublishNoChangeCreatesNoPR(t *testing.T) {
 		t.Fatalf("comments = %v", f.fake.comments)
 	}
 
-	// The no-change comment is a GitHub side effect, so it is on the timeline.
 	assertSubsequence(t, timelineTypes(t, f.tasks, f.task.ID), []string{
 		"publishing.no_change", "github.comment.posted",
 	})
 
-	// Nothing was pushed: the origin still has only main.
 	refs := gitRun(t, f.origin, "for-each-ref", "--format=%(refname)", "refs/heads")
 	if refs != "refs/heads/main" {
 		t.Fatalf("origin refs = %q, want only main", refs)

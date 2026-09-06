@@ -90,8 +90,7 @@ func TestFakeSessionHappyPath(t *testing.T) {
 		t.Fatalf("fixture missing instructions:\n%s", content)
 	}
 
-	// The written validation file must itself parse under the platform's
-	// own limits, or every fake run would end in a config error.
+	// written validation file must parse under platform limits or every fake run config-errors
 	if _, found, err := validation.Load(dir); err != nil || !found {
 		t.Fatalf("validation.Load = found %v, err %v", found, err)
 	}
@@ -129,8 +128,7 @@ func TestFakeSessionCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Consume session_started so the producer is mid-flight, then cancel:
-	// the unbuffered channel guarantees the next stopped() check sees it.
+	// unbuffered channel: cancel after session_started is seen by the next stopped() check
 	first := <-sess.Events()
 	if first.Type != EventSessionStarted {
 		t.Fatalf("first event = %s, want %s", first.Type, EventSessionStarted)

@@ -9,12 +9,7 @@ import (
 	"time"
 )
 
-// TestClaudeCodeRealCLISmoke drives the real Claude Code CLI once, end to
-// end: a fixture instruction in a temp workspace must produce an edited file
-// and a completed session. Opt-in because it spends provider tokens and
-// needs an authenticated CLI on the host:
-//
-//	REAL_CLAUDE_SMOKE=1 go test ./internal/agent -run RealCLISmoke -v
+// opt-in, spends tokens: REAL_CLAUDE_SMOKE=1 go test ./internal/agent -run RealCLISmoke -v
 func TestClaudeCodeRealCLISmoke(t *testing.T) {
 	if os.Getenv("REAL_CLAUDE_SMOKE") == "" {
 		t.Skip("REAL_CLAUDE_SMOKE not set (spends provider tokens)")

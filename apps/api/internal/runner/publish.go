@@ -18,8 +18,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// PublishGitHub is the slice of the GitHub client publishing calls;
-// implemented by *github.Client, faked in tests.
 type PublishGitHub interface {
 	InstallationToken(ctx context.Context, installationID int64) (string, error)
 	BranchHeadSHA(ctx context.Context, installationID int64, owner, repo, branch string) (string, error)
@@ -32,26 +30,17 @@ type PublishGitHub interface {
 	ListCheckRuns(ctx context.Context, installationID int64, owner, repo, ref, checkName string) ([]github.CheckRun, error)
 }
 
-// RepositoryResolver resolves a task's repository publishing context;
-// implemented by *github.Store.
 type RepositoryResolver interface {
 	RepositoryContextByID(ctx context.Context, repositoryID string) (github.RepositoryContext, error)
 }
 
-// checkOutputLimit bounds the check-run output summary (GitHub caps it at
-// 65535 characters).
+// github caps check output at 65535 chars
 const checkOutputLimit = 60000
 
-// publishTarget carries the resolved repository context of a publishable
-// task. nil means the fake local flow: no repository, or publishing
-// dependencies not configured.
 type publishTarget struct {
 	repo github.RepositoryContext
 }
 
-// publishTarget resolves whether and where the task publishes. A repository
-// that cannot be resolved (deleted, or its installation gone or suspended)
-// fails the task: it was asked to publish and never can.
 func (e *Executor) publishTarget(ctx context.Context, c *Claim, t task.Task) (*publishTarget, error) {
 	if t.RepositoryID == nil || e.Workspaces == nil || e.GitHub == nil || e.Repos == nil {
 		return nil, nil
@@ -66,9 +55,7 @@ func (e *Executor) publishTarget(ctx context.Context, c *Claim, t task.Task) (*p
 	return &publishTarget{repo: rc}, nil
 }
 
-// provisionWorkspace resolves the base commit and working branch (first
-// recorded values win, so a recovered attempt reuses them), records them,
-// and cuts the attempt's git worktree from the repository mirror.
+// first recorded base/branch win so a recovered attempt reuses them
 func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task, pub *publishTarget) (gitworkspace.Workspace, error) {
 	rc := pub.repo
 	base := ""
@@ -106,9 +93,7 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 	}
 	ws, err := e.createWorktree(ctx, c, params)
 	if err != nil {
-		// A dead previous owner on this host may have left the worktree or
-		// its branch behind; clear both and retry once. A cleanup failure
-		// must not mask the original error.
+		// dead prior owner may have left worktree/branch behind: clear both, retry once; cleanup failure must not mask err
 		if fenceErr := e.fenceLeaseOwnership(ctx, c); fenceErr != nil {
 			return gitworkspace.Workspace{}, errors.Join(err,
 				fmt.Errorf("fence stale workspace cleanup: %w", fenceErr))
@@ -126,9 +111,7 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 	return ws, nil
 }
 
-// repoRef builds the mirror reference with a fresh installation token
-// embedded in the clone URL. The URL is never logged; gitworkspace redacts
-// it from errors.
+// fresh installation token embedded in clone url; never logged, redacted from errors
 func (e *Executor) repoRef(ctx context.Context, c *Claim, rc github.RepositoryContext) (gitworkspace.RepoRef, error) {
 	tokenCtx, span := startSpan(ctx, "github.token_exchange", c)
 	token, err := e.GitHub.InstallationToken(tokenCtx, rc.InstallationID)
@@ -150,10 +133,7 @@ func (e *Executor) createWorktree(ctx context.Context, c *Claim, p gitworkspace.
 	return ws, err
 }
 
-// credentialedCloneURL embeds an installation token into an https clone
-// URL. Non-https URLs (local mirrors in tests) pass through untouched: the
-// GitHub API only ever serves https clone URLs, so production repositories
-// always carry the credential.
+// non-https (test mirrors) pass through; github only serves https so production always carries the credential
 func credentialedCloneURL(cloneURL, token string) (string, error) {
 	u, err := url.Parse(cloneURL)
 	if err != nil {
@@ -166,10 +146,7 @@ func credentialedCloneURL(cloneURL, token string) (string, error) {
 	return u.String(), nil
 }
 
-// branchLabel derives the deterministic working-branch label for a task.
-// Deterministic so retries and recovered owners land on one branch (a
-// publishing idempotency key); the task-id suffix keeps successive tasks on
-// one issue from colliding.
+// deterministic so retries/recovered owners land on one branch; task-id suffix avoids per-issue collisions
 func branchLabel(t task.Task) string {
 	id := strings.ReplaceAll(t.ID, "-", "")
 	if len(id) > 8 {
@@ -185,9 +162,7 @@ func branchLabel(t task.Task) string {
 	return fmt.Sprintf("task-%s-%s", title, id)
 }
 
-// publishFromWorkspace publishes a live worktree: commit, push, then the
-// GitHub surface. A clean tree whose HEAD equals the base is the no-change
-// outcome; a clean tree whose HEAD moved is a recovered owner's commit.
+// clean tree at base = no-change; clean tree with moved head = recovered owner's commit
 func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, ws gitworkspace.Workspace, summary string) (task.Status, error) {
 	if t.BaseCommitSHA != nil && ws.BaseSHA != *t.BaseCommitSHA {
 		return "", e.failTask(ctx, c, "base_mismatch", fmt.Sprintf(
@@ -217,7 +192,7 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 		if head == ws.BaseSHA {
 			return "", e.publishNoChange(ctx, c, t, pub, ws.BaseSHA, summary)
 		}
-		sha = head // a recovered owner already committed
+		sha = head
 	} else if err != nil {
 		return "", e.publishFailure(ctx, c, "commit", err)
 	}
@@ -244,9 +219,7 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 	return e.publishToGitHub(ctx, log, c, t, pub, ws.Branch, ws.BaseSHA, sha)
 }
 
-// publishRecovered resumes publishing for an attempt claimed at status
-// publishing: reattach the surviving worktree when it exists, otherwise
-// publish from the already-pushed branch, otherwise the work is gone.
+// reattach surviving worktree, else publish from pushed branch, else the work is gone
 func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget) (st task.Status, retErr error) {
 	if t.WorkingBranch == nil || t.BaseCommitSHA == nil {
 		return "", e.failTask(ctx, c, "publish_state_missing",
@@ -266,7 +239,7 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 				retErr = e.cleanupGitWorkspace(ctx, log, c, ws, retErr)
 			}
 		}()
-		// Refresh the mirror's stored credential before reusing its remote.
+		// refresh mirror's stored credential before reusing its remote
 		fetchCtx, span := startSpan(ctx, "git.fetch", c)
 		_, err := e.Workspaces.EnsureMirror(fetchCtx, repoRef)
 		endSpan(span, err)
@@ -301,9 +274,7 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 	return e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
 }
 
-// publishToGitHub drives the GitHub surface from a pushed branch: one draft
-// PR (found or created by head branch), one check run (found or created by
-// external id), and the issue comment. Every step is safe to replay.
+// every step replay-safe: pr found-or-created by head branch, check run by external id
 func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, branch, baseSHA, finalSHA string) (task.Status, error) {
 	if err := e.detectConflicts(ctx, log, c, t, pub.repo, baseSHA, finalSHA); err != nil {
 		return "", err
@@ -389,10 +360,7 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 	return task.StatusPublishing, nil
 }
 
-// publishNoChange settles a clean worktree: no PR, a neutral check on the
-// base commit, an explaining comment, and a no_change failure that keeps
-// the explanation (empty diff means no
-// pull request; the task is marked no-change via the failed state).
+// no pr; neutral check on base commit; no_change failed state keeps the explanation
 func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, baseSHA, summary string) error {
 	rc := pub.repo
 	explanation := "the agent session ended without modifying the workspace"
@@ -431,7 +399,7 @@ func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, p
 	return e.failTask(ctx, c, "no_change", explanation)
 }
 
-// detectConflicts records warnings without failing publication.
+// detection failure must not block publishing
 func (e *Executor) detectConflicts(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, rc github.RepositoryContext, baseSHA, finalSHA string) error {
 	if e.Conflicts == nil || t.RepositoryID == nil {
 		return nil
@@ -476,8 +444,6 @@ func (e *Executor) detectConflicts(ctx context.Context, log *slog.Logger, c *Cla
 	return nil
 }
 
-// upsertCheckRun creates the check run or, when a replayed publish already
-// created one with this external id on the commit, updates it.
 func (e *Executor) upsertCheckRun(ctx context.Context, c *Claim, rc github.RepositoryContext, sha string, p github.CheckRunParams) error {
 	runs, err := e.GitHub.ListCheckRuns(ctx, rc.InstallationID, rc.Owner,
 		rc.Name, sha, p.Name)
@@ -505,7 +471,6 @@ func (e *Executor) upsertCheckRun(ctx context.Context, c *Claim, rc github.Repos
 	})
 }
 
-// storedReport loads the attempt's stored evidence report and markdown.
 func (e *Executor) storedReport(ctx context.Context, taskID string) (evidence.Report, string, error) {
 	stored, err := e.Evidence.GetForTask(ctx, taskID)
 	if err != nil {
@@ -518,9 +483,7 @@ func (e *Executor) storedReport(ctx context.Context, taskID string) (evidence.Re
 	return report, stored.SummaryMarkdown, nil
 }
 
-// checkConclusion maps trusted validation results to a check conclusion:
-// any failed check is failure; checks that could not all run (or none ran)
-// are neutral, never success (evidence over claims).
+// any failed check -> failure; not-all-ran or none ran -> neutral, never success
 func checkConclusion(r evidence.Report) string {
 	sawTrusted := false
 	conclusion := "success"
@@ -543,8 +506,7 @@ func checkConclusion(r evidence.Report) string {
 	return conclusion
 }
 
-// publishFailure settles a failed publishing step. Lease loss and shutdown
-// keep the attempt recoverable; anything else fails the task honestly.
+// lease loss / shutdown keep the attempt recoverable; anything else fails the task
 func (e *Executor) publishFailure(ctx context.Context, c *Claim, step string, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -552,7 +514,6 @@ func (e *Executor) publishFailure(ctx context.Context, c *Claim, step string, er
 	return e.failTask(ctx, c, "publish_failed", step+": "+err.Error())
 }
 
-// truncateRunes bounds s to max bytes without splitting a rune.
 func truncateRunes(s string, max int) string {
 	if len(s) <= max {
 		return s

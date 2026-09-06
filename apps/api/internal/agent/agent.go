@@ -1,6 +1,3 @@
-// Package agent defines the provider-neutral agent adapter interface and its
-// normalized event stream, plus the
-// fake adapter that exercises the orchestration path without model cost.
 package agent
 
 import (
@@ -9,8 +6,7 @@ import (
 	"time"
 )
 
-// EventType is a normalized agent event type. The control plane consumes
-// these, never raw provider formats.
+// control plane consumes these, never raw provider formats
 type EventType string
 
 const (
@@ -29,37 +25,29 @@ const (
 	EventSessionFailed    EventType = "session_failed"
 )
 
-// Event is one normalized event emitted by an agent session.
 type Event struct {
 	Type      EventType
 	Timestamp time.Time
-	// Payload is event-specific JSON (plan text, tool arguments, file path...).
-	Payload json.RawMessage
+	Payload   json.RawMessage
 }
 
-// Request describes one agent invocation inside a prepared workspace.
 type Request struct {
-	// WorkspaceDir is the directory the agent may read and write.
 	WorkspaceDir string
 	Instructions string
 }
 
-// Result is the final outcome of a completed session.
 type Result struct {
 	Summary      string
 	FilesChanged []string
 }
 
-// Adapter is the provider-neutral entry point. Implementations: fake (this
-// milestone), Claude Code CLI (milestone 5).
 type Adapter interface {
 	Name() string
 	ValidateConfiguration(ctx context.Context) error
 	Start(ctx context.Context, req Request) (Session, error)
 }
 
-// Session is one running agent invocation. Cancel must honor its context.
-// Events closes only when the provider stops, after which Wait returns.
+// cancel must honor its context; events closes only after provider stops, then wait returns
 type Session interface {
 	Events() <-chan Event
 	Send(ctx context.Context, message string) error

@@ -16,7 +16,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// requireGit skips a test when the git binary is unavailable.
 func requireGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -24,8 +23,6 @@ func requireGit(t *testing.T) {
 	}
 }
 
-// runGit runs git for test fixtures with a hermetic env plus a fixed identity
-// (Manager.Commit sets its own identity, but the fixture commits below do not).
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -51,8 +48,6 @@ func newTestManager(t *testing.T) *Manager {
 	return m
 }
 
-// buildOrigin creates a bare repository with one commit and returns its path
-// and that commit's SHA, to serve as a mirror source.
 func buildOrigin(t *testing.T) (originPath, sha string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -92,7 +87,6 @@ func TestWorkspaceLifecycle(t *testing.T) {
 		t.Fatalf("worktree missing base file: %v", err)
 	}
 
-	// A clean worktree yields ErrNothingToCommit.
 	if _, err := m.Commit(ctx, ws, CommitParams{Message: "noop", TaskID: "t"}); !errors.Is(err, ErrNothingToCommit) {
 		t.Fatalf("Commit(clean) err = %v, want ErrNothingToCommit", err)
 	}
@@ -180,7 +174,6 @@ func TestConcurrentWorkspacesIsolated(t *testing.T) {
 			t.Fatalf("duplicate workspace path %q", ws.Path)
 		}
 		paths[ws.Path] = true
-		// Each worktree is independently writable.
 		if err := os.WriteFile(filepath.Join(ws.Path, "mine.txt"), []byte(ws.AttemptID), 0o644); err != nil {
 			t.Fatalf("write in %s: %v", ws.Path, err)
 		}
@@ -236,8 +229,7 @@ func TestRemoveKeepsSiblingWorktree(t *testing.T) {
 		t.Fatalf("CreateWorktree drop: %v", err)
 	}
 
-	// Removing one attempt (which runs worktree prune) must not touch a live
-	// sibling checkout.
+	// remove (which runs prune) must not touch a live sibling checkout
 	if err := m.Remove(ctx, drop); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -258,9 +250,7 @@ func TestNoShellInterpolationInCloneURL(t *testing.T) {
 	ctx := context.Background()
 	m := newTestManager(t)
 
-	// A clone URL laced with shell metacharacters. Under a shell this would
-	// create the sentinel; with argument arrays git gets it as one literal
-	// operand, fails to clone, and no command runs.
+	// shell metachars in clone url: argv-only git gets one literal operand, nothing executes
 	sentinel := filepath.Join(t.TempDir(), "pwned")
 	repo := RepoRef{
 		ID:       "repo-1",
@@ -310,7 +300,6 @@ func TestPushGuards(t *testing.T) {
 	ctx := context.Background()
 	ok := Workspace{AttemptID: "a", Repo: RepoRef{ID: "r"}, Path: "/nonexistent", Branch: "agent-trail/ok"}
 
-	// Guards reject before git runs, so no real remote is needed.
 	if err := m.Push(ctx, Workspace{Branch: "main", Path: "/nonexistent"}, PushParams{}); !errors.Is(err, ErrForbiddenBranch) {
 		t.Fatalf("protected branch err = %v, want ErrForbiddenBranch", err)
 	}
@@ -333,12 +322,10 @@ func TestWorkspaceContainsRejectsSymlinkEscape(t *testing.T) {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
 
-	// A path within the worktree is contained, even before it exists.
 	if ok, err := ws.Contains(filepath.Join(ws.Path, "sub", "file.txt")); err != nil || !ok {
 		t.Fatalf("Contains(inside) = %v, %v; want true, nil", ok, err)
 	}
 
-	// A symlink escaping the worktree is not contained.
 	escape := t.TempDir()
 	if err := os.Symlink(escape, filepath.Join(ws.Path, "escape")); err != nil {
 		t.Fatalf("symlink: %v", err)
@@ -374,7 +361,6 @@ func TestHeadAndLookup(t *testing.T) {
 		t.Fatal("Lookup found a workspace that does not exist")
 	}
 
-	// After a commit, Head moves past the base.
 	if err := os.WriteFile(filepath.Join(w.Path, "new.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -388,9 +374,7 @@ func TestHeadAndLookup(t *testing.T) {
 	}
 }
 
-// TestEnsureMirrorSkipsCheckedOutAgentBranches guards the refetch path: once
-// a working branch is pushed to origin, a later mirror fetch must not try to
-// update it (git refuses to fetch into a branch checked out in a worktree).
+// refetch must not touch a pushed working branch checked out in a worktree
 func TestEnsureMirrorSkipsCheckedOutAgentBranches(t *testing.T) {
 	requireGit(t)
 	ctx := context.Background()
@@ -414,8 +398,6 @@ func TestEnsureMirrorSkipsCheckedOutAgentBranches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The branch now exists on origin and is checked out locally; a refetch
-	// must succeed and leave the local branch alone.
 	if _, err := m.EnsureMirror(ctx, repo); err != nil {
 		t.Fatalf("EnsureMirror after push: %v", err)
 	}

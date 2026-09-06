@@ -21,9 +21,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// stubClaudeCLI writes an executable /bin/sh stub standing in for the Claude
-// Code CLI, so the executor runs the real adapter code path end to end without
-// model cost, and returns its path.
 func stubClaudeCLI(t *testing.T, body string) string {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -48,7 +45,6 @@ func claudeExecutor(db *sql.DB, s *Store, ts *task.Store, cliPath string) *Execu
 	}
 }
 
-// claudeStub emits a plan, edits a workspace file, and reports success.
 const claudeStub = `printf '%s\n' '{"type":"system","subtype":"init","model":"claude-test","session_id":"s1"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"ExitPlanMode","input":{"plan":"edit the file"}}]}}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Write","input":{"file_path":"CHANGE.md"}}]}}'
@@ -57,9 +53,6 @@ printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","tool_
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Edited CHANGE.md.","total_cost_usd":0.02,"num_turns":2}'
 `
 
-// TestExecuteCompletesClaudeTaskEndToEnd is the Milestone 5 acceptance
-// criterion: the real Claude Code adapter (backed by a stub CLI) completes a
-// fixture task end to end, with its normalized events on the timeline.
 func TestExecuteCompletesClaudeTaskEndToEnd(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -92,14 +85,11 @@ func TestExecuteCompletesClaudeTaskEndToEnd(t *testing.T) {
 	})
 }
 
-// planlessClaudeStub reports success without ever emitting a plan.
 const planlessClaudeStub = `printf '%s\n' '{"type":"system","subtype":"init","model":"m","session_id":"s"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"nothing to change"}]}}'
 printf '%s\n' '{"type":"result","subtype":"success","result":"no changes needed"}'
 `
 
-// TestExecuteCompletesClaudeTaskWithoutPlan proves the executor does not
-// strand a task in planning when the provider emits no plan event.
 func TestExecuteCompletesClaudeTaskWithoutPlan(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()

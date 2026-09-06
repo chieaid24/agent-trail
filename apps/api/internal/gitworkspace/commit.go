@@ -11,19 +11,14 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// Commit identity for Agent-Trail-authored commits. A noreply address keeps the
-// bot out of contributor graphs and never exposes a real mailbox.
 const (
 	commitAuthorName  = "Agent Trail"
 	commitAuthorEmail = "agent-trail[bot]@users.noreply.github.com"
 )
 
-// ErrNothingToCommit reports that the worktree has no staged or unstaged
-// changes, so there is nothing to record (the no-change task outcome).
 var ErrNothingToCommit = errors.New("gitworkspace: nothing to commit")
 
-// CommitParams describes a commit to record in a workspace. The trailer fields
-// are provenance identifiers only - never a prompt or a secret.
+// trailer fields are provenance ids only, never a prompt or a secret
 type CommitParams struct {
 	Message     string
 	TaskID      string
@@ -32,17 +27,13 @@ type CommitParams struct {
 	RequestedBy string
 }
 
-// Stats summarizes the change a worktree introduces over its base commit.
 type Stats struct {
 	FilesChanged int
 	Insertions   int
 	Deletions    int
 }
 
-// Commit stages every change in the worktree and records one commit carrying
-// the Agent-Trail provenance trailers, under a fixed bot identity set per
-// invocation with -c (never mutating repository or global config). It returns
-// the final commit SHA, or ErrNothingToCommit when the worktree is clean.
+// bot identity set per invocation with -c, never mutating repo/global config
 func (m *Manager) Commit(ctx context.Context, w Workspace, p CommitParams) (string, error) {
 	if strings.TrimSpace(p.Message) == "" {
 		return "", errors.New("gitworkspace: commit message is empty")
@@ -63,8 +54,7 @@ func (m *Manager) Commit(ctx context.Context, w Workspace, p CommitParams) (stri
 		return "", ErrNothingToCommit
 	}
 
-	// Two -m values join with a blank line, so the trailer block sits alone at
-	// the end of the message where git recognizes it as trailers.
+	// two -m join with a blank line so the trailer block sits alone where git recognizes trailers
 	if _, err := m.git.run(ctx, w.Path,
 		"-c", "user.name="+commitAuthorName,
 		"-c", "user.email="+commitAuthorEmail,
@@ -86,9 +76,7 @@ func (m *Manager) Commit(ctx context.Context, w Workspace, p CommitParams) (stri
 	return sha, nil
 }
 
-// Head returns the worktree's current HEAD commit SHA. Publishing uses it to
-// tell a recovered already-committed worktree (HEAD moved past BaseSHA) from
-// a true no-change outcome (HEAD still at BaseSHA, tree clean).
+// tells a recovered already-committed worktree (head moved) from true no-change (head at base)
 func (m *Manager) Head(ctx context.Context, w Workspace) (string, error) {
 	sha, err := m.git.run(ctx, w.Path, "rev-parse", "HEAD")
 	if err != nil {
@@ -97,9 +85,6 @@ func (m *Manager) Head(ctx context.Context, w Workspace) (string, error) {
 	return sha, nil
 }
 
-// DiffStats compares the worktree's HEAD to its base commit and returns the
-// change counts. A binary file counts toward FilesChanged with zero line
-// deltas, matching git's numstat output.
 func (m *Manager) DiffStats(ctx context.Context, w Workspace) (Stats, error) {
 	out, err := m.git.run(ctx, w.Path, "diff", "--numstat", w.BaseSHA, "HEAD")
 	if err != nil {
@@ -108,9 +93,7 @@ func (m *Manager) DiffStats(ctx context.Context, w Workspace) (Stats, error) {
 	return parseNumstat(out)
 }
 
-// buildTrailers renders the non-empty provenance fields as a trailer block. A
-// newline in any value is rejected so a value cannot forge extra trailers or
-// message lines.
+// newline in a value rejected so it cannot forge extra trailers or message lines
 func buildTrailers(p CommitParams) (string, error) {
 	fields := []struct{ key, val string }{
 		{"Agent-Trail-Task-ID", p.TaskID},
@@ -134,7 +117,6 @@ func buildTrailers(p CommitParams) (string, error) {
 	return strings.TrimRight(b.String(), "\n"), nil
 }
 
-// parseNumstat sums git diff --numstat output into Stats.
 func parseNumstat(out string) (Stats, error) {
 	var s Stats
 	for _, line := range strings.Split(out, "\n") {

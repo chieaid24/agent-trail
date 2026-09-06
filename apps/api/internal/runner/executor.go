@@ -20,9 +20,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// agentEventTypes maps normalized adapter events to activity-event types.
-// The web client consumes these, never
-// raw provider formats.
 var agentEventTypes = map[agent.EventType]string{
 	agent.EventSessionStarted:   "agent.started",
 	agent.EventAssistantMessage: "agent.message",
@@ -39,9 +36,7 @@ var agentEventTypes = map[agent.EventType]string{
 	agent.EventSessionFailed:    "agent.failed",
 }
 
-// Executor drives one claimed attempt through the flow: workspace, agent
-// session, trusted validation, evidence, GitHub publishing, review.
-// It owns the lease for the duration and releases it after provider shutdown.
+// owns lease for the attempt; releases only after provider shutdown
 type Executor struct {
 	Tasks       *task.Store
 	Store       *Store
@@ -49,23 +44,14 @@ type Executor struct {
 	Evidence    *evidence.Store
 	Adapter     agent.Adapter
 	Logger      *slog.Logger
-	// Workspaces, GitHub, and Repos are the publishing dependencies: all
-	// three set enables git worktree workspaces and GitHub publishing for
-	// repository-backed tasks. Any nil
-	// keeps the fake local flow: temp-dir workspace, publishing skipped.
-	Workspaces *gitworkspace.Manager
-	GitHub     PublishGitHub
-	Repos      RepositoryResolver
-	// Conflicts records active-task overlap; nil disables detection.
-	Conflicts *conflict.Detector
-	// Metrics emits the runner instruments; nil skips emission.
-	Metrics *Metrics
-	// LeaseDuration is the claim lease; the executor extends it at a third
-	// of this interval while it works.
-	LeaseDuration time.Duration
-	// DefaultRuntime applies when a task omits max_runtime_seconds.
-	DefaultRuntime time.Duration
-	// SessionStopTimeout marks adapter shutdowns that exceed the safe window.
+	// all three set -> git worktrees + github publishing; any nil -> fake temp-dir flow
+	Workspaces          *gitworkspace.Manager
+	GitHub              PublishGitHub
+	Repos               RepositoryResolver
+	Conflicts           *conflict.Detector
+	Metrics             *Metrics
+	LeaseDuration       time.Duration
+	DefaultRuntime      time.Duration
 	SessionStopTimeout  time.Duration
 	extendLeaseHook     func(context.Context, string, string, time.Duration) error
 	fenceLeaseHook      func(context.Context, string, string, time.Duration) error
@@ -85,11 +71,8 @@ func leaseOwnershipLost(ctx context.Context) bool {
 	return state != nil && state.lost.Load()
 }
 
-// ErrAttemptFailed wraps every failTask error: the task reached a terminal
-// failed state, so the attempt is settled rather than retryable.
 var ErrAttemptFailed = errors.New("attempt failed")
 
-// ErrSessionStopFailed means provider termination could not be proven.
 var ErrSessionStopFailed = errors.New("session stop failed")
 
 const (
@@ -98,8 +81,7 @@ const (
 	sessionCancelTimeout     = 5 * time.Second
 )
 
-// Execute drives claim c to a terminal task state. Shutdown or a lost lease
-// leaves the attempt for recovery; an attempt deadline settles it timed_out.
+// shutdown/lease loss leaves attempt for recovery; attempt deadline settles timed_out
 func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error {
 	log := e.Logger.With(
 		slog.String("task_id", c.TaskID),
@@ -133,7 +115,6 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		defer releaseCancel()
 		return errors.Join(err, e.Store.ReleaseLease(releaseCtx, c.AttemptID, runnerID))
 	}
-	// Stop everything on shutdown, lease loss, timeout, or task cancellation.
 	deadlineCtx, cancelDeadline := context.WithDeadline(ctx, deadline)
 	defer cancelDeadline()
 	cancelCtx, cancel := context.WithCancelCause(deadlineCtx)
@@ -204,8 +185,7 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	err = e.drive(spanCtx, log, c)
 	executionCause := context.Cause(execCtx)
 	defer func() { endSpan(span, err) }()
-	// Stop extending before releasing, or the last extension races the
-	// release and logs a spurious loss.
+	// stop extending before release or last extension races it
 	cancel(context.Canceled)
 	<-cancellationDone
 	stopLease()
@@ -223,8 +203,6 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 		err = errors.Join(e.timeoutTask(execCtx, c, runtime), err)
 	}
 	err = e.cleanupTerminalRecovery(execCtx, log, c, err)
-	// Release only our own lease; after ErrLeaseLost there is nothing to
-	// release and the attempt may already belong to another runner.
 	if !errors.Is(err, ErrLeaseLost) {
 		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer releaseCancel()
@@ -430,11 +408,7 @@ func (e *Executor) timeoutTask(ctx context.Context, c *Claim, runtime time.Durat
 	return fmt.Errorf("%w: task_runtime_exceeded: %s", ErrAttemptFailed, message)
 }
 
-// drive advances the task from its claimed status to its resting state:
-// completed for the fake local flow, awaiting_review for a published task.
-// Interrupted attempts re-enter here at a later status and only run the
-// missing stages; duplicated agent events across owners are accepted
-// (at-least-once).
+// interrupted attempts re-enter at a later status and only run missing stages; agent events are at-least-once
 func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error {
 	status := c.TaskStatus
 
@@ -455,10 +429,7 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 		return err
 	}
 
-	// The agent must run unless a previous owner already got the task past
-	// executing. Trusted validation, evidence, and (for repository-backed
-	// tasks) publishing run inside the agent stages, while the workspace
-	// still exists.
+	// validation, evidence, publishing run inside agent stages while workspace exists
 	if status == task.StatusProvisioning || status == task.StatusPlanning ||
 		status == task.StatusExecuting {
 		next, err := e.runAgentStages(ctx, log, c, t, pub, status)
@@ -469,10 +440,7 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 	}
 
 	if status == task.StatusValidating {
-		// Recovery only: the previous owner died mid-validating. A temp-dir
-		// workspace died with it, so the remaining checks cannot run.
-		// Record the infrastructure failure honestly - never a pass - and
-		// build evidence from whatever it managed to store.
+		// recovery: prior owner died mid-validating, workspace gone; record error, never a pass
 		if err := e.append(ctx, c, "validation.completed", "runner", map[string]any{
 			"status": string(validation.StatusError),
 			"reason": workspaceLostNote,
@@ -502,9 +470,7 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 			}
 			status = next
 		} else {
-			// Recovery only: the previous owner died mid-publishing. Its
-			// worktree survives on the same host; otherwise the pushed
-			// branch (if any) carries the work.
+			// recovery: prior owner died mid-publishing; surviving worktree or pushed branch carries the work
 			next, err := e.publishRecovered(ctx, log, c, t, pub)
 			if err != nil {
 				return err
@@ -514,9 +480,7 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 	}
 
 	if status == task.StatusAwaitingReview && pub == nil {
-		// Nothing was published, so there is nothing for a human to review:
-		// the fake flow closes its own loop. Published tasks stay in
-		// awaiting_review for the human on the draft PR.
+		// nothing published -> fake flow self-completes; published tasks wait for human review
 		if _, err := e.transition(ctx, c, task.StatusCompleted, "system",
 			"fake attempt auto-completed; nothing was published to review"); err != nil {
 			return err
@@ -529,11 +493,6 @@ func (e *Executor) drive(ctx context.Context, log *slog.Logger, c *Claim) error 
 	return nil
 }
 
-// runAgentStages provisions a workspace, runs the agent session, streams
-// its events into the timeline, then runs trusted validation, evidence,
-// and (for publishable tasks) publishing while the workspace still exists.
-// It returns the status the task rests at: publishing for the fake local
-// flow, awaiting_review after a successful publish.
 func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, status task.Status) (st task.Status, retErr error) {
 	if err := e.append(ctx, c, "workspace.provisioning", "runner", nil); err != nil {
 		return "", err
@@ -605,8 +564,7 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		return "", e.failTask(ctx, c, "agent_start_failed", err.Error())
 	}
 
-	// On an error mid-stream the session must still be drained: the event
-	// channel is unbuffered, so an abandoned producer would block forever.
+	// must still drain on error: channel unbuffered, abandoned producer blocks forever
 	abort := func(err error) error {
 		endSpan(sessionSpan, err)
 		return errors.Join(err, stopSession(session, session.Events(), e.sessionStopTimeout()))
@@ -633,7 +591,6 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		if err := e.append(ctx, c, eventType, "agent", ev.Payload); err != nil {
 			return "", abort(err)
 		}
-		// The plan marks the end of planning.
 		if ev.Type == agent.EventPlan && status == task.StatusPlanning {
 			next, err := e.transition(ctx, c, task.StatusExecuting, "runner", "")
 			if err != nil {
@@ -649,7 +606,6 @@ sessionEnded:
 	endSpan(sessionSpan, err)
 	if err != nil {
 		if ctx.Err() != nil {
-			// Shutdown or lease loss: leave the task mid-flight for recovery.
 			return "", context.Cause(ctx)
 		}
 		return "", e.failTask(ctx, c, "agent_failed", err.Error())
@@ -660,9 +616,7 @@ sessionEnded:
 		slog.Int("files_changed", len(result.FilesChanged)),
 	)
 
-	// A provider may finish without ever emitting a plan (the plan event is
-	// what advances planning -> executing). Don't strand the task in planning:
-	// session end is the end of execution whether or not a plan was captured.
+	// provider may never emit a plan; session end still ends planning
 	if status == task.StatusPlanning {
 		next, err := e.transition(ctx, c, task.StatusExecuting, "runner", "")
 		if err != nil {
@@ -676,9 +630,7 @@ sessionEnded:
 		}
 	}
 
-	// The workspace dies with this function (deferred cleanup above), so
-	// everything that needs it on disk - validation, evidence, commit, and
-	// push - happens before returning.
+	// workspace dies with this fn: validation, evidence, commit, push must run before return
 	valCtx, valSpan := startSpan(ctx, "validation.run", c)
 	valStart := time.Now()
 	note, err := e.runTrustedValidation(valCtx, log, c, workspace)
@@ -781,16 +733,11 @@ stopped:
 	return errors.Join(stopErr, cancelErr, waitErr)
 }
 
-// workspaceLostNote explains an unrunnable recovery-path validation.
 const workspaceLostNote = "the workspace was lost before trusted validation completed"
 
-// evidenceEventLimit bounds the event-stream read behind one report.
 const evidenceEventLimit = 1000
 
-// runTrustedValidation loads the repository validation file and executes
-// its checks in the workspace, storing each result before announcing it.
-// The returned note is non-empty when the checks could not run (no file,
-// invalid file) and says why; a failing check is a result, never an error.
+// note non-empty when checks could not run; a failing check is a result, not an error
 func (e *Executor) runTrustedValidation(ctx context.Context, log *slog.Logger, c *Claim, workspace string) (string, error) {
 	if err := e.append(ctx, c, "validation.started", "runner", map[string]any{
 		"trusted_execution": true,
@@ -809,9 +756,7 @@ func (e *Executor) runTrustedValidation(ctx context.Context, log *slog.Logger, c
 		return note, nil
 	}
 	if err != nil {
-		// An unreadable or invalid file is an infrastructure-class
-		// outcome: the checks never ran, which is not a check failure
-		// and must never read as a pass.
+		// checks never ran: infra outcome, must never read as a pass
 		note := "invalid validation file: " + err.Error()
 		if appendErr := e.append(ctx, c, "validation.completed", "runner", map[string]any{
 			"status": string(validation.StatusError), "reason": note,
@@ -824,14 +769,11 @@ func (e *Executor) runTrustedValidation(ctx context.Context, log *slog.Logger, c
 	runner := &validation.Runner{Logger: log}
 	var insertErr, eventErr error
 	results := runner.Run(ctx, workspace, file, func(r validation.Result) {
-		// Measured for every completed check, even when persistence of an
-		// earlier result already failed: the command did run.
 		e.Metrics.observeCheck(r)
 		if insertErr != nil || eventErr != nil {
 			return
 		}
-		// Persist before announcing: the stored exit code is the record
-		// of what happened, independent of anything the agent claimed.
+		// persist before announcing: stored exit code is the record
 		if insertErr = e.Validations.Insert(ctx, c.AttemptID, r); insertErr != nil {
 			return
 		}
@@ -862,9 +804,7 @@ func (e *Executor) runTrustedValidation(ctx context.Context, log *slog.Logger, c
 	for _, r := range results {
 		counts[r.Status]++
 	}
-	// The aggregate keeps the check/infrastructure distinction: failed
-	// means a check measurably failed; error means checks could not all
-	// run (timeout or infrastructure) while none failed.
+	// failed = a check failed; error = checks could not all run with none failed
 	overall := string(validation.StatusPassed)
 	switch {
 	case counts[validation.StatusFailed] > 0:
@@ -886,9 +826,6 @@ func (e *Executor) runTrustedValidation(ctx context.Context, log *slog.Logger, c
 	return "", nil
 }
 
-// generateEvidence assembles and stores the attempt's evidence report from
-// what was actually recorded: stored trusted results, the agent's event
-// stream (plan, file changes, claimed commands), and the task row.
 func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNote string) error {
 	t, err := e.Tasks.Get(ctx, c.TaskID)
 	if err != nil {
@@ -933,15 +870,13 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 				files = append(files, p.Path)
 			}
 		case "command.completed":
-			// Commands the agent says it ran are recorded as claims: they
-			// never gain trusted_execution and never alter a stored result.
+			// agent-claimed commands never gain trusted_execution
 			var p struct {
 				Command  string `json:"command"`
 				ExitCode *int   `json:"exit_code"`
 			}
 			if json.Unmarshal(ev.Payload, &p) == nil && p.Command != "" {
-				// A claim without an exit code stays unknown: inventing
-				// a pass or a failure would both be unmeasured.
+				// no exit code -> unknown; inventing pass/fail would be unmeasured
 				status := "unknown"
 				if p.ExitCode != nil {
 					status = string(validation.StatusFailed)
@@ -960,8 +895,7 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 		}
 	}
 
-	// Duration is the attempt's wall clock from its stored started_at;
-	// the task's own start would fold earlier attempts into this one.
+	// attempt started_at, not task start: task start folds earlier attempts in
 	var duration *int64
 	if startedAt, err := e.Store.AttemptStartedAt(ctx, c.AttemptID); err != nil {
 		return fmt.Errorf("evidence: %w", err)
@@ -969,8 +903,6 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 		d := int64(time.Since(*startedAt).Seconds())
 		duration = &d
 	}
-	// Prefer the provider recorded on the task row; the live adapter name
-	// is the fallback so the report never guesses.
 	provider := e.Adapter.Name()
 	if t.AgentProvider != nil {
 		provider = *t.AgentProvider
@@ -997,7 +929,6 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 
 var planStepRe = regexp.MustCompile(`^\s*\d+[.)]\s*`)
 
-// planSteps splits plan text into steps, dropping list numbering.
 func planSteps(text string) []string {
 	var steps []string
 	for _, line := range strings.Split(text, "\n") {
@@ -1009,10 +940,7 @@ func planSteps(text string) []string {
 	return steps
 }
 
-// transition applies one runner-driven task transition. The idempotency key
-// scopes it to the attempt, so an interrupted owner's replay cannot double-
-// apply. A task that moved somewhere the edge no longer fits (cancelled
-// under us) surfaces as InvalidTransitionError for the caller to stop on.
+// idempotency key scoped to attempt so an interrupted owner's replay can't double-apply
 func (e *Executor) transition(ctx context.Context, c *Claim, to task.Status, source, reason string) (task.Status, error) {
 	if err := e.fenceLeaseOwnership(ctx, c); err != nil {
 		return "", fmt.Errorf("fence transition to %s: %w", to, err)
@@ -1032,7 +960,6 @@ func (e *Executor) transition(ctx context.Context, c *Claim, to task.Status, sou
 	return to, nil
 }
 
-// append adds one activity event to the attempt timeline.
 func (e *Executor) append(ctx context.Context, c *Claim, eventType, source string, payload any) error {
 	if err := e.Tasks.AppendAttemptEvent(ctx, c.AttemptID, eventType, source, payload); err != nil {
 		return fmt.Errorf("append %s: %w", eventType, err)
@@ -1040,8 +967,6 @@ func (e *Executor) append(ctx context.Context, c *Claim, eventType, source strin
 	return nil
 }
 
-// failTask records a safe failure: the terminal transition also closes the
-// attempt (store semantics) with the failure preserved on both.
 func (e *Executor) failTask(ctx context.Context, c *Claim, code, message string) error {
 	if err := e.fenceLeaseOwnership(ctx, c); err != nil {
 		return fmt.Errorf("fence task failure (%s): %w", code, err)

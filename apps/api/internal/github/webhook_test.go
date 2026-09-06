@@ -36,8 +36,6 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 }
 
-// newWebhookOnly builds a handler whose store and processor are never
-// reached (rejection-path tests).
 func newWebhookOnly(metrics *observability.Registry) *Webhook {
 	return NewWebhook(testSecret, nil, nil, testLogger(), metrics)
 }
@@ -108,7 +106,6 @@ func TestWebhookAcceptsProcessesAndDedupes(t *testing.T) {
 		t.Fatalf("first delivery: status %d body %s", rec.Code, rec.Body.String())
 	}
 
-	// The replay is acked but not reprocessed.
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req())
 	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), "duplicate") {
@@ -127,7 +124,7 @@ func TestWebhookAcceptsProcessesAndDedupes(t *testing.T) {
 	if err := db.QueryRow(`SELECT processing_status FROM github_webhook_deliveries`).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != "ignored" { // ping is recorded and skipped
+	if status != "ignored" {
 		t.Fatalf("processing_status = %q, want ignored", status)
 	}
 }
@@ -167,10 +164,6 @@ func TestRecordDeliveryConcurrentReplaysInsertOnce(t *testing.T) {
 	}
 }
 
-// TestWebhookIssueCommentCreatesTask drives the flagship flow through the
-// real HTTP path: signed issue_comment delivery -> async processing -> one
-// task (acceptance criterion "one real issue comment creates exactly one
-// task").
 func TestWebhookIssueCommentCreatesTask(t *testing.T) {
 	db := dbtest.Open(t)
 	store := NewStore(db)

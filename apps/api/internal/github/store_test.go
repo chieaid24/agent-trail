@@ -8,8 +8,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/dbtest"
 )
 
-// syncOneRepo stores an installation with one synced repository and returns
-// the stored row.
 func syncOneRepo(t *testing.T, s *Store) StoredRepository {
 	t.Helper()
 	ctx := context.Background()

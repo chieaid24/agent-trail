@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// requireSh skips when no POSIX shell is available to run the stub CLI.
 func requireSh(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -20,9 +19,7 @@ func requireSh(t *testing.T) {
 	}
 }
 
-// stubCLI writes an executable /bin/sh script that stands in for the Claude
-// Code CLI, and returns its path. The body ignores the CLI's arguments unless
-// it chooses to read them, which is the point of the no-shell test.
+// writes an executable sh script standing in for the claude cli
 func stubCLI(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude")
@@ -32,7 +29,6 @@ func stubCLI(t *testing.T, body string) string {
 	return path
 }
 
-// happyStub emits a representative stream-json session and edits the workspace.
 const happyStub = `printf '%s\n' '{"type":"system","subtype":"init","model":"claude-test","session_id":"s1"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Working on it."}]}}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":["edit NOTES.md"]}}]}}'
@@ -53,10 +49,6 @@ func reasonOf(t *testing.T, e Event) string {
 	return p.Reason
 }
 
-// TestClaudeCodeHappyPath is the contract test at the provider boundary: a
-// recorded stream-json session, fed through the CLI subprocess, must normalize
-// to the exact neutral event stream. It doubles as the end-to-end fixture run
-// (the stub edits the workspace and reports a summary).
 func TestClaudeCodeHappyPath(t *testing.T) {
 	requireSh(t)
 	ws := t.TempDir()
@@ -115,8 +107,6 @@ func TestClaudeCodeHappyPath(t *testing.T) {
 	}
 }
 
-// TestClaudeCodeResultError maps a non-success result subtype to a session
-// failure with the subtype as the reason.
 func TestClaudeCodeResultError(t *testing.T) {
 	requireSh(t)
 	stub := `printf '%s\n' '{"type":"system","subtype":"init","model":"m","session_id":"s"}'
@@ -140,7 +130,6 @@ printf '%s\n' '{"type":"result","subtype":"error_max_turns","is_error":true,"res
 	}
 }
 
-// TestClaudeCodeDeadline proves the caller's deadline stops the process.
 func TestClaudeCodeDeadline(t *testing.T) {
 	requireSh(t)
 	runCtx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -166,8 +155,6 @@ func TestClaudeCodeDeadline(t *testing.T) {
 	}
 }
 
-// TestClaudeCodeDeadlineKillsToolSubprocesses proves the caller deadline kills
-// the process group, including tool subprocesses that inherit stdout.
 func TestClaudeCodeDeadlineKillsToolSubprocesses(t *testing.T) {
 	requireSh(t)
 	runCtx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -196,7 +183,6 @@ exec sleep 30
 	}
 }
 
-// TestClaudeCodeCancel proves Cancel stops the process mid-session.
 func TestClaudeCodeCancel(t *testing.T) {
 	requireSh(t)
 	stub := `printf '%s\n' '{"type":"system","subtype":"init","model":"m","session_id":"s"}'
@@ -225,9 +211,6 @@ exec sleep 30
 	}
 }
 
-// TestClaudeCodeNoShellInterpolation proves the adapter never runs the CLI
-// through a shell: an instruction laced with shell metacharacters cannot
-// execute anything.
 func TestClaudeCodeNoShellInterpolation(t *testing.T) {
 	requireSh(t)
 	ws := t.TempDir()
@@ -250,8 +233,6 @@ func TestClaudeCodeNoShellInterpolation(t *testing.T) {
 	}
 }
 
-// TestClaudeCodeValidateConfiguration covers the missing-CLI, runnable, and
-// version-pin cases.
 func TestClaudeCodeValidateConfiguration(t *testing.T) {
 	requireSh(t)
 	missing := NewClaudeCode(ClaudeCodeOptions{CLIPath: filepath.Join(t.TempDir(), "nope")})
@@ -272,16 +253,12 @@ func TestClaudeCodeValidateConfiguration(t *testing.T) {
 		ValidateConfiguration(context.Background()); err == nil {
 		t.Fatal("mismatched pin validated ok")
 	}
-	// A pin is a whole version token, not a substring: "2.1" must not accept
-	// "2.1.3".
 	if err := NewClaudeCode(ClaudeCodeOptions{CLIPath: cli, PinnedVersion: "2.1"}).
 		ValidateConfiguration(context.Background()); err == nil {
 		t.Fatal("prefix pin validated ok")
 	}
 }
 
-// TestClaudeCodeRedactsCredentials proves every forwarded credential value is
-// stripped from failure detail before it reaches an event.
 func TestClaudeCodeRedactsCredentials(t *testing.T) {
 	requireSh(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key-123")

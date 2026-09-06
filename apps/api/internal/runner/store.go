@@ -1,9 +1,4 @@
-// Package runner implements the runner registry, task-attempt leasing, and
-// the loop that drives a claimed attempt through the fake agent flow.
-// Claiming is FOR UPDATE SKIP LOCKED
-// against task_attempts (ADR-0003): only one runner ever owns an attempt,
-// every claim carries an expiring lease, and a lost runner's attempt becomes
-// claimable again once its lease expires.
+// claiming is for update skip locked: one owner per attempt, expiring lease, expired lease re-claimable
 package runner
 
 import (
@@ -17,14 +12,10 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// ErrLeaseLost is returned when the caller no longer holds a live lease on
-// the attempt (expired, released, or claimed by another runner).
 var ErrLeaseLost = errors.New("lease lost")
 
-// ErrRunnerNotFound is returned when the runner id does not exist.
 var ErrRunnerNotFound = errors.New("runner not found")
 
-// Runner mirrors the runners table.
 type Runner struct {
 	ID              string            `json:"id"`
 	Type            string            `json:"runner_type"`
@@ -37,17 +28,14 @@ type Runner struct {
 	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
-// RegisterParams describe a runner registering itself.
 type RegisterParams struct {
-	Type          string // process, docker, kubernetes
+	Type          string
 	HostnameOrPod string
-	Capacity      int               // defaults to 1
-	Labels        map[string]string // optional
+	Capacity      int
+	Labels        map[string]string
 }
 
-// Claim is one leased task attempt. TaskStatus is the task's status at claim
-// time: "queued" for a fresh attempt, a later status when recovering an
-// attempt whose previous owner lost its lease.
+// taskstatus at claim time: queued fresh, later status when recovering a lost owner's attempt
 type Claim struct {
 	AttemptID      string
 	AttemptNumber  int
@@ -59,35 +47,24 @@ type Claim struct {
 	LeaseExpiresAt time.Time
 }
 
-// DispatchAttempt is an unleased attempt a remote backend may schedule.
 type DispatchAttempt struct {
 	AttemptID  string
 	TaskID     string
 	MaxRuntime time.Duration
 }
 
-// claimableStatuses are the task statuses whose active attempt a runner may
-// own: queued (fresh) plus every status the runner itself drives, so an
-// expired lease anywhere mid-flight is recoverable. awaiting_review is
-// excluded: a published task rests there for a human on the draft PR, and
-// re-claiming it would spin runners on finished work.
+// awaiting_review excluded: published task rests there for a human; re-claiming spins runners on finished work
 const claimableStatuses = `('queued', 'provisioning', 'planning',
 	'executing', 'validating', 'publishing')`
 
-// claimableWhere widens claimableStatuses with one recovery case: a task
-// with no repository only passes through awaiting_review on its way to the
-// executor's auto-complete, so an owner dying between those two commits
-// would otherwise strand it in a status no runner may claim (found by the
-// database-restart injection in internal/bench).
+// no-repo tasks recover through awaiting_review: owner dying before auto-complete would strand them unclaimable
 const claimableWhere = `(t.status IN ` + claimableStatuses + `
 	OR (t.status = 'awaiting_review' AND t.repository_id IS NULL))`
 
-// Store is the PostgreSQL-backed runner registry and lease arbiter.
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
@@ -95,7 +72,6 @@ func NewStore(db *sql.DB) *Store {
 const runnerColumns = `id, runner_type, hostname_or_pod, status, capacity,
 	labels_json, last_heartbeat_at, created_at, updated_at`
 
-// Register inserts a new online runner and returns it.
 func (s *Store) Register(ctx context.Context, p RegisterParams) (Runner, error) {
 	switch p.Type {
 	case "process", "docker", "kubernetes":
@@ -127,8 +103,7 @@ func (s *Store) Register(ctx context.Context, p RegisterParams) (Runner, error) 
 	return r, nil
 }
 
-// Heartbeat records liveness and revives a runner marked lost. Offline is
-// deliberate (shutdown), so a heartbeat does not resurrect it.
+// offline is deliberate shutdown; heartbeat must not resurrect it
 func (s *Store) Heartbeat(ctx context.Context, runnerID string) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE runners
@@ -147,7 +122,6 @@ func (s *Store) Heartbeat(ctx context.Context, runnerID string) error {
 	return nil
 }
 
-// MarkOffline records a deliberate shutdown.
 func (s *Store) MarkOffline(ctx context.Context, runnerID string) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE runners SET status = 'offline', updated_at = now()
@@ -165,11 +139,7 @@ func (s *Store) MarkOffline(ctx context.Context, runnerID string) error {
 	return nil
 }
 
-// MarkLost flips online runners whose heartbeat is older than threshold to
-// lost and returns them. The UPDATE is atomic, so concurrent reapers each
-// see a runner transition at most once. Leases are left untouched: expiry,
-// not runner status, is what makes an attempt claimable again, so a lost
-// runner never immediately causes duplicate execution.
+// leases untouched: expiry, not runner status, makes an attempt claimable, so no duplicate execution
 func (s *Store) MarkLost(ctx context.Context, threshold time.Duration) ([]Runner, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		UPDATE runners SET status = 'lost', updated_at = now()
@@ -195,8 +165,6 @@ func (s *Store) MarkLost(ctx context.Context, threshold time.Duration) ([]Runner
 	return lost, nil
 }
 
-// LeasedAttemptIDs returns the active attempts currently leased by a runner,
-// for reporting a loss on their timelines.
 func (s *Store) LeasedAttemptIDs(ctx context.Context, runnerID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id FROM task_attempts
@@ -220,16 +188,11 @@ func (s *Store) LeasedAttemptIDs(ctx context.Context, runnerID string) ([]string
 	return ids, nil
 }
 
-// Claim leases the next claimable attempt for runnerID and returns it, or
-// nil when nothing is claimable. Selection is highest task priority first,
-// then oldest. FOR UPDATE OF task_attempts SKIP LOCKED makes concurrent
-// claims race-free: the row a winner holds is invisible to everyone else,
-// and the lease it writes keeps it invisible after commit.
+// skip locked makes concurrent claims race-free; winner's lease keeps the row invisible after commit
 func (s *Store) Claim(ctx context.Context, runnerID string, leaseDuration time.Duration) (*Claim, error) {
 	return s.claim(ctx, runnerID, leaseDuration, "")
 }
 
-// ClaimAttempt leases one exact attempt for a dedicated runner.
 func (s *Store) ClaimAttempt(ctx context.Context, runnerID, attemptID string, leaseDuration time.Duration) (*Claim, error) {
 	if !task.IsUUID(attemptID) {
 		return nil, nil
@@ -292,8 +255,7 @@ func (s *Store) claim(ctx context.Context, runnerID string, leaseDuration time.D
 	return &c, nil
 }
 
-// DispatchableAttempts lists unleased work without claiming it. Kubernetes
-// Job creation provides the scheduling CAS; each Job claims its exact row.
+// lists without claiming: k8s job creation is the scheduling cas; each job claims its exact row
 func (s *Store) DispatchableAttempts(ctx context.Context, defaultRuntime time.Duration, limit int) ([]DispatchAttempt, error) {
 	if limit <= 0 {
 		limit = 100
@@ -328,8 +290,6 @@ func (s *Store) DispatchableAttempts(ctx context.Context, defaultRuntime time.Du
 	return attempts, nil
 }
 
-// RecordAttemptBase stores the base commit the attempt's workspace was cut
-// from. Idempotent: the first recorded value wins.
 func (s *Store) RecordAttemptBase(ctx context.Context, attemptID, baseSHA string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE task_attempts
@@ -341,8 +301,6 @@ func (s *Store) RecordAttemptBase(ctx context.Context, attemptID, baseSHA string
 	return nil
 }
 
-// RecordFinalCommit stores the attempt's published commit SHA. Idempotent:
-// the first recorded value wins.
 func (s *Store) RecordFinalCommit(ctx context.Context, attemptID, sha string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE task_attempts
@@ -354,8 +312,6 @@ func (s *Store) RecordFinalCommit(ctx context.Context, attemptID, sha string) er
 	return nil
 }
 
-// RecordPullRequest stores the attempt's pull request number. Idempotent:
-// the first recorded value wins.
 func (s *Store) RecordPullRequest(ctx context.Context, attemptID string, number int64) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE task_attempts
@@ -367,8 +323,6 @@ func (s *Store) RecordPullRequest(ctx context.Context, attemptID string, number 
 	return nil
 }
 
-// AttemptStartedAt returns the attempt's stored started_at, nil when the
-// attempt has not started (or does not exist).
 func (s *Store) AttemptStartedAt(ctx context.Context, attemptID string) (*time.Time, error) {
 	var startedAt sql.NullTime
 	err := s.db.QueryRowContext(ctx,
@@ -386,9 +340,7 @@ func (s *Store) AttemptStartedAt(ctx context.Context, attemptID string) (*time.T
 	return &startedAt.Time, nil
 }
 
-// ExtendLease pushes the expiry of a lease the runner still holds. A lease
-// that already expired is not resurrected -- another runner may have claimed
-// the attempt -- so the caller must stop working on ErrLeaseLost.
+// expired lease never resurrected: another runner may own the attempt; caller stops on ErrLeaseLost
 func (s *Store) ExtendLease(ctx context.Context, attemptID, runnerID string, leaseDuration time.Duration) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE task_attempts
@@ -409,8 +361,6 @@ func (s *Store) ExtendLease(ctx context.Context, attemptID, runnerID string, lea
 	return nil
 }
 
-// ReleaseLease clears a lease the runner holds (done or giving up). The
-// attempt may be in any status by now; only ownership is checked.
 func (s *Store) ReleaseLease(ctx context.Context, attemptID, runnerID string) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE task_attempts
@@ -429,7 +379,6 @@ func (s *Store) ReleaseLease(ctx context.Context, attemptID, runnerID string) er
 	return nil
 }
 
-// scanRunner scans one runners row in runnerColumns order.
 func scanRunner(row interface{ Scan(...any) error }) (Runner, error) {
 	var r Runner
 	var labels []byte

@@ -1,4 +1,3 @@
-// Package runner emits the metrics.
 package runner
 
 import (
@@ -9,7 +8,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// Metrics holds the runner and task instruments the worker emits.
 type Metrics struct {
 	activeTasks        *observability.UpDownCounter
 	queueWait          *observability.Histogram
@@ -24,7 +22,6 @@ type Metrics struct {
 	workspaceCleanup   *observability.Counter
 }
 
-// NewMetrics registers the runner instruments on reg.
 func NewMetrics(reg *observability.Registry) *Metrics {
 	return &Metrics{
 		activeTasks: reg.UpDown("agent_trail_runner_active_tasks",
@@ -77,7 +74,7 @@ func (m *Metrics) observeQueueWait(d time.Duration) {
 	m.queueWait.Observe(d.Seconds())
 }
 
-// observeTransition records duration once at awaiting_review or failed.
+// duration recorded once, at awaiting_review or failed
 func (m *Metrics) observeTransition(to task.Status, createdAt time.Time) {
 	if m == nil {
 		return

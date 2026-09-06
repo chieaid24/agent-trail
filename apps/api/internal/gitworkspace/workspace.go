@@ -12,22 +12,13 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// CreateParams describes a worktree to provision for one task attempt.
 type CreateParams struct {
-	Repo RepoRef
-	// AttemptID names the worktree directory; it must be a safe path component.
-	AttemptID string
-	// BaseSHA is the full lowercase-hex commit the worktree is pinned to; it is
-	// verified to exist in the mirror before checkout.
-	BaseSHA string
-	// BranchLabel seeds the working branch and is sanitized under BranchPrefix.
+	Repo        RepoRef
+	AttemptID   string
+	BaseSHA     string
 	BranchLabel string
 }
 
-// CreateWorktree ensures the repository mirror is present and current, verifies
-// the base commit exists, and cuts a fresh worktree on a sanitized working
-// branch pinned to that commit. Two attempts on the same repository get
-// isolated worktree directories and distinct branches.
 func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace, error) {
 	if !validComponent(p.AttemptID) {
 		return Workspace{}, fmt.Errorf("gitworkspace: attempt id %q is not a safe path component", p.AttemptID)
@@ -54,8 +45,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace
 	}
 
 	path := filepath.Join(m.workDir, p.AttemptID)
-	// Defence in depth: the component regex already forbids traversal, but a
-	// path whose parent is not the workspace root must never be checked out.
+	// defence in depth: regex already forbids traversal, but parent must be the workspace root
 	if filepath.Dir(path) != m.workDir {
 		return Workspace{}, fmt.Errorf("gitworkspace: worktree path for %q escapes the workspace root", p.AttemptID)
 	}
@@ -66,8 +56,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace
 	if _, err := m.git.run(ctx, mirror, "worktree", "add", "-b", branch, path, p.BaseSHA); err != nil {
 		return Workspace{}, fmt.Errorf("gitworkspace: add worktree: %w", err)
 	}
-	// A symlinked workspace root could still let the created path resolve
-	// outside root; unwind the worktree if it does.
+	// symlinked root could still resolve the path outside; unwind the worktree if so
 	if err := m.assertWithinRoot(path); err != nil {
 		_, _ = m.git.run(ctx, mirror, "worktree", "remove", "--force", path)
 		return Workspace{}, err
@@ -90,10 +79,7 @@ func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace
 	}, nil
 }
 
-// CleanupStale clears whatever a dead owner left for this attempt: the
-// worktree directory, the working branch, and stale administrative entries.
-// Git steps are best-effort; directory removal and the final prune report
-// failure so a fresh CreateWorktree for the same attempt can succeed.
+// git steps best-effort; dir removal + prune report failure so a fresh CreateWorktree can succeed
 func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, branch string) error {
 	if !validComponent(repo.ID) {
 		return fmt.Errorf("gitworkspace: repository id %q is not a safe path component", repo.ID)
@@ -129,8 +115,6 @@ func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, bra
 	return nil
 }
 
-// WorkspaceExists reports whether an attempt left any on-disk workspace,
-// including a partial directory that is not a registered git worktree.
 func (m *Manager) WorkspaceExists(attemptID string) bool {
 	if !validComponent(attemptID) {
 		return false
@@ -139,10 +123,6 @@ func (m *Manager) WorkspaceExists(attemptID string) bool {
 	return err == nil
 }
 
-// Lookup rebuilds the workspace for an attempt whose worktree still exists
-// on this host (a recovered owner reattaching), or ok=false when it is gone.
-// The caller supplies the branch and base recorded on the task; Lookup only
-// verifies the directory is a live worktree.
 func (m *Manager) Lookup(attemptID string, repo RepoRef, branch, baseSHA string) (Workspace, bool) {
 	if !validComponent(attemptID) {
 		return Workspace{}, false
@@ -160,8 +140,7 @@ func (m *Manager) Lookup(attemptID string, repo RepoRef, branch, baseSHA string)
 	}, true
 }
 
-// verifyBaseSHA confirms sha names an existing commit in the mirror and
-// resolves to exactly that object (never a prefix or a different ref).
+// must resolve to exactly that object, never a prefix or another ref
 func (m *Manager) verifyBaseSHA(ctx context.Context, mirror, sha string) error {
 	out, err := m.git.run(ctx, mirror, "rev-parse", "--verify", "--quiet", sha+"^{commit}")
 	if err != nil || out != sha {
@@ -170,11 +149,7 @@ func (m *Manager) verifyBaseSHA(ctx context.Context, mirror, sha string) error {
 	return nil
 }
 
-// Remove tears down a completed attempt's worktree and deletes its working
-// branch, then prunes stale administrative entries. It force-removes the
-// worktree: a finished attempt's committed work is already pushed, so leftover
-// build artifacts must not block cleanup. worktree prune only clears entries
-// whose directories are already gone, so it never touches an active checkout.
+// force-remove: committed work already pushed; prune only clears dead entries, never an active checkout
 func (m *Manager) Remove(ctx context.Context, w Workspace) error {
 	mirror := filepath.Join(m.reposDir, w.Repo.ID, "repo.git")
 
@@ -186,7 +161,6 @@ func (m *Manager) Remove(ctx context.Context, w Workspace) error {
 		m.cleanups.Inc(observability.Label{Key: "outcome", Value: "failed"})
 		return fmt.Errorf("gitworkspace: remove worktree: %w", err)
 	}
-	// Idempotent: ignore a missing branch so a retried cleanup still succeeds.
 	_, _ = m.git.run(ctx, mirror, "branch", "-D", w.Branch)
 	if _, err := m.git.run(ctx, mirror, "worktree", "prune"); err != nil {
 		m.cleanups.Inc(observability.Label{Key: "outcome", Value: "failed"})
@@ -204,8 +178,7 @@ func (m *Manager) Remove(ctx context.Context, w Workspace) error {
 	return nil
 }
 
-// Prune clears administrative entries for worktrees whose directories are gone.
-// It never removes a live checkout, so it is safe to run opportunistically.
+// never removes a live checkout; safe to run opportunistically
 func (m *Manager) Prune(ctx context.Context, repo RepoRef) error {
 	if !validComponent(repo.ID) {
 		return fmt.Errorf("gitworkspace: repository id %q is not a safe path component", repo.ID)
@@ -220,9 +193,7 @@ func (m *Manager) Prune(ctx context.Context, repo RepoRef) error {
 	return nil
 }
 
-// Contains reports whether target, after symlink resolution, lies inside the
-// workspace. A caller enforcing a filesystem boundary uses it to reject a path
-// that escapes the worktree through a symlink planted in the repository.
+// rejects paths escaping the worktree through a repo-planted symlink
 func (w Workspace) Contains(target string) (bool, error) {
 	base, err := filepath.EvalSymlinks(w.Path)
 	if err != nil {
@@ -235,8 +206,6 @@ func (w Workspace) Contains(target string) (bool, error) {
 	return resolved == base || strings.HasPrefix(resolved, base+string(os.PathSeparator)), nil
 }
 
-// assertWithinRoot fails if path resolves (through any symlink) to a location
-// outside the workspace root.
 func (m *Manager) assertWithinRoot(path string) error {
 	root, err := filepath.EvalSymlinks(m.workDir)
 	if err != nil {
@@ -252,9 +221,7 @@ func (m *Manager) assertWithinRoot(path string) error {
 	return nil
 }
 
-// resolveExisting resolves the symlinks of target's deepest existing ancestor
-// and rejoins the not-yet-created remainder, so a boundary check still sees a
-// symlinked parent even when target itself does not exist.
+// resolve deepest existing ancestor + rejoin remainder: boundary check must see symlinked parents of missing targets
 func resolveExisting(target string) (string, error) {
 	if !filepath.IsAbs(target) {
 		return "", fmt.Errorf("gitworkspace: target %q must be an absolute path", target)

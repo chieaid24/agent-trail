@@ -26,7 +26,6 @@ const (
 	attemptIDLabel = "agent-trail.dev/task-attempt-id"
 )
 
-// KubernetesBackend schedules one Kubernetes Job per dispatchable attempt.
 type KubernetesBackend struct {
 	Jobs                batchclient.JobInterface
 	Store               *Store
@@ -53,7 +52,6 @@ type KubernetesBackend struct {
 	observed map[string]string
 }
 
-// Run dispatches work and observes Job status until ctx ends.
 func (b *KubernetesBackend) Run(ctx context.Context) error {
 	if err := b.validate(); err != nil {
 		return err
@@ -211,7 +209,7 @@ func (b *KubernetesBackend) observe(ctx context.Context, job *batchapi.Job) {
 			slog.String("error", err.Error()))
 	}
 	if state == "failed" {
-		// Lease expiry gates replacement; the executor owns task state.
+		// lease expiry gates replacement; executor owns task state
 		if err := b.Jobs.Delete(ctx, job.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			b.Logger.LogAttrs(ctx, slog.LevelWarn, "failed runner Job deletion failed",
 				slog.String("event", "runner_job_delete_failed"),

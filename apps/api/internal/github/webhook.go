@@ -10,25 +10,19 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// maxWebhookBody bounds the payload we accept. The subscribed events stay
-// far below this (issue bodies cap at 64 KiB); GitHub's own limit is 25 MiB.
-const maxWebhookBody = 1 << 20 // 1 MiB
+// subscribed events stay far below this (issue bodies cap at 64k); github's own limit is 25m
+const maxWebhookBody = 1 << 20
 
-// Webhook is the POST /webhooks/github handler: it validates the HMAC
-// signature over the raw body, enforces the size limit, records the
-// delivery id under its unique constraint, acks fast, and hands processing
-// to the Processor off the request goroutine.
 type Webhook struct {
 	secret    []byte
 	store     *Store
 	processor *Processor
 	logger    *slog.Logger
 
-	received         *observability.Counter // agent_trail_webhook_received_total
-	invalidSignature *observability.Counter // agent_trail_webhook_invalid_signature_total
+	received         *observability.Counter
+	invalidSignature *observability.Counter
 }
 
-// NewWebhook wires the webhook handler.
 func NewWebhook(secret []byte, store *Store, processor *Processor, logger *slog.Logger, metrics *observability.Registry) *Webhook {
 	return &Webhook{
 		secret:    secret,
@@ -43,7 +37,6 @@ func NewWebhook(secret []byte, store *Store, processor *Processor, logger *slog.
 	}
 }
 
-// deliveryEnvelope is the minimal payload slice recorded in the ledger.
 type deliveryEnvelope struct {
 	Action       string `json:"action"`
 	Installation struct {
@@ -54,8 +47,7 @@ type deliveryEnvelope struct {
 	} `json:"repository"`
 }
 
-// ServeHTTP handles one webhook request. Log lines carry only header
-// metadata (delivery id, event type); payloads and secrets are never logged.
+// log lines carry only header metadata; payloads and secrets never logged
 func (h *Webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.received.Inc()
 	traceID := observability.TraceIDFrom(r.Context())
@@ -94,8 +86,6 @@ func (h *Webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Envelope fields are best-effort ledger metadata; a payload without
-	// them (e.g. ping) records zeros.
 	var env deliveryEnvelope
 	_ = json.Unmarshal(body, &env)
 

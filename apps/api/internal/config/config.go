@@ -1,5 +1,4 @@
-// Package config loads and validates control-plane configuration from the
-// environment. Fail fast: a process with bad configuration must not start.
+// fail fast: a process with bad configuration must not start
 package config
 
 import (
@@ -16,107 +15,56 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// Config holds the settings shared by the api, worker, and migrate commands.
 type Config struct {
-	// APIAddr is the listen address for the HTTP API, e.g. ":8080".
 	APIAddr string
-	// DatabaseURL is the PostgreSQL connection string. Optional for the api
-	// command (readiness reports it unconfigured); required by migrate and
-	// the worker.
-	DatabaseURL string
-	// LogLevel is the minimum level emitted by the structured logger.
-	LogLevel slog.Level
-	// RunnerLease is how long a claimed task attempt stays owned without an
-	// extension (RUNNER_LEASE_SECONDS).
-	RunnerLease time.Duration
-	// RunnerHeartbeat is the runner registry heartbeat interval
-	// (RUNNER_HEARTBEAT_SECONDS).
-	RunnerHeartbeat time.Duration
-	// RunnerLostAfter is how stale a heartbeat marks a runner lost
-	// (RUNNER_LOST_AFTER_SECONDS). Must exceed RunnerHeartbeat.
-	RunnerLostAfter time.Duration
-	// WorkerPoll is the idle claim-poll interval (WORKER_POLL_SECONDS).
-	WorkerPoll time.Duration
-	// DefaultTaskRuntime applies when a task omits max_runtime_seconds
-	// (AGENT_TIMEOUT_SECONDS).
+	// optional for api (readiness reports unconfigured); required by migrate + worker
+	DatabaseURL        string
+	LogLevel           slog.Level
+	RunnerLease        time.Duration
+	RunnerHeartbeat    time.Duration
+	RunnerLostAfter    time.Duration
+	WorkerPoll         time.Duration
 	DefaultTaskRuntime time.Duration
-	// RunnerType selects the execution backend: process or kubernetes.
-	RunnerType string
-	// TaskAttemptID restricts a Kubernetes Job runner to one attempt.
-	TaskAttemptID string
-	// Kubernetes controller settings.
-	RunnerImage       string
-	RunnerJobTemplate string
-	RunnerNamespace   string
-	RunnerJobTTL      time.Duration
-	// WorkerMaxTasks caps attempts executed before the worker exits; zero
-	// runs forever (WORKER_MAX_TASKS). A Kubernetes Job runner sets 1 so
-	// the Job completes and TTL cleanup applies.
+	RunnerType         string
+	TaskAttemptID      string
+	RunnerImage        string
+	RunnerJobTemplate  string
+	RunnerNamespace    string
+	RunnerJobTTL       time.Duration
+	// zero runs forever; k8s job runner sets 1 so the job completes and ttl cleanup applies
 	WorkerMaxTasks int
-	// WorkerIdleExit stops the worker when no claim arrives for this long;
-	// zero never idles out (WORKER_IDLE_EXIT_SECONDS).
 	WorkerIdleExit time.Duration
-	// WorkspaceRoot is the base directory for the git mirror cache and task
-	// worktrees (WORKSPACE_ROOT); must be an absolute path.
-	WorkspaceRoot string
-	// GitHub App integration; all three set together, or none (the webhook
-	// endpoint then answers 503). GitHubAPIBaseURL overrides the API root
-	// in tests only.
+	WorkspaceRoot  string
+	// all three set together or none (unset -> webhook 503); api base url is a test-only override
 	GitHubWebhookSecret     string
 	GitHubAppID             string
 	GitHubAppPrivateKeyPath string
 	GitHubAPIBaseURL        string
-	// GitHub OAuth user authorization backing dashboard sessions; both set
-	// together, or neither (the auth endpoints then answer 503 and the API
-	// stays open for localhost development). GitHubOAuthBaseURL overrides
-	// the github.com root for tests and GitHub Enterprise.
+	// both set together or neither (unset -> auth 503, api open for localhost dev)
 	GitHubOAuthClientID     string
 	GitHubOAuthClientSecret string
 	GitHubOAuthBaseURL      string
-	// GitHubAppSlug builds the GitHub App installation link the dashboard
-	// shows (GITHUB_APP_SLUG); optional.
-	GitHubAppSlug string
-	// AuthPublicOrigin is the browser-facing dashboard origin
-	// (AUTH_PUBLIC_ORIGIN). The OAuth redirect URI and post-login redirects
-	// derive from it; the API is reached through its /backend proxy
-	// (apps/web/next.config.ts).
-	AuthPublicOrigin string
-	// AuthCookieSecure marks auth cookies Secure (AUTH_COOKIE_SECURE,
-	// default false for plain-HTTP localhost development).
-	AuthCookieSecure bool
-	// AgentProvider selects the agent adapter: "fake" (default) or
-	// "claude-code" (AGENT_PROVIDER).
-	AgentProvider string
-	// AgentCLIPath is the Claude Code executable, resolved from PATH when bare
-	// (AGENT_CLI_PATH, default "claude").
-	AgentCLIPath string
-	// AgentModel is the provider model; empty uses the CLI default (AGENT_MODEL).
-	AgentModel string
-	// AgentPermissionMode is the Claude Code permission mode
-	// (AGENT_PERMISSION_MODE, default "acceptEdits").
-	AgentPermissionMode string
-	// AgentCLIVersion, when set, pins the CLI version: it must appear in
-	// `claude --version` or the worker refuses to start (AGENT_CLI_VERSION).
-	AgentCLIVersion string
-	// ConflictLLMEnabled is the hard switch for semantic conflict analysis.
-	ConflictLLMEnabled bool
-	// ConflictLLMProvider selects "fake" or "anthropic".
-	ConflictLLMProvider string
-	// ConflictLLMModel is the pinned Anthropic model identifier.
-	ConflictLLMModel string
-	// AnthropicAPIKey is read from the environment and never logged.
+	GitHubAppSlug           string
+	AuthPublicOrigin        string
+	AuthCookieSecure        bool
+	AgentProvider           string
+	AgentCLIPath            string
+	AgentModel              string
+	AgentPermissionMode     string
+	AgentCLIVersion         string
+	ConflictLLMEnabled      bool
+	ConflictLLMProvider     string
+	ConflictLLMModel        string
+	// never logged
 	AnthropicAPIKey string
-	// OTLPEndpoint is the plaintext OTLP/gRPC target; "off" disables export.
+	// "off" disables export
 	OTLPEndpoint string
 }
 
-// GitHubEnabled reports whether the GitHub App integration is configured.
 func (c Config) GitHubEnabled() bool { return c.GitHubWebhookSecret != "" }
 
-// AuthEnabled reports whether the dashboard session layer is configured.
 func (c Config) AuthEnabled() bool { return c.GitHubOAuthClientID != "" }
 
-// Load reads configuration from the environment and validates it.
 func Load() (Config, error) {
 	cfg := Config{
 		APIAddr:                 envOr("API_ADDR", ":8080"),
@@ -247,7 +195,6 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// envNonNegativeInt reads an integer >= 0 from the environment.
 func envNonNegativeInt(key string, fallback int) (int, error) {
 	raw := envOr(key, strconv.Itoa(fallback))
 	n, err := strconv.Atoi(raw)
@@ -257,7 +204,6 @@ func envNonNegativeInt(key string, fallback int) (int, error) {
 	return n, nil
 }
 
-// envSeconds reads a positive whole-second duration from the environment.
 func envSeconds(key string, fallback int) (time.Duration, error) {
 	raw := envOr(key, strconv.Itoa(fallback))
 	n, err := strconv.Atoi(raw)
@@ -267,8 +213,6 @@ func envSeconds(key string, fallback int) (time.Duration, error) {
 	return time.Duration(n) * time.Second, nil
 }
 
-// validateGitHub rejects a partial GitHub configuration: a webhook that can
-// never act, or credentials without a webhook, is a deployment mistake.
 func validateGitHub(cfg Config) error {
 	set := 0
 	for _, v := range []string{cfg.GitHubWebhookSecret, cfg.GitHubAppID,
@@ -284,8 +228,6 @@ func validateGitHub(cfg Config) error {
 	return nil
 }
 
-// validateAuth rejects a partial OAuth configuration and a malformed
-// dashboard origin: a login that can never complete is a deployment mistake.
 func validateAuth(cfg Config) error {
 	if (cfg.GitHubOAuthClientID != "") != (cfg.GitHubOAuthClientSecret != "") {
 		return fmt.Errorf("GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET " +
@@ -300,7 +242,6 @@ func validateAuth(cfg Config) error {
 	return nil
 }
 
-// validateAddr accepts host:port with a numeric port (host may be empty).
 func validateAddr(addr string) error {
 	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -313,7 +254,6 @@ func validateAddr(addr string) error {
 	return nil
 }
 
-// envBool reads a strict true/false from the environment.
 func envBool(key string, fallback bool) (bool, error) {
 	raw := os.Getenv(key)
 	if raw == "" {
