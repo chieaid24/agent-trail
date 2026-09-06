@@ -2,9 +2,7 @@ package task
 
 import "testing"
 
-// specEdges is the full legal edge set, written out literally so the test is
-// an independent statement rather
-// than a re-derivation from the implementation.
+// written out literally so the test is independent of the implementation
 var specEdges = map[Status][]Status{
 	StatusCreated: {StatusQueued, StatusCancelled},
 	StatusQueued:  {StatusProvisioning, StatusCancelled},

@@ -1,6 +1,4 @@
-# Terraform creates the secret containers only. Values are set out-of-band
-# (aws secretsmanager put-secret-value) so no secret material ever enters
-# Terraform state or version control.
+# containers only; values set out-of-band so no secret material enters tf state
 locals {
   secrets = {
     github_app_private_key = "GitHub App private key (PEM). Control plane only; never reaches runners."

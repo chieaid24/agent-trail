@@ -1,7 +1,3 @@
-// Typed client for the control-plane API. All calls go through the
-// same-origin /backend proxy (next.config.ts), so this runs in the browser
-// with no CORS setup.
-
 import type {
   ActivityEvent,
   Me,
@@ -22,8 +18,6 @@ import type {
 export const BACKEND_PREFIX = "/backend";
 export const API_PREFIX = `${BACKEND_PREFIX}/api/v1`;
 
-// Signing in is a full-page navigation into the OAuth redirect chain, not
-// a fetch; render it as a link href.
 export const LOGIN_URL = `${BACKEND_PREFIX}/auth/github/start`;
 
 export class ApiError extends Error {
@@ -36,8 +30,6 @@ export class ApiError extends Error {
   }
 }
 
-// A 401 means the session expired or was revoked; every screen answers it
-// the same way, by starting over at the login page.
 function redirectToLogin() {
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
     window.location.assign("/login");
@@ -70,8 +62,6 @@ function request<T>(path: string, init?: RequestInit): Promise<T> {
   return backendRequest<T>(`${API_PREFIX}${path}`, init);
 }
 
-// The current session; 401 when signed out, 503 when the control plane
-// has no OAuth configuration (localhost development).
 export function getMe(): Promise<Me> {
   return backendRequest<Me>(`${BACKEND_PREFIX}/me`);
 }
@@ -188,8 +178,7 @@ export async function listConflicts(taskId: string): Promise<TaskConflict[]> {
   return body.conflicts;
 }
 
-// Evidence is null until the runner generates a report; a 404 is that
-// normal empty state, not an error.
+// 404 = no report yet, not an error
 export async function getEvidence(
   taskId: string,
 ): Promise<StoredEvidence | null> {
@@ -203,7 +192,6 @@ export async function getEvidence(
   }
 }
 
-// The SSE resume cursor of an event.
 export function eventCursor(e: ActivityEvent): string {
   return `${e.attempt_number}:${e.sequence_number}`;
 }

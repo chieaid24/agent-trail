@@ -12,8 +12,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// streamServer returns a handler whose stream loop runs fast enough to
-// finish inside a test.
 func streamServer(f *fakeTasks) http.Handler {
 	s := New(testLogger(), nil, f, nil, nil, nil, nil)
 	s.streamPollInterval = time.Millisecond
@@ -130,8 +128,6 @@ func TestTaskStreamUnknownTask(t *testing.T) {
 }
 
 func TestTaskStreamHeartbeatsUntilClientCloses(t *testing.T) {
-	// Running task with no new events: the stream must stay open and
-	// heartbeat until the client disconnects.
 	f := &fakeTasks{task: task.Task{ID: testUUID, Status: task.StatusExecuting}}
 	h := streamServer(f)
 

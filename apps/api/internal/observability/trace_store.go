@@ -10,7 +10,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-// TaskSpan is one completed OpenTelemetry span in a task waterfall.
 type TaskSpan struct {
 	TraceID       string         `json:"trace_id"`
 	SpanID        string         `json:"span_id"`
@@ -25,22 +24,19 @@ type TaskSpan struct {
 	StatusMessage string         `json:"status_message"`
 }
 
-// TaskTrace is the trace endpoint payload.
 type TaskTrace struct {
 	Spans []TaskSpan `json:"spans"`
 }
 
-// TraceStore persists completed task spans and serves their read model.
 type TraceStore struct {
 	db *sql.DB
 }
 
-// NewTraceStore returns a PostgreSQL-backed span exporter and read store.
 func NewTraceStore(db *sql.DB) *TraceStore {
 	return &TraceStore{db: db}
 }
 
-// ExportSpans writes task-scoped spans. Process-level spans are ignored.
+// task-scoped spans only; process-level spans ignored
 func (s *TraceStore) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -100,10 +96,9 @@ func (s *TraceStore) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlyS
 	return nil
 }
 
-// Shutdown satisfies sdktrace.SpanExporter; the database is owned by main.
+// db is owned by main
 func (s *TraceStore) Shutdown(context.Context) error { return nil }
 
-// ListTaskSpans returns completed spans in waterfall order.
 func (s *TraceStore) ListTaskSpans(ctx context.Context, taskID string) (TaskTrace, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT trace_id, span_id, parent_span_id, task_attempt_id, name, kind,

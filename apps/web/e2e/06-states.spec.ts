@@ -1,9 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { shoot, shootBothViewports } from "./harness/shots";
 
-// UI states that live data cannot hold still (empty, loading, error, a
-// full-spectrum grouped board) are pinned with route mocks. Everything
-// else in this suite runs against the real stack.
+// route mocks pin states live data cannot hold still
 
 function wireTask(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -230,7 +228,6 @@ test("loading skeleton", async ({ page }) => {
     await route.fulfill({ json: { tasks: [] } });
   });
   await page.goto("/");
-  // The skeleton owns the screen while the request is in flight.
   await shoot(page, "dashboard-loading");
   await expect(page.getByText("No tasks yet.", { exact: false })).toBeVisible();
 });

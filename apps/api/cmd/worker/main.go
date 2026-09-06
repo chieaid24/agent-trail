@@ -1,4 +1,3 @@
-// Command worker runs the configured process or Kubernetes backend.
 package main
 
 import (

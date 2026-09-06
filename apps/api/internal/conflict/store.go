@@ -10,17 +10,14 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// Store persists conflict warnings and reads sibling diffs.
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// ActiveSiblings returns published diffs for active repository tasks.
 func (s *Store) ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID string) ([]Sibling, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT t.id, t.title, a.base_commit_sha, a.final_commit_sha
@@ -55,7 +52,7 @@ func (s *Store) ActiveSiblings(ctx context.Context, repositoryID, excludeTaskID 
 	return siblings, nil
 }
 
-// Reconcile atomically replaces taskID's conflict set.
+// atomically replaces taskid's conflict set
 func (s *Store) Reconcile(ctx context.Context, repositoryID, taskID string, detections []Detection) (retErr error) {
 	desired := make(map[string]Detection, len(detections))
 	for _, detection := range detections {
@@ -161,7 +158,6 @@ func (s *Store) Reconcile(ctx context.Context, repositoryID, taskID string, dete
 	return nil
 }
 
-// ListForTask returns active warnings oriented toward the other task.
 func (s *Store) ListForTask(ctx context.Context, taskID string) ([]TaskConflict, error) {
 	var exists bool
 	if err := s.db.QueryRowContext(ctx,

@@ -7,7 +7,6 @@ import (
 
 const FakeProvider = "fake"
 
-// SemanticRequest is the bounded input for one active sibling pair.
 type SemanticRequest struct {
 	TaskID         string
 	TaskTitle      string
@@ -17,7 +16,6 @@ type SemanticRequest struct {
 	OtherTaskDiff  string
 }
 
-// SemanticVerdict is a provider-neutral behavioral conflict assessment.
 type SemanticVerdict struct {
 	Conflicts   bool     `json:"conflicts"`
 	Severity    Severity `json:"severity"`
@@ -25,12 +23,10 @@ type SemanticVerdict struct {
 	Evidence    []string `json:"evidence"`
 }
 
-// SemanticAssessor compares two active sibling diffs.
 type SemanticAssessor interface {
 	Assess(ctx context.Context, req SemanticRequest) (SemanticVerdict, error)
 }
 
-// SemanticOptions selects and configures the optional provider.
 type SemanticOptions struct {
 	Enabled  bool
 	Provider string
@@ -38,7 +34,6 @@ type SemanticOptions struct {
 	Model    string
 }
 
-// NewSemantic builds the configured provider. Missing Anthropic credentials disable it.
 func NewSemantic(opts SemanticOptions) (SemanticAssessor, error) {
 	if !opts.Enabled {
 		return nil, nil

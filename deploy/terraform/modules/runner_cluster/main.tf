@@ -103,7 +103,6 @@ resource "aws_eks_node_group" "runners" {
   }
 }
 
-# IRSA: OIDC provider so in-cluster service accounts assume narrow IAM roles.
 data "tls_certificate" "oidc" {
   url = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
@@ -120,9 +119,7 @@ locals {
   oidc_hostpath = replace(aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")
 }
 
-# Runner controller: consumes the dispatch queue, creates Jobs, reads only
-# the runner-safe secrets. Kubernetes RBAC (Job create in the runner
-# namespace) lives in the deploy/k8s manifests, not IAM.
+# job-create rbac lives in deploy/k8s manifests, not iam
 data "aws_iam_policy_document" "controller_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -178,7 +175,6 @@ resource "aws_iam_role_policy" "runner_controller" {
   policy = data.aws_iam_policy_document.runner_controller.json
 }
 
-# Runner task: what an individual task Job may do - upload artifacts, nothing else.
 data "aws_iam_policy_document" "task_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]

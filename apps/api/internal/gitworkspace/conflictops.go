@@ -11,10 +11,9 @@ import (
 	"strings"
 )
 
-// ErrMirrorMissing reports a missing repository mirror.
 var ErrMirrorMissing = errors.New("gitworkspace: repository mirror missing")
 
-// LineRange is a 1-based inclusive base-side span.
+// 1-based inclusive base-side span
 type LineRange struct {
 	Start int
 	End   int
@@ -33,7 +32,6 @@ func (m *Manager) mirrorPath(repo RepoRef) (string, error) {
 	return mirror, nil
 }
 
-// HasCommit reports whether the mirror holds sha as a commit.
 func (m *Manager) HasCommit(ctx context.Context, repo RepoRef, sha string) (bool, error) {
 	mirror, err := m.mirrorPath(repo)
 	if err != nil {
@@ -53,7 +51,7 @@ func (m *Manager) HasCommit(ctx context.Context, repo RepoRef, sha string) (bool
 	return code == 0, nil
 }
 
-// ChangedFiles lists touched paths, splitting renames into delete and add.
+// renames split into delete + add
 func (m *Manager) ChangedFiles(ctx context.Context, repo RepoRef, base, head string) ([]string, error) {
 	mirror, err := m.diffTarget(repo, base, head)
 	if err != nil {
@@ -72,7 +70,7 @@ func (m *Manager) ChangedFiles(ctx context.Context, repo RepoRef, base, head str
 	return strings.Split(out, "\n"), nil
 }
 
-// DiffHunks returns base-side ranges; insertions use their preceding line.
+// base-side ranges; insertions use their preceding line
 func (m *Manager) DiffHunks(ctx context.Context, repo RepoRef, base, head string) (map[string][]LineRange, error) {
 	mirror, err := m.diffTarget(repo, base, head)
 	if err != nil {
@@ -88,7 +86,6 @@ func (m *Manager) DiffHunks(ctx context.Context, repo RepoRef, base, head string
 	return parseHunks(out)
 }
 
-// Diff returns the patch between two commits without rename detection.
 func (m *Manager) Diff(ctx context.Context, repo RepoRef, base, head string) (string, error) {
 	mirror, err := m.diffTarget(repo, base, head)
 	if err != nil {
@@ -104,7 +101,6 @@ func (m *Manager) Diff(ctx context.Context, repo RepoRef, base, head string) (st
 	return out, nil
 }
 
-// MergeTree reports whether two commits merge and names conflicted paths.
 func (m *Manager) MergeTree(ctx context.Context, repo RepoRef, commitA, commitB string) (bool, []string, error) {
 	mirror, err := m.diffTarget(repo, commitA, commitB)
 	if err != nil {
@@ -113,7 +109,7 @@ func (m *Manager) MergeTree(ctx context.Context, repo RepoRef, commitA, commitB 
 	lock := m.lockFor(repo.ID)
 	lock.Lock()
 	defer lock.Unlock()
-	// Exit 1 carries the tree OID followed by conflicted paths.
+	// exit 1 carries the tree oid followed by conflicted paths
 	out, code, err := m.git.runExit(ctx, mirror, []int{1},
 		"merge-tree", "--write-tree", "--no-messages", "--name-only", commitA, commitB)
 	if err != nil {
@@ -124,7 +120,7 @@ func (m *Manager) MergeTree(ctx context.Context, repo RepoRef, commitA, commitB 
 	}
 	lines := strings.Split(out, "\n")
 	var conflicted []string
-	for _, line := range lines[1:] { // first line is the tree OID
+	for _, line := range lines[1:] {
 		if line != "" {
 			conflicted = append(conflicted, line)
 		}

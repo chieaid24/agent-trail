@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// clearEnv makes the test hermetic against ambient configuration.
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{

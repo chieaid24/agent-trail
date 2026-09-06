@@ -14,16 +14,11 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// streamBatchLimit bounds one EventsAfter fetch inside the stream loop.
 const streamBatchLimit = 500
 
-// streamRetryMillis is the reconnect delay hint sent to EventSource clients.
 const streamRetryMillis = 2000
 
-// streamCursor is the resume position of an SSE client: events strictly
-// after (attempt, sequence) have not been delivered. The wire form is
-// "<attempt>:<sequence>", carried in the SSE id field and echoed back by
-// browsers as Last-Event-ID on reconnect.
+// wire form "<attempt>:<sequence>", carried in sse id, echoed back as last-event-id
 type streamCursor struct {
 	attempt  int
 	sequence int64
@@ -49,9 +44,6 @@ func parseStreamCursor(raw string) (streamCursor, error) {
 	return streamCursor{attempt: attempt, sequence: seq}, nil
 }
 
-// requestCursor reads the client's resume position: the Last-Event-ID header
-// (set by EventSource on automatic reconnect) wins over the last_event_id
-// query parameter (for callers that cannot set headers on the first request).
 func requestCursor(r *http.Request) (streamCursor, error) {
 	raw := r.Header.Get("Last-Event-ID")
 	if raw == "" {
@@ -67,12 +59,7 @@ func requestCursor(r *http.Request) (streamCursor, error) {
 	return c, nil
 }
 
-// handleTaskStream serves GET /api/v1/tasks/{taskId}/stream: the task's
-// activity timeline as server-sent events. Each
-// event's data is the same JSON object GET /events returns; the SSE id field
-// carries the resume cursor. When the task is terminal and the timeline is
-// drained the server emits a "done" event and closes; clients should close
-// on "done" rather than reconnect.
+// terminal task + drained timeline emits "done" and closes; clients close on it, not reconnect
 func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
 	if s.tasks == nil {
 		s.writeTasksUnavailable(w)
@@ -94,8 +81,7 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	// no-transform keeps proxies (including the Next dev server) from
-	// gzip-buffering the stream into one flush at close.
+	// no-transform keeps proxies from gzip-buffering the stream
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
@@ -120,7 +106,6 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if t.Status.Terminal() && !wrote {
-			// Drained a finished task: tell the client to stop reconnecting.
 			done, err := json.Marshal(map[string]task.Status{"status": t.Status})
 			if err == nil {
 				_, _ = fmt.Fprintf(w, "event: done\ndata: %s\n\n", done)
@@ -150,8 +135,6 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// streamDrain writes every undelivered event and advances the cursor.
-// It reports whether anything was written.
 func (s *Server) streamDrain(w http.ResponseWriter, rc *http.ResponseController,
 	r *http.Request, id string, cursor *streamCursor) (bool, error) {
 	wrote := false
@@ -179,8 +162,7 @@ func (s *Server) streamDrain(w http.ResponseWriter, rc *http.ResponseController,
 	}
 }
 
-// writeSSEEvent frames one timeline event. json.Marshal output never contains
-// raw newlines, so a single data line is always a valid SSE frame.
+// json.marshal output has no raw newlines, so one data line is a valid sse frame
 func writeSSEEvent(w http.ResponseWriter, e task.Event) error {
 	data, err := json.Marshal(e)
 	if err != nil {
@@ -193,7 +175,7 @@ func writeSSEEvent(w http.ResponseWriter, e task.Event) error {
 
 func (s *Server) logStreamEnd(r *http.Request, taskID, msg string, err error) {
 	if errors.Is(err, r.Context().Err()) {
-		return // client went away; nothing to report
+		return // client went away
 	}
 	s.logger.LogAttrs(r.Context(), slog.LevelError, msg,
 		slog.String("event", "task_stream_failed"),

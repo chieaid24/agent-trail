@@ -1,7 +1,3 @@
-# Local infrastructure for Agent Trail. Apps (api, worker, web) run natively
-# via `make dev`. All ports bind to localhost and are overridable via .env so
-# parallel checkouts can coexist. Credentials here are local-only values,
-# never used outside compose.
 name: agent-trail
 
 services:

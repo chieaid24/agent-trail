@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# Verifies the Kubernetes runner acceptance criteria locally in a per-run
-# kind cluster:
-#   1. the controller creates a Job and the task runs inside it
-#   2. the pod spec carries every hardening the Job template promises
-#   3. ttlSecondsAfterFinished removes the finished Job
-# The cluster, images, and secrets are namespaced per run and torn down on
-# exit. KEEP_CLUSTER=1 keeps the cluster for debugging.
+# verify k8s runner end to end in a per-run kind cluster; KEEP_CLUSTER=1 keeps it
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -24,8 +18,6 @@ for dep in docker kind kubectl curl openssl python3; do
   command -v "$dep" >/dev/null || fail "$dep is required"
 done
 
-# On success everything this run created goes; on failure the artifacts
-# stay (path printed) so the run can be diagnosed.
 cleanup() {
   local status=$?
   if [ "${KEEP_CLUSTER:-0}" = "1" ]; then
@@ -43,8 +35,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# render FILE VAR=VALUE... substitutes ${VAR} placeholders without needing
-# gettext's envsubst.
 render() {
   local file=$1
   shift
@@ -60,18 +50,13 @@ render() {
 }
 
 log "Building runner and tools images"
-# Single-manifest images: kind load rejects the manifest lists that
-# provenance attestations produce.
+# --provenance=false: kind load rejects manifest lists from provenance attestations
 docker build -q --provenance=false -f deploy/docker/Dockerfile --target runner -t "$RUNNER_IMAGE" . >/dev/null
 docker build -q --provenance=false -f deploy/docker/Dockerfile --target tools -t "$TOOLS_IMAGE" . >/dev/null
 
 log "Creating kind cluster ${CLUSTER}"
 kind create cluster --name "$CLUSTER" --wait 180s >/dev/null
-# Archive route: with Docker's containerd image store, kind load
-# docker-image streams multi-platform indexes whose foreign blobs are not
-# local and the import fails. A saved archive of a locally built
-# single-platform image is safe. postgres is not preloaded - its pulled
-# index has the same problem - so the node pulls it from the registry.
+# archive route: kind load docker-image fails on containerd-store multi-platform indexes
 IMAGES_TAR="$(mktemp -t agent-trail-images-XXXXXX.tar)"
 docker save "$RUNNER_IMAGE" "$TOOLS_IMAGE" -o "$IMAGES_TAR"
 kind load image-archive --name "$CLUSTER" "$IMAGES_TAR" >/dev/null

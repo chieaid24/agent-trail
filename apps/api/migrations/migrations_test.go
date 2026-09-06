@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// Every embedded migration must carry goose annotations, or goose refuses it
-// at run time; catch that in unit tests instead.
+// goose refuses unannotated migrations at run time; catch here instead
 func TestMigrationsHaveGooseAnnotations(t *testing.T) {
 	entries, err := FS.ReadDir(".")
 	if err != nil {

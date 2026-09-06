@@ -15,7 +15,6 @@ import (
 
 const testOrigin = "http://dashboard.test:3000"
 
-// fakeAuth implements AuthService with a single valid session token.
 type fakeAuth struct {
 	sessionToken string
 	user         auth.User
@@ -115,7 +114,6 @@ func TestAuthRoutesUnavailableWithoutConfiguration(t *testing.T) {
 			t.Errorf("%s %s = %d, want 503", tc[0], tc[1], rec.Code)
 		}
 	}
-	// Without auth configured the API stays open (localhost development).
 	rec := do(t, h, http.MethodGet, "/api/v1/organizations", "")
 	if rec.Code != http.StatusOK {
 		t.Errorf("organizations without auth = %d, want 200", rec.Code)
@@ -139,7 +137,6 @@ func TestRequireSessionGuardsAPI(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("good cookie = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	// Health stays open.
 	if rec := do(t, h, http.MethodGet, "/healthz", ""); rec.Code != http.StatusOK {
 		t.Errorf("healthz = %d, want 200", rec.Code)
 	}
@@ -248,7 +245,6 @@ func TestAuthLogout(t *testing.T) {
 		t.Errorf("session cookie not cleared: %+v", cookie)
 	}
 
-	// Logging out without a cookie is idempotent.
 	if rec := do(t, h, http.MethodPost, "/auth/logout", ""); rec.Code != http.StatusNoContent {
 		t.Errorf("status = %d, want 204", rec.Code)
 	}

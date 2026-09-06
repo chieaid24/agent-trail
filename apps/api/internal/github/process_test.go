@@ -15,7 +15,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// fakeAPI implements API in memory and records the side effects.
 type fakeAPI struct {
 	mu         sync.Mutex
 	repos      []Repository
@@ -179,8 +178,6 @@ func issueCommentJSON(t *testing.T, o commentOpts) []byte {
 	return payload
 }
 
-// recordAndProcess mimics the webhook path synchronously: ledger row, then
-// processing.
 func (f *fixture) recordAndProcess(t *testing.T, deliveryID, eventType string, payload []byte) {
 	t.Helper()
 	ctx := context.Background()
@@ -422,8 +419,7 @@ func TestDisabledRepositoryRejected(t *testing.T) {
 
 func TestCommandSelfHealsUnsyncedRepository(t *testing.T) {
 	f := newFixture(t)
-	// No installation events processed: the tables are empty, as they are
-	// for an app installed before the webhook endpoint existed.
+	// empty tables = app installed before the webhook endpoint existed
 	f.recordAndProcess(t, "d-1", "issue_comment",
 		issueCommentJSON(t, commentOpts{body: "/agent-trail run"}))
 
@@ -504,8 +500,7 @@ func TestSelfHealUpsertPreservesPermissions(t *testing.T) {
 	f := newFixture(t)
 	f.recordAndProcess(t, "d-perm-install", "installation", installationJSON(t, "created"))
 
-	// The self-heal path upserts with neither permissions nor events; a
-	// previous sync's values must survive.
+	// self-heal upserts with neither permissions nor events; previous sync's values must survive
 	err := f.store.UpsertInstallation(context.Background(), InstallationParams{
 		GitHubInstallationID: 999, AccountID: 61,
 		AccountLogin: "acme", AccountType: "Organization",

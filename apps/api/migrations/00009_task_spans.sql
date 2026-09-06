@@ -1,5 +1,5 @@
 -- +goose Up
--- Dashboard trace read model, populated by the worker's OpenTelemetry exporter.
+-- trace read model, populated by the worker's otel exporter
 
 ALTER TABLE task_attempts ADD CONSTRAINT task_attempts_id_task_unique
     UNIQUE (id, task_id);

@@ -57,7 +57,7 @@ resource "aws_eip" "nat" {
   depends_on = [aws_internet_gateway.this]
 }
 
-# Single NAT gateway: private-subnet egress is not AZ-redundant by design (cost).
+# single nat: private egress not az-redundant, cost tradeoff
 resource "aws_nat_gateway" "this" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public[0].id

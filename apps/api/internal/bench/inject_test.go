@@ -23,16 +23,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// Failure-injection matrix (issue #13): runner kill, network interruption,
-// database
-// restart, S3 timeout, GitHub rate limit, agent hang, full disk. Each test
-// injects one fault and asserts the recorded behaviour; the measured
-// outcomes live in docs/testing/benchmark-results.md.
-
-// TestInjectRunnerKill kills a runner the hardest way observable from the
-// database: the runner claims an attempt and then never heartbeats again -
-// the state a SIGKILL leaves behind. The lease must expire on the server
-// clock and a second runner must recover the task to completion.
 func TestInjectRunnerKill(t *testing.T) {
 	db := openDB(t)
 	t.Setenv("TMPDIR", t.TempDir())
@@ -60,7 +50,7 @@ func TestInjectRunnerKill(t *testing.T) {
 		t.Fatalf("victim claim = %+v, %v", claim, err)
 	}
 	killedAt := time.Now()
-	// No heartbeat, no executor, no release: the victim is dead.
+	// no heartbeat, no release: victim is dead
 
 	f := startFleet(db, s, ts, 1, agent.NewFake(), time.Minute, "bench-kill-rescue")
 	waitInt(t, db, `SELECT count(*) FROM tasks WHERE status = 'completed'`,
@@ -90,8 +80,6 @@ func TestInjectRunnerKill(t *testing.T) {
 		recovery.Round(time.Millisecond))
 }
 
-// waitIntTolerant polls like waitInt but tolerates query errors - required
-// while the database is being restarted under the test.
 func waitIntTolerant(t *testing.T, db *sql.DB, query string, want int, timeout time.Duration, what string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -109,11 +97,6 @@ func waitIntTolerant(t *testing.T, db *sql.DB, query string, want int, timeout t
 	}
 }
 
-// TestInjectDatabaseRestart restarts the Postgres container while 10
-// runners drain 50 tasks. Runners must ride out the outage (claim errors
-// retry on the poll interval), interrupted attempts must be recovered
-// after lease expiry, and every task must still complete exactly once at
-// the task level. Requires BENCH_PG_CONTAINER (set by scripts/bench.sh).
 func TestInjectDatabaseRestart(t *testing.T) {
 	container := os.Getenv("BENCH_PG_CONTAINER")
 	if container == "" {
@@ -140,7 +123,6 @@ func TestInjectDatabaseRestart(t *testing.T) {
 	start := time.Now()
 	f := startFleet(db, s, ts, runners, agent.NewFake(), lease, "bench-dbrestart")
 
-	// Let the drain get going, then pull the database out.
 	waitIntTolerant(t, db,
 		`SELECT count(*) FROM tasks WHERE status = 'completed'`,
 		total/5, time.Minute, "warm-up completions")
@@ -149,7 +131,6 @@ func TestInjectDatabaseRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("docker restart %s: %v\n%s", container, err, out)
 	}
-	// Outage window: from the restart order to the first successful query.
 	var outage time.Duration
 	for {
 		var one int
@@ -171,9 +152,7 @@ func TestInjectDatabaseRestart(t *testing.T) {
 	f.stop(t)
 
 	assertLeasesReleased(t, db)
-	// Attempts interrupted mid-agent-session are re-run after lease expiry
-	// (documented at-least-once recovery), so count them rather than
-	// forbidding them: task-level exactly-once is the invariant.
+	// interrupted attempts re-run after lease expiry; task-level exactly-once is the invariant
 	reExecuted := queryInt(t, db, `
 		SELECT count(*) FROM (
 			SELECT task_attempt_id FROM activity_events
@@ -190,10 +169,6 @@ func TestInjectDatabaseRestart(t *testing.T) {
 		drain.Round(time.Millisecond), reExecuted)
 }
 
-// stubGitHub is a minimal GitHub API for the real github.Client, with a
-// switchable fault mode: "ok" serves the endpoints webhook processing
-// needs, "reset" drops every connection mid-request (network
-// interruption), "429" answers every request with a rate-limit rejection.
 type stubGitHub struct {
 	mu   sync.Mutex
 	mode string
@@ -225,7 +200,7 @@ func (g *stubGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			panic(err)
 		}
-		_ = conn.Close() // dropped mid-request: the client sees a broken connection
+		_ = conn.Close() // drop mid-request
 		return
 	case "429":
 		w.Header().Set("Content-Type", "application/json")
@@ -269,8 +244,6 @@ func (g *stubGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// injectRig wires the real webhook handler and the real GitHub client to a
-// fault-switchable GitHub stub over real HTTP.
 type injectRig struct {
 	db        *sql.DB
 	stub      *stubGitHub
@@ -312,8 +285,6 @@ func newInjectRig(t *testing.T) *injectRig {
 		client:    &http.Client{Timeout: 30 * time.Second},
 		secret:    secret,
 	}
-	// Seed the installation and wait for the repository sync while the
-	// stub is healthy.
 	status, ack, _ := postWebhook(t, rig.client, webhook.URL, secret,
 		"bench-inject-install", "installation", installationEvent(t, injectInstallationID))
 	if status != http.StatusAccepted || ack != "accepted" {
@@ -325,8 +296,6 @@ func newInjectRig(t *testing.T) *injectRig {
 	return rig
 }
 
-// deliver posts one signed task-creating delivery and waits for its ledger
-// row to settle, returning the processing status and failure message.
 func (rig *injectRig) deliver(t *testing.T, deliveryID string, issue int) (status, failure string, ackLatency time.Duration) {
 	t.Helper()
 	httpStatus, ack, latency := postWebhook(t, rig.client, rig.webhook.URL,
@@ -361,11 +330,6 @@ func (rig *injectRig) tasksForIssue(t *testing.T, issue int) int {
 		`SELECT count(*) FROM tasks WHERE source_issue_number = $1`, issue)
 }
 
-// TestInjectNetworkInterruption drops every GitHub connection mid-request
-// while a task-creating delivery is processed. The webhook must still ack
-// fast (processing is async), the delivery must settle as failed with the
-// error recorded, no task may be created - and the next delivery after the
-// network returns must succeed with no restart.
 func TestInjectNetworkInterruption(t *testing.T) {
 	rig := newInjectRig(t)
 	const issue = 31
@@ -395,10 +359,7 @@ func TestInjectNetworkInterruption(t *testing.T) {
 		ackLatency.Round(time.Microsecond), failure != "", status == "processed")
 }
 
-// TestInjectGitHubRateLimit answers every GitHub call with 429. The client
-// has no retry or backoff by design, so the delivery fails
-// with the 429 recorded and no task; processing recovers on the next
-// delivery once the limit lifts.
+// client has no retry/backoff by design; delivery fails with 429 recorded
 func TestInjectGitHubRateLimit(t *testing.T) {
 	rig := newInjectRig(t)
 	const issue = 41
@@ -428,8 +389,6 @@ func TestInjectGitHubRateLimit(t *testing.T) {
 		strings.Contains(failure, "429"), status == "processed")
 }
 
-// TestInjectS3Timeout documents the S3 row of the matrix: there is nothing
-// to inject into yet.
 func TestInjectS3Timeout(t *testing.T) {
 	guard(t)
 	t.Skip("not applicable: no object-storage code path exists yet - logs, " +
@@ -438,8 +397,6 @@ func TestInjectS3Timeout(t *testing.T) {
 		"log offload to object storage lands")
 }
 
-// TestInjectAgentHang proves timeout and API cancellation both stop a session
-// that emits one event and then hangs.
 func TestInjectAgentHang(t *testing.T) {
 	db := openDB(t)
 	tmp := t.TempDir()
@@ -509,9 +466,6 @@ func TestInjectAgentHang(t *testing.T) {
 		timed.Status, *timed.FailureCode, cancelTook.Round(time.Millisecond), len(leftovers))
 }
 
-// TestInjectFullDisk points the workspace root at a full filesystem (a
-// 1 MiB tmpfs filled by scripts/bench.sh). Provisioning must fail the task
-// terminally with the ENOSPC recorded, and the lease must be released.
 func TestInjectFullDisk(t *testing.T) {
 	dir := os.Getenv("BENCH_FULL_DISK_DIR")
 	if dir == "" {

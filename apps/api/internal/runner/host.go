@@ -8,37 +8,28 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// Host is one runner process: it registers itself, heartbeats, reaps lost
-// runners, and claims and executes attempts until its context ends.
 type Host struct {
 	Store    *Store
 	Executor *Executor
 	Logger   *slog.Logger
-	// Metrics emits the runner instruments; nil skips emission.
-	Metrics *Metrics
+	Metrics  *Metrics
 
-	// RunnerType and HostnameOrPod identify this runner in the registry.
 	RunnerType    string
 	HostnameOrPod string
 	AttemptID     string
 
-	Lease     time.Duration // claim lease duration
-	Heartbeat time.Duration // registry heartbeat and reap cadence
-	LostAfter time.Duration // heartbeat staleness that marks a runner lost
-	Poll      time.Duration // idle claim-poll interval
+	Lease     time.Duration
+	Heartbeat time.Duration
+	LostAfter time.Duration
+	Poll      time.Duration
 
-	// MaxTasks caps executed attempts; zero is unbounded. A capped host
-	// exits cleanly after its last attempt, so a Kubernetes Job completes
-	// and ttlSecondsAfterFinished can reclaim it.
+	// zero unbounded; capped host exits so a k8s job completes and ttl reclaims it
 	MaxTasks int
-	// IdleExit stops the host when no claim arrives for this long; zero
-	// never idles out. Keeps a one-shot Job from hanging on an empty queue.
+	// zero never idles out; keeps a one-shot job from hanging on an empty queue
 	IdleExit time.Duration
 }
 
-// Run registers the runner and works the queue until ctx ends, then marks
-// the runner offline. An attempt in flight at shutdown is left mid-status
-// with its lease released, ready for recovery by another runner.
+// in-flight attempt at shutdown is left mid-status with lease released, ready for recovery
 func (h *Host) Run(ctx context.Context) error {
 	self, err := h.Store.Register(ctx, RegisterParams{
 		Type:          h.RunnerType,
@@ -53,8 +44,7 @@ func (h *Host) Run(ctx context.Context) error {
 		slog.String("hostname", h.HostnameOrPod),
 	)
 
-	// A cap or idle exit ends the work loop without cancelling ctx; the
-	// heartbeat goroutine needs its own stop signal for that path.
+	// cap/idle exit end the loop without cancelling ctx; heartbeats need their own stop
 	beatCtx, stopBeats := context.WithCancel(ctx)
 	defer stopBeats()
 	beatsDone := make(chan struct{})
@@ -105,16 +95,13 @@ func (h *Host) Run(ctx context.Context) error {
 			slog.String("task_attempt_id", claim.AttemptID),
 			slog.String("task_status", string(claim.TaskStatus)),
 		)
-		// Queue wait is creation to first claim; a recovered claim at a
-		// later status already waited once and is not re-counted.
+		// queue wait = creation to first claim; recovered claims not re-counted
 		if claim.TaskStatus == task.StatusQueued {
 			h.Metrics.observeQueueWait(time.Since(claim.TaskCreatedAt))
 			recordQueueWaitSpan(ctx, claim)
 		}
 		h.Metrics.taskStarted()
 		if err := h.Executor.Execute(ctx, self.ID, claim); err != nil {
-			// The failure is already recorded on the task or the attempt is
-			// recoverable; either way this runner moves on.
 			log.LogAttrs(ctx, slog.LevelWarn, "attempt did not complete",
 				slog.String("event", "runner_attempt_incomplete"),
 				slog.String("task_id", claim.TaskID),
@@ -146,8 +133,7 @@ func (h *Host) Run(ctx context.Context) error {
 	return nil
 }
 
-// beatAndReap heartbeats the registry and reaps lost runners until ctx ends.
-// Any live runner may reap: MarkLost is atomic, so a loss is detected once.
+// any live runner may reap: MarkLost is atomic, a loss is detected once
 func (h *Host) beatAndReap(ctx context.Context, log *slog.Logger, runnerID string) {
 	ticker := time.NewTicker(h.Heartbeat)
 	defer ticker.Stop()
@@ -186,9 +172,6 @@ func (h *Host) beatAndReap(ctx context.Context, log *slog.Logger, runnerID strin
 	}
 }
 
-// reportLoss writes the loss onto the timeline of every attempt the lost
-// runner still leases. The lease itself is untouched: expiry, not runner
-// status, makes the attempt claimable again.
 func (h *Host) reportLoss(ctx context.Context, log *slog.Logger, lost Runner) {
 	attempts, err := h.Store.LeasedAttemptIDs(ctx, lost.ID)
 	if err != nil {
@@ -216,7 +199,6 @@ func (h *Host) reportLoss(ctx context.Context, log *slog.Logger, lost Runner) {
 	}
 }
 
-// sleep waits d or until ctx ends, whichever is first.
 func sleep(ctx context.Context, d time.Duration) {
 	timer := time.NewTimer(d)
 	defer timer.Stop()

@@ -1,8 +1,4 @@
-// Package dbtest is the shared harness for integration tests that need a
-// real database. It skips without TEST_DATABASE_URL, serializes access
-// across concurrently running test binaries with a session advisory lock
-// (go test runs packages in parallel against the one shared database),
-// applies migrations, and starts each test from empty task tables.
+// advisory lock serializes parallel test binaries against the one shared database
 package dbtest
 
 import (
@@ -17,11 +13,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/migrations"
 )
 
-// lockKey is the advisory lock shared by every integration-test package.
 const lockKey = 0x61747261 // "atra"
 
-// Open returns a migrated, truncated test database, holding the advisory
-// lock until test cleanup. Skips when TEST_DATABASE_URL is not set.
 func Open(t *testing.T) *sql.DB {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -34,8 +27,7 @@ func Open(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 
-	// The lock must live on one session, so pin a connection for its whole
-	// lifetime; pool queries elsewhere are unaffected.
+	// lock must live on one session, so pin a connection for its lifetime
 	ctx := context.Background()
 	lockConn, err := db.Conn(ctx)
 	if err != nil {
@@ -61,7 +53,7 @@ func Open(t *testing.T) *sql.DB {
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// TRUNCATE bypasses the append-only row trigger by design.
+	// truncate bypasses the append-only row trigger by design
 	if _, err := db.ExecContext(ctx, `
 		TRUNCATE task_spans, tasks, task_attempts, activity_events, organizations,
 			github_installations, repositories,

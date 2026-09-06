@@ -1,20 +1,4 @@
-// Package gitworkspace provisions and cleans up isolated git worktrees for
-// task attempts. It keeps a bare mirror
-// cache per repository, cuts one worktree per attempt from a verified base
-// commit, sanitizes branch names under the agent-trail/ prefix, enforces a
-// push policy (agent-trail/* only, no force pushes) in code rather than by
-// prompt, records commits with Agent-Trail trailers, and removes worktrees
-// with git-aware cleanup that never prunes an active checkout.
-//
-// Every external git call goes through argument arrays; the package never
-// spawns a shell, so no input is interpreted by one. Clone URLs may carry a
-// credential, so they are never logged and are redacted out of error output.
-//
-// Security limitation: the fetch lock that serializes mirror clones and
-// fetches is process-local. A single control-plane/runner process per host
-// is safe; sharing one on-disk mirror cache across processes on the same
-// host would need a cross-process file lock, which this package does not
-// implement.
+// argv only, never a shell; push policy enforced in code; fetch lock is process-local, so sharing a mirror cache across processes is unsafe
 package gitworkspace
 
 import (
@@ -31,42 +15,28 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// ErrBaseSHANotFound reports that a requested base commit is absent from the
-// repository mirror, so no worktree can be pinned to it.
 var ErrBaseSHANotFound = errors.New("gitworkspace: base commit not found")
 
-// shaRe matches a full lowercase-hex commit SHA, the same shape the
-// task_attempts.base_commit_sha CHECK constraint enforces.
+// same shape the task_attempts.base_commit_sha check enforces
 var shaRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// safeComponent matches an identifier usable as a single filesystem path
-// component: it forbids "/", "\", ".", "..", and any control or shell-special
-// character, so a repository or attempt id cannot traverse out of its root.
+// single path component only: no traversal, no shell-special chars
 var safeComponent = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
-// RepoRef identifies a repository to mirror.
 type RepoRef struct {
-	// ID is the stable repository identifier. It names the on-disk mirror
-	// directory, so it must be a safe path component.
 	ID string
-	// CloneURL is the mirror source. It may embed a credential; the package
-	// never logs it and redacts it from errors.
+	// may embed a credential: never logged, redacted from errors
 	CloneURL string
 }
 
-// Workspace is a provisioned worktree for one task attempt.
 type Workspace struct {
 	AttemptID string
 	Repo      RepoRef
-	// Path is the worktree directory the agent reads and writes.
-	Path string
-	// Branch is the working branch, always under BranchPrefix.
-	Branch string
-	// BaseSHA is the commit the worktree was created at.
-	BaseSHA string
+	Path      string
+	Branch    string
+	BaseSHA   string
 }
 
-// Manager owns the on-disk mirror cache and worktrees under a single root.
 type Manager struct {
 	root     string
 	reposDir string
@@ -77,12 +47,10 @@ type Manager struct {
 	denials  *observability.Counter
 
 	mu    sync.Mutex
-	locks map[string]*sync.Mutex // per-repository fetch/worktree lock
+	locks map[string]*sync.Mutex
 }
 
-// New returns a Manager rooted at root (e.g. /var/lib/agent-trail), creating
-// its repos/ and workspaces/ subdirectories. The root must be absolute so a
-// worktree path can be checked against it.
+// root must be absolute so worktree paths can be checked against it
 func New(root string, logger *slog.Logger, metrics *observability.Registry) (*Manager, error) {
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("gitworkspace: root %q must be an absolute path", root)
@@ -107,10 +75,7 @@ func New(root string, logger *slog.Logger, metrics *observability.Registry) (*Ma
 	return m, nil
 }
 
-// EnsureMirror clones repo into the bare mirror cache on first use and fetches
-// updates on later calls, returning the mirror path. The per-repository lock
-// serializes concurrent callers so two attempts never clone or fetch the same
-// cache at once.
+// per-repo lock: two attempts never clone/fetch the same cache at once
 func (m *Manager) EnsureMirror(ctx context.Context, repo RepoRef) (string, error) {
 	if !validComponent(repo.ID) {
 		return "", fmt.Errorf("gitworkspace: repository id %q is not a safe path component", repo.ID)
@@ -125,16 +90,11 @@ func (m *Manager) EnsureMirror(ctx context.Context, repo RepoRef) (string, error
 	defer lock.Unlock()
 
 	if _, err := os.Stat(filepath.Join(mirror, "HEAD")); err == nil {
-		// Refresh the stored remote URL first: it may embed a short-lived
-		// credential recorded by an earlier clone, and a fetch or a later
-		// push through an expired one fails.
+		// stored remote url may embed an expired short-lived credential from an earlier clone
 		if _, err := m.git.run(ctx, mirror, "remote", "set-url", "origin", "--", repo.CloneURL); err != nil {
 			return "", fmt.Errorf("gitworkspace: refresh remote url: %w", err)
 		}
-		// The agent-trail/* namespace is excluded: those branches are born
-		// locally (worktree add) and pushed out, so the local refs are the
-		// source of truth - and fetching one back would be refused anyway
-		// while its worktree has it checked out.
+		// agent-trail/* refs are born locally and are source of truth; fetching them back is refused while checked out
 		if _, err := m.git.run(ctx, mirror, "fetch", "--prune", "--refmap=", "origin",
 			"+refs/*:refs/*", "^refs/heads/"+BranchPrefix+"*"); err != nil {
 			return "", fmt.Errorf("gitworkspace: fetch mirror: %w", err)
@@ -149,10 +109,9 @@ func (m *Manager) EnsureMirror(ctx context.Context, repo RepoRef) (string, error
 	if err := os.MkdirAll(filepath.Dir(mirror), 0o750); err != nil {
 		return "", fmt.Errorf("gitworkspace: create mirror dir: %w", err)
 	}
-	// "--" terminates options so a hostile clone URL beginning with "-" is
-	// treated as a positional argument, never a flag.
+	// "--" so a hostile clone url starting with "-" is never a flag
 	if _, err := m.git.run(ctx, "", "clone", "--mirror", "--", repo.CloneURL, mirror); err != nil {
-		// Drop a half-written cache so the next attempt reclones cleanly.
+		// drop half-written cache so next attempt reclones cleanly
 		_ = os.RemoveAll(filepath.Dir(mirror))
 		return "", fmt.Errorf("gitworkspace: clone mirror: %w", err)
 	}
@@ -164,7 +123,6 @@ func (m *Manager) EnsureMirror(ctx context.Context, repo RepoRef) (string, error
 	return mirror, nil
 }
 
-// lockFor returns the mutex guarding one repository's mirror cache.
 func (m *Manager) lockFor(id string) *sync.Mutex {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -176,11 +134,9 @@ func (m *Manager) lockFor(id string) *sync.Mutex {
 	return l
 }
 
-// validComponent reports whether s is safe as a single path component.
 func validComponent(s string) bool {
 	return s != "." && s != ".." &&
 		!strings.ContainsAny(s, `/\`) && safeComponent.MatchString(s)
 }
 
-// validSHA reports whether s is a full lowercase-hex commit SHA.
 func validSHA(s string) bool { return shaRe.MatchString(s) }

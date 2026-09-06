@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// RegisterRunnerResources samples process CPU, RSS, and workspace disk usage.
 func RegisterRunnerResources(reg *Registry, workspaceRoot string, logger *slog.Logger) {
 	if !resourceSamplingSupported {
 		logger.Warn("runner resource gauges unsupported on this platform",
@@ -19,7 +18,7 @@ func RegisterRunnerResources(reg *Registry, workspaceRoot string, logger *slog.L
 		diskPath = os.TempDir()
 	}
 
-	// The first CPU sample establishes the baseline and reports zero.
+	// first cpu sample establishes the baseline and reports zero
 	var mu sync.Mutex
 	lastWall := time.Now()
 	lastCPU, _ := processCPUSeconds()

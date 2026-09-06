@@ -29,8 +29,6 @@ const (
 	benchRepositoryID   = 501
 )
 
-// memoryAPI implements github.API in memory so the benchmark measures this
-// control plane, not a GitHub stub's network stack.
 type memoryAPI struct {
 	repos []github.Repository
 }
@@ -150,11 +148,6 @@ func runCommandEvent(t *testing.T, installationID, repositoryID, issue int) []by
 	return payload
 }
 
-// TestWebhookIdempotency10k processes 10,000 simulated GitHub deliveries -
-// 5,000 unique task-creating issue_comment events plus one exact duplicate
-// of each, shuffled and sent concurrently - through the real POST
-// /webhooks/github handler backed by a real database, and verifies zero
-// duplicate tasks (docs/testing/benchmarks.md "Webhook idempotency").
 func TestWebhookIdempotency10k(t *testing.T) {
 	db := openDB(t)
 	secret := []byte("bench-webhook-secret")
@@ -175,8 +168,6 @@ func TestWebhookIdempotency10k(t *testing.T) {
 		},
 	}
 
-	// Seed the installation through the same endpoint, then wait for the
-	// async repository sync before the load starts.
 	status, ack, _ := postWebhook(t, client, srv.URL, secret,
 		"bench-install-1", "installation", installationEvent(t, benchInstallationID))
 	if status != http.StatusAccepted || ack != "accepted" {
@@ -186,8 +177,6 @@ func TestWebhookIdempotency10k(t *testing.T) {
 		`SELECT count(*) FROM repositories WHERE github_repository_id = %d AND is_enabled`,
 		benchRepositoryID), 1, 10*time.Second, "repository sync")
 
-	// Work list: index i < uniqueDeliveries is the original, i+unique is
-	// its exact duplicate (same delivery id, same payload).
 	type shot struct {
 		deliveryID string
 		payload    []byte
@@ -202,7 +191,7 @@ func TestWebhookIdempotency10k(t *testing.T) {
 	for i := 0; i < webhookDeliveries-uniqueDeliveries; i++ {
 		shots = append(shots, shots[i%uniqueDeliveries])
 	}
-	rng := rand.New(rand.NewSource(13)) // fixed seed: reproducible order
+	rng := rand.New(rand.NewSource(13))
 	rng.Shuffle(len(shots), func(i, j int) { shots[i], shots[j] = shots[j], shots[i] })
 
 	var (
@@ -244,7 +233,7 @@ func TestWebhookIdempotency10k(t *testing.T) {
 	wg.Wait()
 	sendWall := time.Since(start)
 
-	// Ack only says "recorded"; task creation is async. Drain it.
+	// ack only says "recorded"; task creation is async
 	processor.Wait()
 	processWall := time.Since(start)
 
@@ -257,8 +246,6 @@ func TestWebhookIdempotency10k(t *testing.T) {
 			accepted, duplicates, uniqueDeliveries, webhookDeliveries-uniqueDeliveries)
 	}
 
-	// The invariants: one ledger
-	// row per delivery id, one task per issue, zero duplicates.
 	if got := queryInt(t, db,
 		`SELECT count(*) FROM github_webhook_deliveries WHERE github_delivery_id LIKE 'bench-delivery-%'`); got != uniqueDeliveries {
 		t.Errorf("delivery ledger rows = %d, want %d", got, uniqueDeliveries)

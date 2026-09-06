@@ -26,8 +26,7 @@ export default function Installations() {
 
   const load = useCallback(async () => {
     try {
-      // The install link comes from /me; a 503 means auth (and therefore
-      // /me) is not configured, which never blocks the repository list.
+      // /me 503 = auth unconfigured; never blocks the repository list
       const [organizations, me] = await Promise.all([
         listOrganizations(),
         getMe().catch(() => null),

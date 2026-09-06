@@ -1,8 +1,4 @@
 -- +goose Up
--- Task domain: tasks, task attempts, and the append-only activity timeline.
--- Spec: docs/architecture/data-model.md, docs/architecture/task-state-machine.md.
--- organization_id / repository_id gain FKs when the GitHub integration
--- milestone creates those tables; runner_id likewise with the runner milestone.
 
 CREATE TABLE tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -41,7 +37,6 @@ CREATE TABLE tasks (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     version BIGINT NOT NULL DEFAULT 1 CHECK (version >= 1),
-    -- phase is derived from status; keep the pair consistent at the DB level.
     CONSTRAINT tasks_phase_matches_status CHECK (phase = CASE
         WHEN status IN ('created', 'queued') THEN 'pending'
         WHEN status IN ('provisioning', 'planning', 'executing',
@@ -76,7 +71,7 @@ CREATE TABLE task_attempts (
     UNIQUE (task_id, attempt_number)
 );
 
--- Invariant: a task has exactly one active attempt until it terminates.
+-- exactly one active attempt per task until it terminates
 CREATE UNIQUE INDEX task_attempts_one_active_idx
     ON task_attempts (task_id) WHERE status = 'active';
 
@@ -96,14 +91,12 @@ CREATE TABLE activity_events (
     UNIQUE (task_attempt_id, sequence_number)
 );
 
--- Backstop for duplicate transition messages (the store also checks first).
+-- backstop for duplicate transition messages; store also checks first
 CREATE UNIQUE INDEX activity_events_idempotency_idx
     ON activity_events (task_attempt_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 
--- The timeline is append-only: reject UPDATE and DELETE at the DB level.
--- This also blocks task deletion (the FK cascade trips the trigger), which
--- is intended: audit history outlives the task.
+-- append-only; also blocks task deletion via fk cascade: audit history outlives the task
 -- +goose StatementBegin
 CREATE FUNCTION activity_events_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$

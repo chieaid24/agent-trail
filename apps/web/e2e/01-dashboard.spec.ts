@@ -17,7 +17,6 @@ test("overview lists seeded tasks with grouped state and summary", async ({
     page.getByRole("region", { name: "Recent repositories" }),
   ).toContainText("chieaid24/agent-trail");
 
-  // The summary strip is computed from the visible tasks.
   await expect(page.getByText(/\d+ tasks/)).toBeVisible();
   await expect(page.getByText(/% completed/)).toBeVisible();
 

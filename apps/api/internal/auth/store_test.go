@@ -130,7 +130,6 @@ func TestExpiredSessionsRejectAndReap(t *testing.T) {
 		t.Errorf("expired token error = %v, want ErrNoSession", err)
 	}
 
-	// The next mint reaps expired rows.
 	if _, err := store.CreateSession(ctx, user.ID, time.Hour); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -157,14 +156,13 @@ func TestSyncMembershipsReplacesAndSkipsUnknownAccounts(t *testing.T) {
 
 	err = store.SyncMemberships(ctx, user.ID, []InstallationAccount{
 		{ID: 100, Login: "acme", Type: "Organization"},
-		{ID: 999, Login: "unknown", Type: "Organization"}, // no synced org row
+		{ID: 999, Login: "unknown", Type: "Organization"},
 	})
 	if err != nil {
 		t.Fatalf("SyncMemberships: %v", err)
 	}
 	assertMemberships(t, db, user.ID, []string{orgA})
 
-	// A later login moved the user to the other organization.
 	err = store.SyncMemberships(ctx, user.ID, []InstallationAccount{
 		{ID: 200, Login: "globex", Type: "Organization"},
 	})

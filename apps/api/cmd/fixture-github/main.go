@@ -1,11 +1,4 @@
-// Command fixture-github serves the GitHub simulation for the Kubernetes
-// runner verification (scripts/verify-k8s-runner.sh): the fake GitHub REST
-// API from internal/githubfixture, the sample bare repository over git
-// smart HTTP, and a /verify endpoint reporting the seeded task's outcome.
-// On startup it seeds the installation and repository and delivers the
-// signed /agent-trail run webhook, so a worker Job polling the same
-// database finds one queued task. Test-only: anonymous git push, single-run
-// credentials, no TLS.
+// github simulation for kubernetes runner verification; test-only: anonymous push, no tls
 package main
 
 import (
@@ -117,8 +110,6 @@ func run() error {
 	}
 }
 
-// pingUntil retries the first connection: the fixture may start while the
-// database pod is still coming up.
 func pingUntil(ctx context.Context, db *sql.DB, patience time.Duration) error {
 	deadline := time.Now().Add(patience)
 	for {
@@ -137,8 +128,6 @@ func pingUntil(ctx context.Context, db *sql.DB, patience time.Duration) error {
 	}
 }
 
-// fixture routes the fake GitHub API, the git smart-HTTP repository, and
-// the verification endpoints on one listener.
 type fixture struct {
 	db       *sql.DB
 	gh       *githubfixture.Server
@@ -163,9 +152,7 @@ func newFixture(db *sql.DB, origin, publicURL string) (*fixture, error) {
 		return nil, err
 	}
 	gh := githubfixture.NewServer(origin)
-	// The processor's permission check calls the fake API on this same
-	// process; loop back directly rather than through the service address,
-	// which has no ready endpoints until seeding completes.
+	// loop back directly; service address has no ready endpoints until seeding completes
 	self := httptest.NewServer(gh)
 	client, err := github.NewClient("1", keyPEM, self.URL, metrics)
 	if err != nil {
@@ -182,8 +169,7 @@ func newFixture(db *sql.DB, origin, publicURL string) (*fixture, error) {
 	}, nil
 }
 
-// seed registers the installation and repository and delivers the signed
-// /agent-trail run webhook, leaving exactly one queued task.
+// leaves exactly one queued task
 func (f *fixture) seed(ctx context.Context) error {
 	logger := observability.NewLogger(os.Stdout, "fixture-github", slog.LevelWarn)
 	metrics := observability.NewRegistry()
@@ -261,7 +247,6 @@ func (f *fixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// verify reports the seeded task's outcome for the verification script.
 func (f *fixture) verify(w http.ResponseWriter, r *http.Request) {
 	if !f.ready.Load() {
 		http.Error(w, "seeding", http.StatusServiceUnavailable)

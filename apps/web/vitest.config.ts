@@ -5,7 +5,6 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    // Mirror the tsconfig "@/*" path alias.
     alias: { "@": fileURLToPath(new URL(".", import.meta.url)) },
   },
   test: {

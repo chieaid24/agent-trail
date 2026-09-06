@@ -17,7 +17,6 @@ function nonNegativeNumber(value: unknown): number | null {
     : null;
 }
 
-// Providers may report either a cumulative total or an incremental cost.
 export function aggregateCost(events: ActivityEvent[]): CostSummary {
   const attempts = new Map<number, AttemptCost>();
   for (const event of events) {

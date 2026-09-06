@@ -114,7 +114,6 @@ func TestInstallationTokenCachedUntilExpiry(t *testing.T) {
 		t.Fatalf("token not cached: %q vs %q, mints=%d", first, second, mints.Load())
 	}
 
-	// Within the refresh margin the token is re-minted.
 	c.now = func() time.Time { return time.Now().Add(56 * time.Minute) }
 	if _, err := c.InstallationToken(ctx, 42); err != nil {
 		t.Fatal(err)
@@ -133,7 +132,7 @@ func TestListInstallationRepositoriesPaginates(t *testing.T) {
 		}
 		page := r.URL.Query().Get("page")
 		if page == "1" {
-			// A full page (100 entries) forces a second request.
+			// full page forces a second request
 			var b strings.Builder
 			b.WriteString(`{"repositories":[`)
 			for i := range 100 {
@@ -188,7 +187,6 @@ func TestParsePrivateKeyRejectsGarbage(t *testing.T) {
 	}
 }
 
-// tokenOr404 answers the token mint; everything else falls through to h.
 func tokenOr404(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/app/installations/") {

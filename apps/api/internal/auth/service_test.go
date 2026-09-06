@@ -18,7 +18,6 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// fakeGitHub serves the three endpoints CompleteLogin touches.
 func fakeGitHub(t *testing.T, accounts string, failInstallations bool) *OAuthClient {
 	t.Helper()
 	mux := http.NewServeMux()

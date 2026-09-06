@@ -1,9 +1,3 @@
-// Package observability provides structured JSON logging and request
-// correlation for the control plane. Field names are timestamp, service,
-// level, and message;
-// request-scoped lines carry trace_id, the correlation id shared with
-// OpenTelemetry tracing. Handlers add task_id on task-context lines;
-// attempt-scoped lines add task_attempt_id and runner_id.
 package observability
 
 import (
@@ -17,17 +11,13 @@ import (
 	"time"
 )
 
-// TraceIDHeader is the inbound/outbound correlation header.
 const TraceIDHeader = "X-Trace-Id"
 
 type ctxKey struct{}
 
-// validTraceID bounds accepted inbound ids to alphanumerics plus dash, so a
-// hostile header cannot inject log content or unbounded data.
+// bounds inbound ids so a hostile header cannot inject log content
 var validTraceID = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
 
-// NewLogger returns a JSON slog.Logger writing to w, tagged with the service
-// name. Keys are renamed to the observability doc's names (timestamp, message).
 func NewLogger(w io.Writer, service string, level slog.Level) *slog.Logger {
 	h := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level:       level,
@@ -36,7 +26,6 @@ func NewLogger(w io.Writer, service string, level slog.Level) *slog.Logger {
 	return slog.New(h).With("service", service)
 }
 
-// renameDefaultKeys maps slog's built-in keys to the required names.
 func renameDefaultKeys(groups []string, a slog.Attr) slog.Attr {
 	if len(groups) == 0 {
 		switch a.Key {
@@ -49,28 +38,24 @@ func renameDefaultKeys(groups []string, a slog.Attr) slog.Attr {
 	return a
 }
 
-// NewTraceID returns a 32-char hex correlation id.
 func NewTraceID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand never fails on supported platforms; degrade loudly.
+		// crypto/rand never fails on supported platforms; degrade loudly
 		return "trace-id-unavailable"
 	}
 	return hex.EncodeToString(b[:])
 }
 
-// TraceIDFrom returns the correlation id stored in ctx, or "" if absent.
 func TraceIDFrom(ctx context.Context) string {
 	id, _ := ctx.Value(ctxKey{}).(string)
 	return id
 }
 
-// WithTraceID returns a child context carrying the correlation id.
 func WithTraceID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, ctxKey{}, id)
 }
 
-// statusRecorder captures the response status for the request log line.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -81,13 +66,9 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-// Unwrap lets http.ResponseController reach the underlying writer's Flusher,
-// which streaming responses (SSE) need.
+// lets responsecontroller reach the flusher for sse
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
-// Middleware assigns each request a correlation id (honouring a valid inbound
-// X-Trace-Id), echoes it on the response, and logs one structured line per
-// request.
 func Middleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

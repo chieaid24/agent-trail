@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestGitHandlerServesCloneAndPush: the smart-HTTP fixture supports the two
-// operations the runner performs against origin - clone (mirror fetch) and
-// branch push.
 func TestGitHandlerServesCloneAndPush(t *testing.T) {
 	dir := t.TempDir()
 	origin, baseSHA, err := BuildOrigin(dir)

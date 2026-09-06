@@ -2,9 +2,6 @@ import { TrustBadge } from "./TrustBadge";
 import { formatDateTime, formatDuration, shortSha } from "@/lib/format";
 import type { StoredEvidence } from "@/lib/types";
 
-// The evidence report, rendered from the structured document rather than
-// its markdown mirror: the same facts, natively typed. Prose surfaces are
-// measure-limited.
 export function EvidencePanel({
   evidence,
 }: {

@@ -1,7 +1,4 @@
-// Package evidence builds and stores the evidence report:
-// the structured JSON document and the
-// Markdown summary that back a task's draft PR. Only measured facts enter
-// a report; fields nothing measured are omitted, never invented.
+// only measured facts enter a report; unmeasured fields are omitted, never invented
 package evidence
 
 import (
@@ -11,10 +8,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// SchemaVersion is the current evidence report JSON schema version.
 const SchemaVersion = 1
 
-// Report is the evidence JSON document.
 type Report struct {
 	SchemaVersion int           `json:"schema_version"`
 	Task          TaskInfo      `json:"task"`
@@ -26,7 +21,6 @@ type Report struct {
 	Unverified    []string      `json:"unverified,omitempty"`
 }
 
-// TaskInfo identifies what was requested.
 type TaskInfo struct {
 	ID          string `json:"id"`
 	SourceIssue *int64 `json:"source_issue,omitempty"`
@@ -34,7 +28,6 @@ type TaskInfo struct {
 	RequestedBy string `json:"requested_by,omitempty"`
 }
 
-// Execution records how the attempt ran. Empty fields were not measured.
 type Execution struct {
 	AgentProvider   string `json:"agent_provider,omitempty"`
 	AgentModel      string `json:"agent_model,omitempty"`
@@ -43,15 +36,12 @@ type Execution struct {
 	DurationSeconds *int64 `json:"duration_seconds,omitempty"`
 }
 
-// Changes summarizes what the agent edited.
 type Changes struct {
 	FilesChanged int      `json:"files_changed"`
 	Files        []string `json:"files,omitempty"`
 }
 
-// CheckResult is one validation entry. TrustedExecution=true means the
-// platform ran the command and measured the outcome; false means the agent
-// merely claimed it.
+// trustedexecution=true means the platform measured it; false means the agent merely claimed it
 type CheckResult struct {
 	Name             string `json:"name"`
 	Category         string `json:"category,omitempty"`
@@ -62,28 +52,18 @@ type CheckResult struct {
 	Summary          string `json:"summary,omitempty"`
 }
 
-// Params are the measured inputs of one report.
 type Params struct {
-	Task          task.Task
-	AgentProvider string
-	// DurationSeconds is the measured attempt runtime, nil when unknown.
+	Task            task.Task
+	AgentProvider   string
 	DurationSeconds *int64
 	Plan            []string
 	FilesChanged    []string
-	// Trusted are the platform-executed results for the attempt.
-	Trusted []validation.StoredResult
-	// AgentReported are checks the agent claimed in its event stream; they
-	// are recorded as claims, never as verification.
-	AgentReported []CheckResult
-	// ValidationNote is non-empty when trusted validation did not run
-	// (no file, invalid file, workspace lost) and says why.
-	ValidationNote string
-	// Unverified are extra caveats the caller measured (for example a
-	// truncated event read); they land in the report's unverified list.
-	Unverified []string
+	Trusted         []validation.StoredResult
+	AgentReported   []CheckResult
+	ValidationNote  string
+	Unverified      []string
 }
 
-// Generate assembles the evidence report from measured inputs.
 func Generate(p Params) Report {
 	r := Report{
 		SchemaVersion: SchemaVersion,

@@ -18,8 +18,6 @@ func runOne(t *testing.T, c Check) Result {
 	return results[0]
 }
 
-// TestRunPreservesExitCodes: measured outcomes only - exit codes are
-// recorded as observed and every trusted result carries the flag.
 func TestRunPreservesExitCodes(t *testing.T) {
 	pass := runOne(t, Check{Name: "ok", Category: "custom", Command: []string{"true"}})
 	if pass.Status != StatusPassed || pass.ExitCode == nil || *pass.ExitCode != 0 ||
@@ -34,8 +32,6 @@ func TestRunPreservesExitCodes(t *testing.T) {
 	}
 }
 
-// TestRunDistinguishesInfrastructureFailures: a command that never ran is
-// error, and a timeout is timed_out - neither is a check failure.
 func TestRunDistinguishesInfrastructureFailures(t *testing.T) {
 	missing := runOne(t, Check{Name: "gone", Category: "build",
 		Command: []string{"agent-trail-no-such-binary"}})
@@ -61,8 +57,6 @@ func TestRunSummarizesLastOutputLine(t *testing.T) {
 	}
 }
 
-// TestRunStopsOnCancelledContext: a cancelled parent stops the loop so a
-// lost lease cannot keep spending workspace time.
 func TestRunStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -99,8 +93,6 @@ func TestBoundedWriterTruncates(t *testing.T) {
 	}
 }
 
-// TestRunSanitizesUntrustedOutput: check output is untrusted bytes; the
-// stored summary must be NUL-free valid UTF-8 or the insert would fail.
 func TestRunSanitizesUntrustedOutput(t *testing.T) {
 	res := runOne(t, Check{Name: "binary", Category: "custom",
 		Command: []string{"printf", `tests\0passed\370\n`}})

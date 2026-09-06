@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Run api, worker, and web in the foreground with one Ctrl-C teardown.
-# Infra (postgres etc.) is expected up already: `make dev` handles both.
-# Kills only the PIDs it started; never touches other processes.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# .env feeds the apps (API_ADDR, DATABASE_URL, ...); compose reads it itself.
 if [ -f .env ]; then
   set -a
   # shellcheck disable=SC1091
@@ -32,5 +28,4 @@ pids+=($!)
 
 echo "dev: api, worker, and web running; Ctrl-C stops all three"
 wait -n
-# One process died; propagate so the trap tears the rest down.
 exit 1

@@ -86,7 +86,6 @@ describe("overviewStats", () => {
     expect(stats.total).toBe(5);
     expect(stats.running).toBe(1);
     expect(stats.failed).toBe(1);
-    // Cancelled is excluded: 2 completed of 3 outcomes.
     expect(stats.completionRate).toBeCloseTo(2 / 3);
     expect(stats.medianRuntimeMs).toBe(120_000);
   });

@@ -8,11 +8,8 @@ import (
 
 var fakeContractPattern = regexp.MustCompile(`semantic-contract:\s*([A-Za-z0-9_.-]+)\s*=\s*([A-Za-z0-9_.-]+)`)
 
-// FakeSemantic is a deterministic semantic provider for tests and demos.
-// It compares explicit semantic-contract markers in changed lines.
 type FakeSemantic struct{}
 
-// Assess implements SemanticAssessor.
 func (FakeSemantic) Assess(_ context.Context, req SemanticRequest) (SemanticVerdict, error) {
 	a := fakeContracts(req.TaskDiff)
 	b := fakeContracts(req.OtherTaskDiff)

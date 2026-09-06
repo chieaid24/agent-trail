@@ -16,7 +16,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
-// Registry exposes OTel metrics through Prometheus and optional OTLP readers.
 type Registry struct {
 	meter    metric.Meter
 	provider *sdkmetric.MeterProvider
@@ -29,7 +28,6 @@ type Registry struct {
 	gauges     map[string]struct{}
 }
 
-// Label is one metric attribute; a bounded key/value pair.
 type Label struct {
 	Key   string
 	Value string
@@ -43,11 +41,10 @@ func attrs(labels []Label) metric.MeasurementOption {
 	return metric.WithAttributes(kvs...)
 }
 
-// NewRegistry returns a Prometheus-only registry.
 func NewRegistry() *Registry {
 	r, err := newRegistry(nil, nil)
 	if err != nil {
-		// Fixed exporter options make this a programmer error.
+		// fixed exporter options make this a programmer error
 		panic(err)
 	}
 	return r
@@ -84,13 +81,11 @@ func newRegistry(res *resource.Resource, extra []sdkmetric.Reader) (*Registry, e
 	}, nil
 }
 
-// Counter is a monotonically increasing metric, optionally labelled.
 type Counter struct {
 	c     metric.Int64Counter
 	total atomic.Uint64
 }
 
-// Counter returns the named counter, creating it on first use.
 func (r *Registry) Counter(name, help string) *Counter {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -106,10 +101,8 @@ func (r *Registry) Counter(name, help string) *Counter {
 	return c
 }
 
-// Inc adds one to the counter.
 func (c *Counter) Inc(labels ...Label) { c.Add(1, labels...) }
 
-// Add adds n to the counter.
 func (c *Counter) Add(n int64, labels ...Label) {
 	if c == nil || n < 0 {
 		return
@@ -120,7 +113,7 @@ func (c *Counter) Add(n int64, labels ...Label) {
 	}
 }
 
-// Value returns the count summed across every label set.
+// summed across every label set
 func (c *Counter) Value() uint64 {
 	if c == nil {
 		return 0
@@ -128,12 +121,10 @@ func (c *Counter) Value() uint64 {
 	return c.total.Load()
 }
 
-// Histogram records a distribution of values, optionally labelled.
 type Histogram struct {
 	h metric.Float64Histogram
 }
 
-// Histogram returns the named histogram with explicit bucket boundaries.
 func (r *Registry) Histogram(name, help string, boundaries ...float64) *Histogram {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -152,7 +143,6 @@ func (r *Registry) Histogram(name, help string, boundaries ...float64) *Histogra
 	return h
 }
 
-// Observe records one value.
 func (h *Histogram) Observe(v float64, labels ...Label) {
 	if h == nil || h.h == nil {
 		return
@@ -160,12 +150,10 @@ func (h *Histogram) Observe(v float64, labels ...Label) {
 	h.h.Record(context.Background(), v, attrs(labels))
 }
 
-// UpDownCounter is an additive metric that can decrease (a live count).
 type UpDownCounter struct {
 	c metric.Int64UpDownCounter
 }
 
-// UpDown returns the named up/down counter, creating it on first use.
 func (r *Registry) UpDown(name, help string) *UpDownCounter {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -181,7 +169,6 @@ func (r *Registry) UpDown(name, help string) *UpDownCounter {
 	return u
 }
 
-// Add applies delta to the counter.
 func (u *UpDownCounter) Add(delta int64, labels ...Label) {
 	if u == nil || u.c == nil {
 		return
@@ -189,7 +176,6 @@ func (u *UpDownCounter) Add(delta int64, labels ...Label) {
 	u.c.Add(context.Background(), delta, attrs(labels))
 }
 
-// Gauge registers a callback sampled at collection time.
 func (r *Registry) Gauge(name, help string, observe func() float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -209,12 +195,10 @@ func (r *Registry) Gauge(name, help string, observe func() float64) {
 	}
 }
 
-// Handler serves GET /metrics in the Prometheus text format.
 func (r *Registry) Handler() http.Handler {
 	return promhttp.HandlerFor(r.promReg, promhttp.HandlerOpts{})
 }
 
-// shutdown flushes and stops the meter provider.
 func (r *Registry) shutdown(ctx context.Context) error {
 	return r.provider.Shutdown(ctx)
 }

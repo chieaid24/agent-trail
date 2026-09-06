@@ -5,7 +5,6 @@ import { StatusBadge } from "./StatusBadge";
 import { formatDateTime, formatDuration, runtimeMs } from "@/lib/format";
 import type { Task } from "@/lib/types";
 
-// One dense row per task (table rows are rows, not cards).
 export function TaskRows({ tasks }: { tasks: Task[] }) {
   return (
     <ul>
@@ -26,7 +25,6 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
                   <span>issue #{t.source_issue_number}</span>
                 )}
                 {t.agent_provider && (
-                  // Shed below 1280 so the title keeps its width at 1024.
                   <span className="hidden xl:inline">
                     {t.agent_provider}
                     {t.agent_model ? ` / ${t.agent_model}` : ""}

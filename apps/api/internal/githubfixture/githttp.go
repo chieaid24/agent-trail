@@ -9,11 +9,7 @@ import (
 	"strings"
 )
 
-// GitHandler serves the bare repository at origin over git's smart HTTP
-// protocol by wrapping `git http-backend` as a CGI program. Clone and push
-// are anonymous: this is a test fixture, never production serving. Mount it
-// under prefix (e.g. "/git/"); the repository is addressed as
-// <prefix>origin.git.
+// anonymous clone/push: test fixture, never production serving
 func GitHandler(origin, prefix string) (http.Handler, error) {
 	gitPath, err := exec.LookPath("git")
 	if err != nil {

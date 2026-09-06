@@ -41,8 +41,7 @@ func mustCreateTask(t *testing.T, ts *task.Store) task.Task {
 	return tk
 }
 
-// expireLease forces an attempt's lease into the past: deterministic lease
-// expiry without sleeping through real durations.
+// force lease into the past: deterministic expiry without sleeping
 func expireLease(t *testing.T, db *sql.DB, attemptID string) {
 	t.Helper()
 	_, err := db.ExecContext(context.Background(), `
@@ -180,7 +179,6 @@ func TestClaimLeasesQueuedTaskOnce(t *testing.T) {
 		t.Errorf("runner_id/lease_owner = %s/%s, want %s", runnerID, leaseOwner, r.ID)
 	}
 
-	// The live lease hides the attempt from further claims.
 	again, err := s.Claim(ctx, r.ID, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -190,8 +188,6 @@ func TestClaimLeasesQueuedTaskOnce(t *testing.T) {
 	}
 }
 
-// TestConcurrentClaimsHaveOneWinner is the "only one runner ever owns an
-// attempt" acceptance criterion: many runners race one queued task.
 func TestConcurrentClaimsHaveOneWinner(t *testing.T) {
 	_, s, ts := testStores(t)
 	ctx := context.Background()
@@ -229,8 +225,6 @@ func TestConcurrentClaimsHaveOneWinner(t *testing.T) {
 	}
 }
 
-// TestExpiredLeaseIsRecoverable is the runner-loss acceptance criterion:
-// the lease expires and another runner claims the same attempt.
 func TestExpiredLeaseIsRecoverable(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -245,7 +239,6 @@ func TestExpiredLeaseIsRecoverable(t *testing.T) {
 	if first == nil {
 		t.Fatal("first claim returned nil")
 	}
-	// Simulate the dead runner mid-flight: task advanced, then silence.
 	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning} {
 		if _, err := ts.Transition(ctx, tk.ID, task.TransitionParams{
 			To: to, Source: "runner",
@@ -254,7 +247,6 @@ func TestExpiredLeaseIsRecoverable(t *testing.T) {
 		}
 	}
 
-	// Live lease: not claimable.
 	if c, err := s.Claim(ctx, successor.ID, time.Minute); err != nil || c != nil {
 		t.Fatalf("claim against live lease = %+v, %v; want nil, nil", c, err)
 	}
@@ -274,7 +266,6 @@ func TestExpiredLeaseIsRecoverable(t *testing.T) {
 		t.Errorf("recovered status = %s, want planning", second.TaskStatus)
 	}
 
-	// The stale owner must not extend the lease it lost.
 	if err := s.ExtendLease(ctx, first.AttemptID, dead.ID, time.Minute); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("stale extend: %v, want ErrLeaseLost", err)
 	}
@@ -303,13 +294,11 @@ func TestExtendAndReleaseLease(t *testing.T) {
 		t.Errorf("extended expiry %v not ~2m out", expiry)
 	}
 
-	// An expired lease cannot be extended (it may belong to someone else).
 	expireLease(t, db, c.AttemptID)
 	if err := s.ExtendLease(ctx, c.AttemptID, r.ID, time.Minute); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("extend expired: %v, want ErrLeaseLost", err)
 	}
 
-	// Release clears both lease fields but keeps runner_id for history.
 	if _, err := db.ExecContext(ctx, `
 		UPDATE task_attempts
 		SET lease_expires_at = now() + interval '1 minute' WHERE id = $1`,
@@ -366,7 +355,6 @@ func TestMarkLostFlagsOnlyStaleOnlineRunners(t *testing.T) {
 		t.Errorf("lost status = %s", lost[0].Status)
 	}
 
-	// Second reap: nothing newly lost (detection happens exactly once).
 	again, err := s.MarkLost(ctx, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -384,7 +372,6 @@ func TestMarkLostFlagsOnlyStaleOnlineRunners(t *testing.T) {
 		t.Errorf("fresh runner = %s, want online", freshStatus)
 	}
 
-	// The lost runner's leased attempts are reportable on their timelines.
 	ids, err := s.LeasedAttemptIDs(ctx, stale.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -415,7 +402,6 @@ func TestRecordAttemptPublishFieldsFirstWriteWins(t *testing.T) {
 	if err := s.RecordPullRequest(ctx, c.AttemptID, 8); err != nil {
 		t.Fatal(err)
 	}
-	// Replays keep the first values.
 	if err := s.RecordFinalCommit(ctx, c.AttemptID,
 		"3333333333333333333333333333333333333333"); err != nil {
 		t.Fatal(err)
@@ -439,18 +425,12 @@ func TestRecordAttemptPublishFieldsFirstWriteWins(t *testing.T) {
 	_ = tk
 }
 
-// TestClaimRecoversStrandedRepositorylessAwaitingReview: a task with no
-// repository only passes through awaiting_review on its way to the
-// executor's auto-complete, so an owner that dies between those two
-// commits must not strand it - the attempt stays claimable and the next
-// owner completes it. Found by the database-restart failure injection.
+// owner dying between awaiting_review and the no-repo auto-complete must not strand the attempt
 func TestClaimRecoversStrandedRepositorylessAwaitingReview(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
 	tk := mustCreateTask(t, ts)
 
-	// The dead owner drove the task all the way to awaiting_review and
-	// vanished before the completing transition; no lease is held.
 	for _, to := range []task.Status{
 		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
 		task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview,
@@ -485,9 +465,6 @@ func TestClaimRecoversStrandedRepositorylessAwaitingReview(t *testing.T) {
 	}
 }
 
-// TestClaimSkipsPublishedAwaitingReview: a repository-backed task in
-// awaiting_review rests there for a human on the draft PR and must never
-// be re-claimed.
 func TestClaimSkipsPublishedAwaitingReview(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()

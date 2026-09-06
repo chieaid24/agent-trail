@@ -1,4 +1,3 @@
-// Package runner traces the flows.
 package runner
 
 import (
@@ -12,7 +11,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// recordQueueWaitSpan covers creation through the first claim.
 func recordQueueWaitSpan(ctx context.Context, c *Claim) {
 	if c.TaskCreatedAt.IsZero() {
 		return
@@ -23,13 +21,11 @@ func recordQueueWaitSpan(ctx context.Context, c *Claim) {
 	span.End(trace.WithTimestamp(time.Now()))
 }
 
-// startSpan opens a span carrying the attempt identity.
 func startSpan(ctx context.Context, name string, c *Claim) (context.Context, trace.Span) {
 	return observability.Tracer().Start(ctx, name,
 		trace.WithAttributes(claimAttrs(c)...))
 }
 
-// endSpan closes span, recording err when non-nil.
 func endSpan(span trace.Span, err error) {
 	recordSpanError(span, err)
 	span.End()

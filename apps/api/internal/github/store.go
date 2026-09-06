@@ -9,22 +9,16 @@ import (
 	"time"
 )
 
-// Store persists the GitHub integration state: organizations,
-// installations, repositories, and the webhook delivery ledger
-// (migration 00003_github_integration.sql).
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// ErrRepositoryNotFound is returned when no synced repository matches.
 var ErrRepositoryNotFound = errors.New("repository not found")
 
-// StoredRepository is one repositories row.
 type StoredRepository struct {
 	ID                 string
 	OrganizationID     string
@@ -37,26 +31,21 @@ type StoredRepository struct {
 	IsEnabled          bool
 }
 
-// RepositoryContext is everything publishing needs about a task's
-// repository: the stored row plus its installation for API credentials.
 type RepositoryContext struct {
 	StoredRepository
 	InstallationID int64
 }
 
-// InstallationParams describe an installation upsert; the organization is
-// upserted with it from the installation account.
 type InstallationParams struct {
 	GitHubInstallationID int64
 	AccountID            int64
 	AccountLogin         string
-	AccountType          string // User or Organization
+	AccountType          string
 	Permissions          map[string]string
 	Events               []string
 }
 
-// RecordDelivery inserts the delivery under the github_delivery_id unique
-// constraint. inserted=false means a replay: the id is already recorded.
+// inserted=false means replay: delivery id already recorded
 func (s *Store) RecordDelivery(ctx context.Context, deliveryID, eventType, action string, installationID, repositoryID int64) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO github_webhook_deliveries
@@ -75,7 +64,6 @@ func (s *Store) RecordDelivery(ctx context.Context, deliveryID, eventType, actio
 	return n == 1, nil
 }
 
-// MarkDelivery finishes a delivery: processed, ignored, or failed.
 func (s *Store) MarkDelivery(ctx context.Context, deliveryID, status, failureMessage string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE github_webhook_deliveries
@@ -89,9 +77,7 @@ func (s *Store) MarkDelivery(ctx context.Context, deliveryID, status, failureMes
 	return nil
 }
 
-// UpsertInstallation stores the installation and its owning organization.
-// Nil Permissions/Events (the self-heal path has neither) keep any values a
-// previous sync stored.
+// nil permissions/events (self-heal path) keep previously synced values
 func (s *Store) UpsertInstallation(ctx context.Context, p InstallationParams) error {
 	var permissions, events []byte
 	var err error
@@ -143,9 +129,6 @@ func (s *Store) UpsertInstallation(ctx context.Context, p InstallationParams) er
 	return nil
 }
 
-// upsertOrganization stores the GitHub account backing an installation and
-// returns its id. The slug is the lowercased login; on collision with a
-// different account the github_account_id unique constraint surfaces it.
 func upsertOrganization(ctx context.Context, tx *sql.Tx, accountID int64, login, accountType string) (string, error) {
 	var orgID string
 	err := tx.QueryRowContext(ctx, `
@@ -167,7 +150,6 @@ func upsertOrganization(ctx context.Context, tx *sql.Tx, accountID int64, login,
 	return orgID, nil
 }
 
-// SetInstallationSuspended marks the installation suspended or clears it.
 func (s *Store) SetInstallationSuspended(ctx context.Context, githubInstallationID int64, suspended bool) error {
 	var at *time.Time
 	if suspended {
@@ -184,9 +166,7 @@ func (s *Store) SetInstallationSuspended(ctx context.Context, githubInstallation
 	return nil
 }
 
-// DeleteInstallation removes the installation and disables the
-// organization's repositories. Organization and repository rows stay: tasks
-// reference them and history outlives the installation.
+// org + repo rows stay: tasks reference them, history outlives the installation
 func (s *Store) DeleteInstallation(ctx context.Context, githubInstallationID int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -200,7 +180,7 @@ func (s *Store) DeleteInstallation(ctx context.Context, githubInstallationID int
 		WHERE github_installation_id = $1
 		RETURNING organization_id`, githubInstallationID).Scan(&orgID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return tx.Commit() // already gone; deletion is idempotent
+		return tx.Commit()
 	}
 	if err != nil {
 		return fmt.Errorf("delete installation: %w", err)
@@ -217,10 +197,7 @@ func (s *Store) DeleteInstallation(ctx context.Context, githubInstallationID int
 	return nil
 }
 
-// SyncRepositories replaces the organization's repository set with repos:
-// listed ones are upserted and enabled, previously synced ones missing from
-// the list are disabled. Repository rows are never deleted (tasks reference
-// them).
+// repos missing from the list are disabled, never deleted: tasks reference them
 func (s *Store) SyncRepositories(ctx context.Context, githubInstallationID int64, repos []Repository) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -276,7 +253,6 @@ func (s *Store) SyncRepositories(ctx context.Context, githubInstallationID int64
 	return nil
 }
 
-// RepositoryByGitHubID returns the synced repository with that GitHub id.
 func (s *Store) RepositoryByGitHubID(ctx context.Context, githubRepositoryID int64) (StoredRepository, error) {
 	var r StoredRepository
 	err := s.db.QueryRowContext(ctx, `
@@ -295,14 +271,9 @@ func (s *Store) RepositoryByGitHubID(ctx context.Context, githubRepositoryID int
 	return r, nil
 }
 
-// ErrNoInstallation marks a repository whose organization has no live GitHub
-// App installation, so no credential can be minted for it.
 var ErrNoInstallation = errors.New("repository has no installation")
 
-// RepositoryContextByID returns the publishing context for the repository
-// with that internal id (the tasks.repository_id value). A suspended or
-// missing installation returns ErrNoInstallation: publishing must not mint
-// tokens for it.
+// suspended/missing installation -> ErrNoInstallation: publishing must not mint tokens for it
 func (s *Store) RepositoryContextByID(ctx context.Context, repositoryID string) (RepositoryContext, error) {
 	var r RepositoryContext
 	err := s.db.QueryRowContext(ctx, `
@@ -328,7 +299,6 @@ func (s *Store) RepositoryContextByID(ctx context.Context, repositoryID string) 
 	return r, nil
 }
 
-// nullableInt64 scans a NULLable bigint into an int64, mapping NULL to 0.
 type nullableInt64 struct{ v *int64 }
 
 func (n *nullableInt64) Scan(src any) error {

@@ -1,8 +1,6 @@
 import type { TaskStatus } from "@/lib/types";
 import { statusLabel } from "@/lib/format";
 
-// Status map: queued/cancelled muted, running accent, completed
-// success, failed/timed-out danger, awaiting-review warning.
 type Tone = "muted" | "accent" | "success" | "warning" | "danger";
 
 const TONES: Record<TaskStatus, Tone> = {

@@ -91,7 +91,7 @@ func TestConflictOps(t *testing.T) {
 		}
 		want := map[string][]LineRange{
 			"app.go": {{Start: 6, End: 6}},
-			"lib.go": {{Start: 1, End: 12}}, // deletion spans the whole file
+			"lib.go": {{Start: 1, End: 12}},
 		}
 		if !reflect.DeepEqual(hunks, want) {
 			t.Errorf("hunks = %v, want %v", hunks, want)

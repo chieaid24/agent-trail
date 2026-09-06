@@ -71,8 +71,6 @@ func TestStoreInsertAndList(t *testing.T) {
 	}
 }
 
-// TestStoreInsertReplayIsNoOp: a zombie owner replaying a check cannot
-// overwrite the recorded outcome.
 func TestStoreInsertReplayIsNoOp(t *testing.T) {
 	db := dbtest.Open(t)
 	ctx := context.Background()

@@ -13,13 +13,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
-// FixtureFile is the known file the fake adapter edits in the workspace.
 const FixtureFile = "AGENT_NOTES.md"
 
-// fixtureValidationFile is the validation file the fake adapter writes so
-// the fake flow exercises trusted validation end to end. In a real flow
-// the file ships with the repository checkout; the fake workspace has no
-// checkout, so the "repository content" comes from the adapter.
 const fixtureValidationFile = `version: 1
 
 validation:
@@ -29,27 +24,18 @@ validation:
     timeout_seconds: 60
 `
 
-// fakeCommand is the command the fake adapter pretends to run. It is never
-// executed; the emitted exit code and output are simulated by design.
+// never executed; exit code and output are simulated
 var fakeCommand = []string{"echo", "fake agent validation"}
 
-// Fake is the deterministic no-model adapter: it emits a plan, edits
-// FixtureFile in the workspace, emits command events for a simulated
-// command, and returns a summary. It exists so the orchestration path
-// (leases, transitions, timeline) is testable without model cost.
+// deterministic no-model adapter: orchestration path testable without model cost
 type Fake struct{}
 
-// NewFake returns the fake adapter.
 func NewFake() *Fake { return &Fake{} }
 
-// Name implements Adapter.
 func (f *Fake) Name() string { return "fake" }
 
-// ValidateConfiguration implements Adapter; the fake needs no configuration.
 func (f *Fake) ValidateConfiguration(ctx context.Context) error { return nil }
 
-// Start implements Adapter. The session runs in a goroutine; drain Events
-// then call Wait.
 func (f *Fake) Start(ctx context.Context, req Request) (Session, error) {
 	if req.WorkspaceDir == "" {
 		return nil, errors.New("fake adapter: workspace dir required")
@@ -63,8 +49,7 @@ func (f *Fake) Start(ctx context.Context, req Request) (Session, error) {
 			req.WorkspaceDir)
 	}
 
-	// Unbuffered: the producer runs in lockstep with the consumer, so a
-	// Cancel observed between emissions takes effect at the next step.
+	// unbuffered: producer in lockstep with consumer, cancel takes effect at next step
 	s := &fakeSession{
 		events: make(chan Event),
 		done:   make(chan struct{}),
@@ -85,12 +70,10 @@ type fakeSession struct {
 
 func (s *fakeSession) Events() <-chan Event { return s.events }
 
-// Send implements Session; the fake session takes no follow-up input.
 func (s *fakeSession) Send(ctx context.Context, message string) error {
 	return errors.New("fake adapter: session does not accept messages")
 }
 
-// Cancel implements Session: the run stops at its next emission point.
 func (s *fakeSession) Cancel(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -98,7 +81,6 @@ func (s *fakeSession) Cancel(ctx context.Context) error {
 	return nil
 }
 
-// Wait blocks until the session ends and returns its result.
 func (s *fakeSession) Wait(ctx context.Context) (Result, error) {
 	select {
 	case <-ctx.Done():
@@ -110,7 +92,6 @@ func (s *fakeSession) Wait(ctx context.Context) (Result, error) {
 	return s.result, s.err
 }
 
-// stopped reports whether the session should abort before its next step.
 func (s *fakeSession) stopped(ctx context.Context) bool {
 	s.mu.Lock()
 	cancelled := s.cancelled
@@ -119,13 +100,10 @@ func (s *fakeSession) stopped(ctx context.Context) bool {
 }
 
 func (s *fakeSession) emit(t EventType, payload map[string]any) {
-	// Payload maps hold strings and numbers; marshalling cannot fail.
 	raw, _ := json.Marshal(payload)
 	s.events <- Event{Type: t, Timestamp: time.Now().UTC(), Payload: raw}
 }
 
-// run emits the scripted session. Every step checks for cancellation so
-// Cancel and context expiry end the session as session_failed.
 func (s *fakeSession) run(ctx context.Context, req Request) {
 	defer close(s.done)
 	defer close(s.events)
@@ -186,8 +164,6 @@ func (s *fakeSession) run(ctx context.Context, req Request) {
 		return
 	}
 
-	// Simulated command: requested -> started -> output -> completed. The
-	// exit code is scripted, not measured (the fake runs nothing).
 	command := map[string]any{"command": fakeCommand[0], "args": fakeCommand[1:]}
 	s.emit(EventToolRequested, command)
 	s.emit(EventToolStarted, command)

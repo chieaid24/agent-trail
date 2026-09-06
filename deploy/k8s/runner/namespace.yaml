@@ -1,5 +1,3 @@
-# Runner namespace: Pod Security Admission enforces the restricted profile,
-# so a Job that drops the hardening in job.yaml is rejected at admission.
 apiVersion: v1
 kind: Namespace
 metadata:

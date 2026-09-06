@@ -1,6 +1,5 @@
 -- +goose Up
--- Baseline migration: proves the migration tooling end to end. The task
--- domain schema lands with milestone 2 (docs/architecture/data-model.md).
+-- baseline: proves migration tooling end to end
 SELECT 1;
 
 -- +goose Down

@@ -38,8 +38,7 @@ func TestTruncateUTF8(t *testing.T) {
 	if got := truncateUTF8("hello", 3); got != "hel" {
 		t.Fatalf("ascii truncation: %q", got)
 	}
-	// Multi-byte rune straddling the cut must be dropped whole.
-	s := "aé" // 'é' is 2 bytes; cut at 2 lands mid-rune
+	s := "aé" // 2-byte rune; cut at 2 lands mid-rune, must drop whole
 	if got := truncateUTF8(s, 2); got != "a" {
 		t.Fatalf("rune-splitting truncation: %q", got)
 	}

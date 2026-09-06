@@ -20,11 +20,6 @@ const (
 	cleanupRunners   = 20
 )
 
-// TestCleanup100ForcedFailures forces 100 attempts off the happy path - 50
-// cancelled through the store mid-session (the API cancellation path) and
-// 50 failed by the agent session - then verifies every workspace was
-// removed and every lease released
-// (docs/testing/benchmarks.md "Cleanup").
 func TestCleanup100ForcedFailures(t *testing.T) {
 	db := openDB(t)
 	tmp := t.TempDir()
@@ -32,9 +27,6 @@ func TestCleanup100ForcedFailures(t *testing.T) {
 	s := runner.NewStore(db)
 	ts := task.NewStore(db)
 
-	// Cancel-mode sessions carry a key resolving to their own task id; the
-	// onStarted hook cancels that task while the session is mid-flight and
-	// its workspace exists, exactly like a user hitting the cancel endpoint.
 	var (
 		mu        sync.Mutex
 		taskByKey = map[int]string{}
@@ -96,15 +88,12 @@ func TestCleanup100ForcedFailures(t *testing.T) {
 			cancelled, failed, cleanupCancelled, cleanupTasks-cleanupCancelled)
 	}
 
-	// Every terminal failure must be machine-readable.
 	if bare := queryInt(t, db, `
 		SELECT count(*) FROM tasks WHERE status = 'failed'
 		AND (failure_code IS NULL OR failure_message IS NULL)`); bare != 0 {
 		t.Errorf("failed tasks without failure_code/message = %d, want 0", bare)
 	}
 
-	// The cleanup contract: no workspace survives, no lease survives, and
-	// every attempt that provisioned a workspace recorded its removal.
 	leftovers, err := filepath.Glob(filepath.Join(tmp, "agent-trail-attempt-*"))
 	if err != nil {
 		t.Fatal(err)

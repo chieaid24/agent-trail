@@ -1,5 +1,3 @@
-// Presentation helpers shared across screens.
-
 export function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString("en-GB", { hour12: false });
@@ -10,7 +8,6 @@ export function formatDateTime(iso: string): string {
   return `${d.toLocaleDateString("en-CA")} ${formatTime(iso)}`;
 }
 
-// Compact duration: 999ms, 12s, 3m 24s, 1h 08m.
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   const seconds = Math.round(ms / 1000);
@@ -22,7 +19,6 @@ export function formatDuration(ms: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-// Runtime between two instants; open-ended tasks run until now.
 export function runtimeMs(
   startedAt: string | null,
   completedAt: string | null,
@@ -36,7 +32,6 @@ export function shortSha(sha: string): string {
   return sha.slice(0, 10);
 }
 
-// Task status -> human label ("awaiting_review" -> "awaiting review").
 export function statusLabel(status: string): string {
   return status.replaceAll("_", " ");
 }

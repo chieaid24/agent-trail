@@ -14,9 +14,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 )
 
-// Instruction prefixes selecting a scripted session behaviour. The executor
-// hands task instructions to the adapter verbatim, so the task row is the
-// only coordination channel a real multi-runner deployment also has.
+// instruction prefixes selecting scripted session behaviour
 const (
 	modeComplete = "bench-mode=complete"
 	modeBarrier  = "bench-mode=barrier"
@@ -25,8 +23,6 @@ const (
 	modeHang     = "bench-mode=hang"
 )
 
-// barrier releases every waiter once n have arrived, proving n sessions
-// were alive at the same instant.
 type barrier struct {
 	mu      sync.Mutex
 	n       int
@@ -38,8 +34,6 @@ func newBarrier(n int) *barrier {
 	return &barrier{n: n, release: make(chan struct{})}
 }
 
-// arrive blocks until n sessions have arrived, the stop channel closes, or
-// an internal timeout guards against a wedged run.
 func (b *barrier) arrive(stop <-chan struct{}) error {
 	b.mu.Lock()
 	b.arrived++
@@ -57,16 +51,9 @@ func (b *barrier) arrive(stop <-chan struct{}) error {
 	}
 }
 
-// scriptAdapter runs scripted sessions selected by the task instructions.
-// It implements agent.Adapter without model cost, like the fake adapter,
-// but with behaviours the benchmarks need: a concurrency barrier, forced
-// failure, self-requested cancellation, and a hang.
 type scriptAdapter struct {
 	barrier *barrier
-	// onStarted runs synchronously inside a cancel-mode session right
-	// after session_started, while the workspace exists and the attempt
-	// is mid-flight. The benchmark uses it to cancel the session's own
-	// task through the store, mimicking an API cancellation.
+	// runs synchronously right after session_started, mid-flight; used to cancel own task
 	onStarted func(instructions string)
 }
 
@@ -156,7 +143,6 @@ func (s *scriptSession) run(ctx context.Context, req agent.Request) {
 		return
 
 	case len(mode) > 0 && mode[0] == modeHang:
-		// A hung provider emits nothing else until its context or session stops.
 		select {
 		case <-ctx.Done():
 		case <-s.stop:

@@ -60,8 +60,6 @@ func assertSubsequence(t *testing.T, got, want []string) {
 	}
 }
 
-// TestExecuteCompletesFakeTaskEndToEnd is the "fake task completes end to
-// end with a full timeline" acceptance criterion.
 func TestExecuteCompletesFakeTaskEndToEnd(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -96,8 +94,6 @@ func TestExecuteCompletesFakeTaskEndToEnd(t *testing.T) {
 		"publishing.skipped", "task.awaiting_review", "task.completed",
 	})
 
-	// The fake flow's smoke check ran trusted and its measured exit code
-	// is stored.
 	results, err := validation.NewStore(db).ListForTask(ctx, tk.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +107,6 @@ func TestExecuteCompletesFakeTaskEndToEnd(t *testing.T) {
 		t.Fatalf("smoke result = %+v, want passed trusted exit 0", smoke)
 	}
 
-	// The evidence report exists and separates trusted from claimed.
 	st, err := evidence.NewStore(db).GetForTask(ctx, tk.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +133,6 @@ func TestExecuteCompletesFakeTaskEndToEnd(t *testing.T) {
 			st.SummaryMarkdown)
 	}
 
-	// The attempt closed with the task and the lease is gone.
 	var attemptStatus string
 	var leaseOwner *string
 	if err := db.QueryRowContext(ctx, `
@@ -154,8 +148,6 @@ func TestExecuteCompletesFakeTaskEndToEnd(t *testing.T) {
 	}
 }
 
-// TestExecuteRecoversExpiredMidFlightAttempt: a successor claims an attempt
-// whose owner died mid-executing and drives it to completed.
 func TestExecuteRecoversExpiredMidFlightAttempt(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -196,7 +188,6 @@ func TestExecuteRecoversExpiredMidFlightAttempt(t *testing.T) {
 	if got.Status != task.StatusCompleted {
 		t.Fatalf("recovered task status = %s, want completed", got.Status)
 	}
-	// The successor re-ran the agent in a fresh workspace (at-least-once).
 	assertSubsequence(t, timelineTypes(t, ts, tk.ID), []string{
 		"task.executing", "workspace.provisioning", "workspace.ready",
 		"agent.started", "agent.completed", "task.validating",
@@ -204,8 +195,6 @@ func TestExecuteRecoversExpiredMidFlightAttempt(t *testing.T) {
 	})
 }
 
-// TestExecuteRecoversAttemptPastTheAgent: recovery at validating must not
-// re-run the agent, only finish the remaining stages.
 func TestExecuteRecoversAttemptPastTheAgent(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -252,8 +241,6 @@ func TestExecuteRecoversAttemptPastTheAgent(t *testing.T) {
 		}
 	}
 
-	// The lost workspace is an infrastructure outcome, never a pass, and
-	// evidence still exists saying so.
 	st, err := evidence.NewStore(db).GetForTask(ctx, tk.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -263,8 +250,7 @@ func TestExecuteRecoversAttemptPastTheAgent(t *testing.T) {
 	}
 }
 
-// scriptedAdapter writes the given workspace files, then claims every
-// check passed no matter what those checks will measure.
+// writes the given workspace files, then claims every check passed regardless
 type scriptedAdapter struct {
 	files map[string]string
 }
@@ -294,7 +280,6 @@ func (a *scriptedAdapter) Start(ctx context.Context, req agent.Request) (agent.S
 			}
 			emit(agent.EventFileWritten, map[string]any{"path": path})
 		}
-		// The claim trusted validation must ignore.
 		emit(agent.EventToolCompleted, map[string]any{
 			"command": "make", "exit_code": 0, "simulated": true,
 		})
@@ -474,9 +459,6 @@ func (s *scriptedSession) Wait(ctx context.Context) (agent.Result, error) {
 	return s.result, s.err
 }
 
-// TestExecuteTrustedValidationOutcomes covers the milestone-6 acceptance
-// criteria: a failing check stays failed no matter what the agent claims,
-// and check failures are distinct from infrastructure failures.
 func TestExecuteTrustedValidationOutcomes(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()
@@ -525,19 +507,15 @@ validation:
 		r.ExitCode == nil || *r.ExitCode != 0 || !r.TrustedExecution {
 		t.Fatalf("ok = %+v, want passed trusted exit 0", r)
 	}
-	// "all tests passed" was claimed; the measured exit code stands.
 	if r := byName["failing-tests"]; r.Status != validation.StatusFailed ||
 		r.ExitCode == nil || *r.ExitCode != 1 || !r.TrustedExecution {
 		t.Fatalf("failing-tests = %+v, want failed trusted exit 1", r)
 	}
-	// A command that never ran is an error, not a failed check.
 	if r := byName["broken-infra"]; r.Status != validation.StatusError ||
 		r.ExitCode != nil {
 		t.Fatalf("broken-infra = %+v, want error with no exit code", r)
 	}
 
-	// The evidence report keeps the trusted failure and records the
-	// agent's contradicting claim as untrusted.
 	st, err := evidence.NewStore(db).GetForTask(ctx, tk.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -561,8 +539,6 @@ validation:
 			sawTrustedFailure, sawClaim, st.Report)
 	}
 
-	// A failed check does not abort the flow: the failure is recorded and
-	// the review gate (a human on the draft PR) decides.
 	got, err := ts.Get(ctx, tk.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -572,8 +548,6 @@ validation:
 	}
 }
 
-// TestExecuteStopsOnCancelledTask: a task cancelled between claim and drive
-// is left alone; the executor releases the lease and reports the conflict.
 func TestExecuteStopsOnCancelledTask(t *testing.T) {
 	db, s, ts := testStores(t)
 	ctx := context.Background()

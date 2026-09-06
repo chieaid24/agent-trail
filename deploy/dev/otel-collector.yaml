@@ -1,6 +1,3 @@
-# Dev collector: receive OTLP from the apps and log it. The dashboard reads
-# per-task spans from Postgres for its trace view; this collector proves the
-# real OTLP export path (traces, metrics, logs) end to end.
 receivers:
   otlp:
     protocols:

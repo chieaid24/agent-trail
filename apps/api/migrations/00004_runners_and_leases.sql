@@ -1,9 +1,5 @@
 -- +goose Up
--- Runner registry and task-attempt leasing. Spec: docs/architecture/runner.md
--- (task leasing), docs/architecture/data-model.md (runner). Claiming is
--- FOR UPDATE SKIP LOCKED against task_attempts (ADR-0003); a lease expires
--- unless the owning runner extends it, so a lost runner's attempt becomes
--- claimable again without immediate duplicate execution.
+-- lease expires unless extended, so a lost runner's attempt becomes claimable again
 
 CREATE TABLE runners (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -20,13 +16,10 @@ CREATE TABLE runners (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Reaper scan: online runners ordered by heartbeat age.
 CREATE INDEX runners_status_heartbeat_idx
     ON runners (status, last_heartbeat_at);
 
--- runner_id records which runner ran the attempt (kept after the lease is
--- released); lease_owner + lease_expires_at are the live lease. heartbeat_at
--- is the last lease extension, for diagnostics.
+-- runner_id kept after release; lease_owner + lease_expires_at are the live lease
 ALTER TABLE task_attempts
     ADD CONSTRAINT task_attempts_runner_id_fkey
         FOREIGN KEY (runner_id) REFERENCES runners (id),
@@ -36,7 +29,6 @@ ALTER TABLE task_attempts
     ADD CONSTRAINT task_attempts_lease_pair CHECK (
         (lease_owner IS NULL) = (lease_expires_at IS NULL));
 
--- Claim scan: active attempts by lease expiry.
 CREATE INDEX task_attempts_claim_idx
     ON task_attempts (lease_expires_at) WHERE status = 'active';
 

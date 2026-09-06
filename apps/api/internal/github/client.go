@@ -26,30 +26,25 @@ import (
 const (
 	apiVersion      = "2022-11-28"
 	userAgent       = "agent-trail"
-	maxResponseSize = 5 << 20 // 5 MiB response cap
+	maxResponseSize = 5 << 20
 	requestTimeout  = 15 * time.Second
-	// tokenExpiryMargin refreshes installation tokens well before their
-	// one-hour expiry so in-flight requests never race it.
+	// refresh well before the one-hour expiry so in-flight requests never race it
 	tokenExpiryMargin = 5 * time.Minute
 )
 
-// Client calls the GitHub REST API as a GitHub App: it signs app JWTs,
-// exchanges and caches installation tokens, and wraps the few endpoints the
-// integration needs. No SDK: the surface is small and the standard library
-// keeps the dependency tree flat (ADR-0006).
+// no sdk: surface is small, stdlib keeps the dependency tree flat
 type Client struct {
 	appID   string
 	key     *rsa.PrivateKey
 	baseURL string
 	httpc   *http.Client
 
-	requests *observability.Counter // agent_trail_github_api_requests_total
-	errors   *observability.Counter // agent_trail_github_api_errors_total
+	requests *observability.Counter
+	errors   *observability.Counter
 
 	mu     sync.Mutex
 	tokens map[int64]installationToken
 
-	// now is stubbed in tests.
 	now func() time.Time
 }
 
@@ -58,7 +53,6 @@ type installationToken struct {
 	expiresAt time.Time
 }
 
-// APIError is a non-2xx GitHub API response.
 type APIError struct {
 	StatusCode int
 	Method     string
@@ -69,8 +63,6 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("github: %s %s: status %d", e.Method, e.Path, e.StatusCode)
 }
 
-// NewClient builds a Client from the app id and PEM-encoded private key.
-// baseURL overrides the API root in tests; empty means api.github.com.
 func NewClient(appID string, keyPEM []byte, baseURL string, metrics *observability.Registry) (*Client, error) {
 	key, err := parsePrivateKey(keyPEM)
 	if err != nil {
@@ -112,7 +104,6 @@ func parsePrivateKey(keyPEM []byte) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-// appJWT returns a short-lived RS256 JWT identifying the app itself.
 func (c *Client) appJWT() (string, error) {
 	b64 := base64.RawURLEncoding
 	header := b64.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
@@ -134,8 +125,6 @@ func (c *Client) appJWT() (string, error) {
 	return signing + "." + b64.EncodeToString(sig), nil
 }
 
-// InstallationToken returns a cached or freshly minted token for the
-// installation.
 func (c *Client) InstallationToken(ctx context.Context, installationID int64) (string, error) {
 	c.mu.Lock()
 	cached, ok := c.tokens[installationID]
@@ -165,7 +154,6 @@ func (c *Client) InstallationToken(ctx context.Context, installationID int64) (s
 	return resp.Token, nil
 }
 
-// Repository is the slice of the GitHub repository object the sync stores.
 type Repository struct {
 	ID            int64  `json:"id"`
 	Name          string `json:"name"`
@@ -178,8 +166,6 @@ type Repository struct {
 	} `json:"owner"`
 }
 
-// ListInstallationRepositories returns every repository the installation
-// can access.
 func (c *Client) ListInstallationRepositories(ctx context.Context, installationID int64) ([]Repository, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -203,8 +189,6 @@ func (c *Client) ListInstallationRepositories(ctx context.Context, installationI
 	}
 }
 
-// CollaboratorPermission returns the user's effective permission on the
-// repository: admin, write, read, or none.
 func (c *Client) CollaboratorPermission(ctx context.Context, installationID int64, owner, repo, username string) (string, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -221,7 +205,6 @@ func (c *Client) CollaboratorPermission(ctx context.Context, installationID int6
 	return resp.Permission, nil
 }
 
-// BranchHeadSHA returns the head commit SHA of the branch.
 func (c *Client) BranchHeadSHA(ctx context.Context, installationID int64, owner, repo, branch string) (string, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -240,7 +223,6 @@ func (c *Client) BranchHeadSHA(ctx context.Context, installationID int64, owner,
 	return resp.Commit.SHA, nil
 }
 
-// CreateIssueComment posts a comment on the issue.
 func (c *Client) CreateIssueComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int64, body string) error {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -252,20 +234,17 @@ func (c *Client) CreateIssueComment(ctx context.Context, installationID int64, o
 		map[string]any{"body": body}, nil)
 }
 
-// CheckRunParams describe a check run create or update. Zero-valued fields
-// are omitted from the request; Title and Summary form the output block and
-// must be set together.
+// zero fields omitted from the request; title+summary form the output block, set together
 type CheckRunParams struct {
-	Name       string // required on create
-	HeadSHA    string // required on create
-	ExternalID string // caller-owned idempotency identifier
-	Status     string // queued, in_progress, completed
-	Conclusion string // required by GitHub when status is completed
+	Name       string
+	HeadSHA    string
+	ExternalID string // caller-owned idempotency id
+	Status     string
+	Conclusion string // github requires it when status is completed
 	Title      string
 	Summary    string
 }
 
-// CheckRun is the slice of the GitHub check-run object publishing reads.
 type CheckRun struct {
 	ID         int64  `json:"id"`
 	ExternalID string `json:"external_id"`
@@ -289,7 +268,6 @@ func (p CheckRunParams) body() map[string]any {
 	return body
 }
 
-// CreateCheckRun creates a check run on the commit and returns its id.
 func (c *Client) CreateCheckRun(ctx context.Context, installationID int64, owner, repo string, p CheckRunParams) (int64, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -306,7 +284,6 @@ func (c *Client) CreateCheckRun(ctx context.Context, installationID int64, owner
 	return resp.ID, nil
 }
 
-// UpdateCheckRun patches an existing check run.
 func (c *Client) UpdateCheckRun(ctx context.Context, installationID int64, owner, repo string, checkRunID int64, p CheckRunParams) error {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -317,7 +294,6 @@ func (c *Client) UpdateCheckRun(ctx context.Context, installationID int64, owner
 	return c.do(ctx, http.MethodPatch, path, "Bearer "+token, p.body(), nil)
 }
 
-// ListCheckRuns returns the check runs with checkName on the commit.
 func (c *Client) ListCheckRuns(ctx context.Context, installationID int64, owner, repo, ref, checkName string) ([]CheckRun, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -335,7 +311,6 @@ func (c *Client) ListCheckRuns(ctx context.Context, installationID int64, owner,
 	return resp.CheckRuns, nil
 }
 
-// PullRequest is the slice of the GitHub pull-request object publishing reads.
 type PullRequest struct {
 	Number  int64  `json:"number"`
 	State   string `json:"state"`
@@ -343,17 +318,14 @@ type PullRequest struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// PullRequestParams describe a draft pull request to open.
 type PullRequestParams struct {
 	Title string
-	Head  string // working branch name
+	Head  string
 	Base  string
 	Body  string
 }
 
-// FindPullRequestByHead returns the pull request whose head is
-// headOwner:branch, or nil when none exists. Any state counts: a branch is
-// used by at most one task, so an existing PR in any state is this task's.
+// state=all: a branch belongs to one task, so any existing pr is this task's
 func (c *Client) FindPullRequestByHead(ctx context.Context, installationID int64, owner, repo, headOwner, branch string) (*PullRequest, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -372,7 +344,6 @@ func (c *Client) FindPullRequestByHead(ctx context.Context, installationID int64
 	return &resp[0], nil
 }
 
-// CreateDraftPullRequest opens a draft pull request and returns it.
 func (c *Client) CreateDraftPullRequest(ctx context.Context, installationID int64, owner, repo string, p PullRequestParams) (PullRequest, error) {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -391,8 +362,7 @@ func (c *Client) CreateDraftPullRequest(ctx context.Context, installationID int6
 	return resp, nil
 }
 
-// UpdatePullRequestBody replaces the pull request body (retries refresh the
-// evidence-backed body rather than opening a second PR).
+// retries refresh the body rather than opening a second pr
 func (c *Client) UpdatePullRequestBody(ctx context.Context, installationID int64, owner, repo string, number int64, body string) error {
 	token, err := c.InstallationToken(ctx, installationID)
 	if err != nil {
@@ -404,8 +374,6 @@ func (c *Client) UpdatePullRequestBody(ctx context.Context, installationID int64
 		map[string]any{"body": body}, nil)
 }
 
-// do issues one API request. A non-2xx status returns *APIError; the
-// response body is decoded into out when out is non-nil.
 func (c *Client) do(ctx context.Context, method, path, authorization string, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
@@ -437,7 +405,7 @@ func (c *Client) do(ctx context.Context, method, path, authorization string, bod
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		c.errors.Inc()
-		// Drain (bounded) so the connection is reused; never log the body.
+		// drain bounded so the connection is reused; never log the body
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseSize))
 		return &APIError{
 			StatusCode: resp.StatusCode, Method: method, Path: req.URL.Path,

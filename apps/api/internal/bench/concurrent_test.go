@@ -15,11 +15,6 @@ import (
 
 const concurrentAgents = 20
 
-// TestConcurrentAgents20 runs 20 agent sessions that are provably alive at
-// the same instant - every session blocks on a shared barrier that only
-// releases once all 20 have started - and verifies each ran in its own
-// isolated workspace with its own timeline
-// (docs/testing/benchmarks.md "Concurrent agents").
 func TestConcurrentAgents20(t *testing.T) {
 	db := openDB(t)
 	tmp := t.TempDir()
@@ -38,8 +33,6 @@ func TestConcurrentAgents20(t *testing.T) {
 	start := time.Now()
 	f := startFleet(db, s, ts, concurrentAgents, adapter, time.Minute, "bench-conc")
 
-	// The barrier releasing is the proof of 20-way concurrency: it cannot
-	// release until 20 sessions are simultaneously mid-flight.
 	select {
 	case <-adapter.barrier.release:
 	case <-time.After(2 * time.Minute):
@@ -55,9 +48,6 @@ func TestConcurrentAgents20(t *testing.T) {
 	assertNoDoubleAssignment(t, db)
 	assertLeasesReleased(t, db)
 
-	// Isolation: every session recorded the workspace it wrote to; all 20
-	// must be distinct directories under the run's TMPDIR, and all removed
-	// after cleanup.
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT payload_json->>'workspace' FROM activity_events
 		WHERE event_type = 'file.changed' AND source = 'agent'`)

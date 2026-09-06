@@ -9,31 +9,20 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// allowedRemote is the only remote a workspace may push to.
 const allowedRemote = "origin"
 
-// Push policy violations, refused in code before git is invoked.
 var (
 	ErrForbiddenBranch = errors.New("gitworkspace: refusing to push a branch outside agent-trail/")
 	ErrForbiddenRemote = errors.New("gitworkspace: refusing to push to a remote other than origin")
 	ErrForcePushDenied = errors.New("gitworkspace: force push is not allowed")
 )
 
-// PushParams describes a push of a workspace's working branch.
 type PushParams struct {
-	// Remote is the target remote; empty defaults to origin, and only origin
-	// is allowed.
 	Remote string
-	// Force requests a non-fast-forward push. The guard always refuses it.
-	Force bool
+	Force  bool // always refused
 }
 
-// Push publishes the workspace's working branch to origin. The policy is
-// enforced in code, not by prompt: the branch must sit under agent-trail/, the
-// remote must be origin, and force is refused - the command built never carries
-// a leading "+" refspec or --force. The mirror flag is disabled for this
-// invocation so an explicit refspec push cannot be reinterpreted as a
-// mirror push that prunes upstream refs.
+// policy in code, not prompt; mirror=false so a refspec push cannot become a mirror push that prunes upstream refs
 func (m *Manager) Push(ctx context.Context, w Workspace, p PushParams) error {
 	remote := p.Remote
 	if remote == "" {

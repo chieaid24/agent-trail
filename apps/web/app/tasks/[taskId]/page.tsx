@@ -51,7 +51,6 @@ type ConflictState =
   | { phase: "ready"; items: TaskConflict[] }
   | { phase: "error" };
 
-// Re-render clock for live runtimes.
 function useNow(intervalMs: number, enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -95,7 +94,7 @@ export default function TaskPage({
     try {
       setValidations(await listValidations(taskId));
     } catch {
-      // The timeline still tells the story; retried on the next trigger.
+      // non-fatal; retried on next trigger
     }
   }, [taskId]);
 
@@ -103,7 +102,7 @@ export default function TaskPage({
     try {
       setEvidence(await getEvidence(taskId));
     } catch {
-      // Same: non-fatal, retried on the next trigger.
+      // non-fatal
     }
   }, [taskId]);
 
@@ -135,8 +134,6 @@ export default function TaskPage({
     return () => clearTimeout(initial);
   }, [loadTask, loadValidations, loadEvidence, loadConflicts, loadTrace]);
 
-  // The stream drives freshness: a lifecycle event refetches the task, a
-  // validation or evidence event refetches its view.
   const taskEventCount = stream.events.filter((e) =>
     e.event_type.startsWith("task."),
   ).length;
@@ -187,7 +184,7 @@ export default function TaskPage({
     return () => clearTimeout(refresh);
   }, [stream.state, loadTrace]);
 
-  // Poll for sibling publishes, which do not reach this task's stream.
+  // poll for sibling publishes; they never reach this task's stream
   const running = state.phase === "ready" && !isTerminal(state.task.status);
   useEffect(() => {
     if (!running) return;
@@ -276,7 +273,7 @@ function TaskDetail({
   const terminal = isTerminal(task.status);
   const now = useNow(1000, !terminal);
   const runtime = runtimeMs(task.started_at, task.completed_at);
-  void now; // ticking re-render keeps the runtime fresh
+  void now; // tick forces re-render for live runtime
 
   return (
     <article>

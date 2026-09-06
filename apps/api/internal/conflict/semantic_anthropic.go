@@ -20,7 +20,6 @@ const (
 	semanticTimeout         = 10 * time.Second
 )
 
-// AnthropicOptions configures the Messages API semantic provider.
 type AnthropicOptions struct {
 	APIKey   string
 	Model    string
@@ -28,7 +27,6 @@ type AnthropicOptions struct {
 	Client   *http.Client
 }
 
-// AnthropicSemantic assesses diffs through Anthropic's Messages API.
 type AnthropicSemantic struct {
 	apiKey   string
 	model    string
@@ -36,7 +34,6 @@ type AnthropicSemantic struct {
 	client   *http.Client
 }
 
-// NewAnthropicSemantic returns a pinned, timeout-bounded provider.
 func NewAnthropicSemantic(opts AnthropicOptions) (*AnthropicSemantic, error) {
 	if opts.APIKey == "" {
 		return nil, fmt.Errorf("conflict: Anthropic API key is required")
@@ -71,7 +68,6 @@ type anthropicMessageResponse struct {
 	} `json:"content"`
 }
 
-// Assess implements SemanticAssessor.
 func (a *AnthropicSemantic) Assess(ctx context.Context, input SemanticRequest) (SemanticVerdict, error) {
 	ctx, cancel := context.WithTimeout(ctx, semanticTimeout)
 	defer cancel()

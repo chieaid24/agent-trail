@@ -1,7 +1,3 @@
-// Wire types for the control-plane API. Field
-// names and casing mirror the Go JSON tags exactly; every nullable column
-// arrives as null, never absent.
-
 export type TaskStatus =
   | "created"
   | "queued"
@@ -64,9 +60,7 @@ export interface Task {
 export type ActivitySource = "api" | "system" | "runner" | "agent";
 export type RedactionStatus = "none" | "pending" | "redacted";
 
-// One row of the append-only activity timeline. Sequence numbers restart
-// per attempt; (attempt_number, sequence_number) orders the timeline and is
-// the SSE resume cursor.
+// (attempt_number, sequence_number) orders the timeline; also the sse resume cursor
 export interface ActivityEvent {
   id: string;
   task_attempt_id: string;
@@ -123,14 +117,10 @@ export interface ValidationResult {
   exit_code: number | null;
   duration_ms: number;
   summary: string;
-  // The trust distinction: true means the platform
-  // ran and measured the command; false means the agent merely claimed it.
   trusted_execution: boolean;
   created_at: string;
 }
 
-// The evidence report document (apps/api/internal/evidence/report.go).
-// Optional fields use omitempty on the Go side, so they may be absent.
 export interface EvidenceReportDocument {
   schema_version: number;
   task: {

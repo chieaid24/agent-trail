@@ -7,7 +7,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
-// TraceService reads completed task spans.
 type TraceService interface {
 	ListTaskSpans(ctx context.Context, taskID string) (observability.TaskTrace, error)
 }

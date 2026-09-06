@@ -38,8 +38,6 @@ func testParams() Params {
 	}
 }
 
-// TestGenerateKeepsTrustedAndClaimedApart: the report never promotes an
-// agent claim to a trusted result, and a trusted failure stays failed.
 func TestGenerateKeepsTrustedAndClaimedApart(t *testing.T) {
 	r := Generate(testParams())
 	if r.SchemaVersion != SchemaVersion {
@@ -88,8 +86,6 @@ func TestGenerateRecordsValidationNote(t *testing.T) {
 	}
 }
 
-// TestMarkdownSeparatesTrustedFromClaimed: trusted results are visibly
-// distinct - only platform-run checks sit under "Verified by Agent Trail".
 func TestMarkdownSeparatesTrustedFromClaimed(t *testing.T) {
 	md := Markdown(Generate(testParams()))
 
@@ -127,8 +123,6 @@ func TestMarkdownWithoutTrustedChecks(t *testing.T) {
 	}
 }
 
-// TestGenerateAppendsCallerCaveats: measured caveats (a truncated event
-// read) land in the unverified list.
 func TestGenerateAppendsCallerCaveats(t *testing.T) {
 	p := testParams()
 	p.Unverified = []string{"event stream truncated at 1000 events"}

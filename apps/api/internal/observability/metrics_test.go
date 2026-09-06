@@ -34,8 +34,6 @@ func scrape(t *testing.T, r *Registry) string {
 	return string(body)
 }
 
-// The /metrics contract: doc-exact names in the Prometheus text format,
-// no exporter-added suffixes or scope metadata.
 func TestCounterExpositionKeepsExactNames(t *testing.T) {
 	r := NewRegistry()
 	c := r.Counter("agent_trail_webhook_received_total", "Webhook deliveries received.")
@@ -159,12 +157,10 @@ func TestRunnerResourceGauges(t *testing.T) {
 
 func TestWithTraceParentBindsTraceID(t *testing.T) {
 	ctx := WithTraceParent(t.Context(), "0123456789abcdef0123456789abcdef")
-	// The bound span context must carry exactly the given trace id.
 	got := spanContextTraceID(ctx)
 	if got != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("trace id = %q", got)
 	}
-	// An invalid id leaves the context untouched.
 	if spanContextTraceID(WithTraceParent(t.Context(), "nope")) != "" {
 		t.Fatal("invalid trace id produced a span context")
 	}

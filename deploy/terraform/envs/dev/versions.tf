@@ -12,7 +12,6 @@ terraform {
     }
   }
 
-  # Partial backend: pass bucket/key/region/dynamodb_table at init time.
-  # Never initialised in CI; fmt and validate run with -backend=false.
+  # partial backend, config at init time; ci validates with -backend=false
   backend "s3" {}
 }

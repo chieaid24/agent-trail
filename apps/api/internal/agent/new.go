@@ -5,16 +5,11 @@ import (
 	"log/slog"
 )
 
-// Provider names selectable through configuration (AGENT_PROVIDER).
 const (
-	// ProviderFake is the deterministic no-model adapter (default).
-	ProviderFake = "fake"
-	// ProviderClaudeCode is the Claude Code CLI adapter.
+	ProviderFake       = "fake"
 	ProviderClaudeCode = ClaudeProvider
 )
 
-// Options selects and configures an Adapter. The worker builds it from
-// config, keeping provider-specific settings out of the core domain.
 type Options struct {
 	Provider       string
 	CLIPath        string
@@ -24,8 +19,6 @@ type Options struct {
 	Logger         *slog.Logger
 }
 
-// New builds the adapter named by opts.Provider. An empty provider is the
-// fake; an unknown one is a configuration error.
 func New(opts Options) (Adapter, error) {
 	switch opts.Provider {
 	case ProviderFake, "":

@@ -65,7 +65,7 @@ func fixtureCases() []fixtureCase {
 		},
 		{
 			label:     "delete against edit",
-			a:         []edit{{path: "lib.go"}}, // delete
+			a:         []edit{{path: "lib.go"}},
 			b:         []edit{{path: "lib.go", line: 6, content: changed("b")}},
 			wantKinds: []Kind{KindFileOverlap, KindAdjacentLines, KindMergeConflict},
 			wantFiles: []string{"lib.go"},

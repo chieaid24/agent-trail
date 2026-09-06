@@ -12,14 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Store is the PostgreSQL-backed task domain store. Every state change goes
-// through applyTransition inside a transaction holding the task row lock, so
-// transitions for one task serialize and each emits exactly one event.
+// every state change goes through applyTransition under the task row lock
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore returns a Store backed by db.
 func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
@@ -35,12 +32,9 @@ const taskColumns = `id, organization_id, repository_id, source_type,
 var uuidRe = regexp.MustCompile(
 	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// IsUUID reports whether s is a canonical UUID string.
 func IsUUID(s string) bool { return uuidRe.MatchString(s) }
 
-// Create inserts a task with its first attempt, emits task.created, and
-// immediately queues it (nothing else queues tasks yet): the returned task
-// is in status queued at version 2 with events task.created and task.queued.
+// inserts task + first attempt, queues immediately; returns status queued at version 2
 func (s *Store) Create(ctx context.Context, p CreateParams) (Task, error) {
 	if p.BaseBranch == "" {
 		p.BaseBranch = "main"
@@ -104,7 +98,6 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Task, error) {
 	return queued, nil
 }
 
-// Get returns the task by id.
 func (s *Store) Get(ctx context.Context, id string) (Task, error) {
 	if !IsUUID(id) {
 		return Task{}, ErrNotFound
@@ -121,10 +114,7 @@ func (s *Store) Get(ctx context.Context, id string) (Task, error) {
 	return t, nil
 }
 
-// EnsureGitContext records the resolved base commit and working branch on
-// the task. First writer wins: a recovered attempt re-resolving the context
-// keeps the original values, so the branch and base stay stable across
-// owners. It returns the effective stored values.
+// first writer wins: branch and base stay stable across owners
 func (s *Store) EnsureGitContext(ctx context.Context, id, baseCommitSHA, workingBranch string) (base, branch string, err error) {
 	if !IsUUID(id) {
 		return "", "", ErrNotFound
@@ -146,7 +136,6 @@ func (s *Store) EnsureGitContext(ctx context.Context, id, baseCommitSHA, working
 	return base, branch, nil
 }
 
-// List returns tasks newest-first, optionally filtered by status.
 func (s *Store) List(ctx context.Context, p ListParams) ([]Task, error) {
 	limit := p.Limit
 	if limit <= 0 {
@@ -187,7 +176,6 @@ func (s *Store) List(ctx context.Context, p ListParams) ([]Task, error) {
 	return tasks, nil
 }
 
-// Transition applies one validated state transition and emits its event.
 func (s *Store) Transition(ctx context.Context, id string, p TransitionParams) (Task, error) {
 	if !IsUUID(id) {
 		return Task{}, ErrNotFound
@@ -212,8 +200,7 @@ func (s *Store) Transition(ctx context.Context, id string, p TransitionParams) (
 	return next, nil
 }
 
-// Cancel requests cancellation. Cancelling an already-cancelled task is an
-// idempotent no-op; other terminal states reject with InvalidTransitionError.
+// cancel of already-cancelled task is idempotent no-op; other terminal states reject
 func (s *Store) Cancel(ctx context.Context, id, reason string) (Task, error) {
 	if !IsUUID(id) {
 		return Task{}, ErrNotFound
@@ -245,7 +232,6 @@ func (s *Store) Cancel(ctx context.Context, id, reason string) (Task, error) {
 	return next, nil
 }
 
-// Events returns the task's timeline ordered by attempt then sequence.
 func (s *Store) Events(ctx context.Context, id string, limit int) ([]Event, error) {
 	if !IsUUID(id) {
 		return nil, ErrNotFound
@@ -299,9 +285,6 @@ func (s *Store) Events(ctx context.Context, id string, limit int) ([]Event, erro
 	return events, nil
 }
 
-// EventsAfter returns timeline events strictly after the (attempt, sequence)
-// cursor, ordered by attempt then sequence. It backs SSE resumption
-// (Last-Event-ID): a zero cursor returns the timeline from the start.
 func (s *Store) EventsAfter(ctx context.Context, id string, afterAttempt int, afterSequence int64, limit int) ([]Event, error) {
 	if !IsUUID(id) {
 		return nil, ErrNotFound
@@ -356,9 +339,7 @@ func (s *Store) EventsAfter(ctx context.Context, id string, afterAttempt int, af
 	return events, nil
 }
 
-// AppendAttemptEvent appends one non-transition activity event (agent
-// output, workspace lifecycle, ...) to an attempt's timeline. It takes the
-// task row lock so the sequence number cannot race a transition.
+// takes task row lock so sequence number cannot race a transition
 func (s *Store) AppendAttemptEvent(ctx context.Context, attemptID, eventType, source string, payload any) error {
 	if !IsUUID(attemptID) {
 		return ErrAttemptNotFound
@@ -370,7 +351,6 @@ func (s *Store) AppendAttemptEvent(ctx context.Context, attemptID, eventType, so
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
-	// nil and typed-nil payloads both marshal to "null"; store {} instead.
 	if string(raw) == "null" {
 		raw = []byte(`{}`)
 	}
@@ -403,8 +383,6 @@ func (s *Store) AppendAttemptEvent(ctx context.Context, attemptID, eventType, so
 	return nil
 }
 
-// AppendEvent appends one non-transition event (e.g. a GitHub side effect)
-// to the task's active attempt.
 func (s *Store) AppendEvent(ctx context.Context, taskID, eventType, source string, payload map[string]string) error {
 	if !IsUUID(taskID) {
 		return ErrNotFound
@@ -439,7 +417,6 @@ func (s *Store) AppendEvent(ctx context.Context, taskID, eventType, source strin
 	return nil
 }
 
-// validSource reports whether s is a known activity-event source.
 func validSource(s string) bool {
 	switch s {
 	case "api", "system", "runner", "agent":
@@ -448,8 +425,6 @@ func validSource(s string) bool {
 	return false
 }
 
-// ActiveTaskForIssue returns the non-terminal github_issue task for the
-// repository/issue pair, if one exists.
 func (s *Store) ActiveTaskForIssue(ctx context.Context, repositoryID string, issueNumber int64) (Task, bool, error) {
 	if !IsUUID(repositoryID) {
 		return Task{}, false, nil
@@ -469,15 +444,12 @@ func (s *Store) ActiveTaskForIssue(ctx context.Context, repositoryID string, iss
 	return t, true, nil
 }
 
-// isUniqueViolation reports whether err is a unique violation on the named
-// constraint or index.
 func isUniqueViolation(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) &&
 		pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
-// lockTask loads a task FOR UPDATE, serializing its transitions.
 func lockTask(ctx context.Context, tx *sql.Tx, id string) (Task, error) {
 	row := tx.QueryRowContext(ctx,
 		`SELECT `+taskColumns+` FROM tasks WHERE id = $1 FOR UPDATE`, id)
@@ -491,10 +463,7 @@ func lockTask(ctx context.Context, tx *sql.Tx, id string) (Task, error) {
 	return t, nil
 }
 
-// applyTransition validates and applies cur -> p.To inside tx (which must
-// hold cur's row lock): bumps the version, keeps the active attempt in step,
-// and appends exactly one activity event. A replayed idempotency key returns
-// the current task untouched.
+// tx must hold cur's row lock; replayed idempotency key returns cur untouched
 func applyTransition(ctx context.Context, tx *sql.Tx, cur Task, p TransitionParams) (Task, error) {
 	source := p.Source
 	if source == "" {
@@ -553,7 +522,6 @@ func applyTransition(ctx context.Context, tx *sql.Tx, cur Task, p TransitionPara
 			return Task{}, fmt.Errorf("finish attempt: %w", err)
 		}
 	case cur.Status == StatusRevisionRequested && p.To == StatusQueued:
-		// A revision starts a fresh attempt; the old one is superseded.
 		_, err = tx.ExecContext(ctx, `
 			UPDATE task_attempts
 			SET status = 'superseded', completed_at = now()
@@ -618,8 +586,7 @@ func applyTransition(ctx context.Context, tx *sql.Tx, cur Task, p TransitionPara
 	return next, nil
 }
 
-// insertEvent appends one event with the attempt's next sequence number.
-// Callers hold the task row lock, so the MAX+1 cannot race.
+// callers hold task row lock so max+1 sequence cannot race
 func insertEvent(ctx context.Context, tx *sql.Tx, attemptID, eventType, source string, payload []byte, idempotencyKey string) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO activity_events
@@ -636,7 +603,6 @@ func insertEvent(ctx context.Context, tx *sql.Tx, attemptID, eventType, source s
 	return nil
 }
 
-// scanTask scans one tasks row in taskColumns order.
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var (

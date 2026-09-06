@@ -5,10 +5,7 @@ import (
 	"strings"
 )
 
-// PRBody renders the draft pull request body from the stored report.
-// finalCommit is the
-// published commit, measured at publish time (the report is generated before
-// the commit exists). Only measured facts appear; no prompts, no secrets.
+// finalcommit measured at publish time; report is generated before the commit exists
 func PRBody(r Report, finalCommit string) string {
 	var b strings.Builder
 	b.WriteString("## Agent Trail task\n\n")

@@ -1,14 +1,8 @@
-// Pure derivation of timeline rows from activity events. Rendering stays in
-// components; everything here is testable without a DOM.
-
 import type { ActivityEvent } from "./types";
 
 export interface TimelineRow {
-  // Headline for the row; always present.
   label: string;
-  // Longer free text under the headline, when the payload carries one.
   detail?: string;
-  // Detail renders in mono when it is a shell/git artifact.
   monoDetail?: boolean;
 }
 
@@ -28,8 +22,7 @@ function num(
   return typeof v === "number" ? v : undefined;
 }
 
-// commandLine renders {command, args} as one shell-like line. Display only,
-// never executed.
+// display only, never executed
 function commandLine(payload: Record<string, unknown>): string | undefined {
   const command = str(payload, "command");
   if (!command) return undefined;
@@ -40,8 +33,6 @@ function commandLine(payload: Record<string, unknown>): string | undefined {
   return command;
 }
 
-// describeEvent maps every event type the platform emits to a readable row.
-// Unknown types fall back to the raw type so nothing is silently dropped.
 export function describeEvent(e: ActivityEvent): TimelineRow {
   const p = e.payload;
   const type = e.event_type;
@@ -173,7 +164,6 @@ export function describeEvent(e: ActivityEvent): TimelineRow {
   }
 }
 
-// Unique changed file paths, in first-seen order.
 export function changedFiles(events: ActivityEvent[]): string[] {
   const seen = new Set<string>();
   for (const e of events) {
@@ -184,7 +174,6 @@ export function changedFiles(events: ActivityEvent[]): string[] {
   return [...seen];
 }
 
-// The latest plan text, if the agent published one.
 export function latestPlan(events: ActivityEvent[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i].event_type === "plan.created") {

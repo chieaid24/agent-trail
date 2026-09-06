@@ -24,9 +24,6 @@ func TestRunRequiresDatabaseURL(t *testing.T) {
 	}
 }
 
-// TestRunUpAgainstRealDatabase exercises the full migration path when a test
-// database is available (make integration-test); otherwise it skips. The
-// dbtest harness serializes this against the other packages' DB tests.
 func TestRunUpAgainstRealDatabase(t *testing.T) {
 	dbtest.Open(t)
 	t.Setenv("DATABASE_URL", os.Getenv("TEST_DATABASE_URL"))

@@ -1,7 +1,3 @@
-// Direct control-plane calls for specs: arranging fixtures through the real
-// API, never through the UI under test. Every call carries the harness
-// session; the suite runs with the session layer on.
-
 import { apiBaseUrl, readState, sessionCookieName } from "./env";
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {

@@ -10,9 +10,6 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// TestHostWorksQueueUntilStopped: the full worker loop against a real
-// database -- register, claim, execute the fake flow, poll again, shut down
-// offline.
 func TestHostWorksQueueUntilStopped(t *testing.T) {
 	db, s, ts := testStores(t)
 	tk := mustCreateTask(t, ts)
@@ -71,9 +68,6 @@ func TestHostWorksQueueUntilStopped(t *testing.T) {
 	}
 }
 
-// TestLostRunnerReportedOnTimeline: the reap path end to end -- a runner with
-// a leased attempt goes stale, MarkLost detects it, and reportLoss writes
-// runner.lost onto the attempt's timeline.
 func TestLostRunnerReportedOnTimeline(t *testing.T) {
 	db, s, ts := testStores(t)
 	mustCreateTask(t, ts)
@@ -115,9 +109,6 @@ func TestLostRunnerReportedOnTimeline(t *testing.T) {
 	}
 }
 
-// TestHostExitsAfterMaxTasks: a capped host executes one attempt, exits on
-// its own without a context cancel, and leaves the runner offline -- the
-// contract a one-shot Kubernetes Job runner depends on.
 func TestHostExitsAfterMaxTasks(t *testing.T) {
 	db, s, ts := testStores(t)
 	tk := mustCreateTask(t, ts)
@@ -171,8 +162,6 @@ func TestHostExitsAfterMaxTasks(t *testing.T) {
 	}
 }
 
-// TestHostIdleExit: with nothing to claim, an idle deadline ends the host
-// cleanly so an empty-queue Job completes instead of hanging.
 func TestHostIdleExit(t *testing.T) {
 	db, s, ts := testStores(t)
 
