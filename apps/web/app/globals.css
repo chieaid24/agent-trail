@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Design tokens from DESIGN.md. Dark warm-clay theme; OKLCH only. */
+/* Design tokens. Dark warm-clay theme; OKLCH only. */
 @theme {
   --color-background: oklch(0.16 0.008 60);
   --color-surface: oklch(0.2 0.008 60);
@@ -33,8 +33,8 @@ body {
   outline-offset: 2px;
 }
 
-/* New live rows fade from an accent tint to transparent (DESIGN.md: 240ms,
-   background only, never a slide). */
+/* New live rows fade from an accent tint to transparent (240ms, background
+   only, never a slide). */
 @keyframes row-appear {
   from {
     background-color: color-mix(in oklab, var(--color-accent) 14%, transparent);
