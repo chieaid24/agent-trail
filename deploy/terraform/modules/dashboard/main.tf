@@ -23,7 +23,7 @@ resource "aws_vpc_security_group_egress_rule" "service_all" {
   security_group_id = aws_security_group.service.id
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "-1"
-  description       = "Outbound to the control plane, ECR, and CloudWatch"
+  description       = "Unrestricted outbound; reaches the control plane, ECR, and CloudWatch"
 }
 
 resource "aws_vpc_security_group_egress_rule" "alb_to_service" {
@@ -175,7 +175,7 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
 
 data "aws_region" "current" {}
 
-# no task role: the dashboard holds no AWS credentials and reaches AWS only through the control plane
+# no task role: the dashboard holds no AWS credentials
 resource "aws_ecs_task_definition" "this" {
   family                   = "${var.name}-dashboard"
   requires_compatibilities = ["FARGATE"]
@@ -223,7 +223,7 @@ resource "aws_ecs_task_definition" "this" {
       }
 
       healthCheck = {
-        command     = ["CMD-SHELL", "wget -q -O /dev/null http://localhost:${var.container_port}/healthz || exit 1"]
+        command     = ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:${var.container_port}/healthz"]
         interval    = 15
         timeout     = 5
         retries     = 3
