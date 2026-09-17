@@ -55,7 +55,7 @@ export default function Home() {
 
   return (
     <AppShell>
-      <div className="px-8 py-6">
+      <div className="px-4 py-6 sm:px-8">
         <header>
           <h1 className="text-lg font-semibold">Overview</h1>
           <p className="mt-1 text-sm text-muted">
@@ -74,7 +74,7 @@ export default function Home() {
                 repositories={state.repositories}
               />
               <section aria-labelledby="tasks-heading" className="mt-8">
-                <header className="flex items-baseline justify-between gap-6 border-b border-border pb-2">
+                <header className="flex flex-col items-start justify-between gap-1 border-b sm:flex-row sm:items-baseline sm:gap-6 border-border pb-2">
                   <h2 id="tasks-heading" className="text-base font-semibold">
                     Tasks
                   </h2>
@@ -104,7 +104,7 @@ function OperationalOverview({
   repositories: Repository[];
 }) {
   return (
-    <div className="grid grid-cols-2 gap-8">
+    <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
       <section aria-labelledby="runners-heading">
         <div className="flex items-baseline justify-between border-b border-border pb-2">
           <h2 id="runners-heading" className="text-base font-semibold">
@@ -294,7 +294,7 @@ function ErrorNotice({
 function OverviewSkeleton() {
   return (
     <div aria-hidden className="animate-pulse">
-      <div className="grid grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
         {[0, 1].map((column) => (
           <div key={column}>
             <div className="h-5 w-36 rounded bg-surface" />

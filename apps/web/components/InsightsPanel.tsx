@@ -169,7 +169,7 @@ function OverallSummary({ insights }: { insights: TaskInsights }) {
   return (
     <dl
       aria-label="Overall summary"
-      className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+      className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5"
     >
       {tiles.map((tile) => (
         <div
@@ -180,10 +180,21 @@ function OverallSummary({ insights }: { insights: TaskInsights }) {
             {tile.label}
           </dt>
           <dd
-            className={`mt-0.5 text-lg font-semibold break-words tabular-nums ${tile.tone ?? "text-foreground"}`}
+            className={`mt-0.5 font-semibold break-words tabular-nums ${tile.label === "Checks" ? "text-base" : "text-lg"} ${tile.tone ?? "text-foreground"}`}
             title={tile.value}
           >
-            {tile.value}
+            {tile.label === "Checks" ? (
+              <>
+                <span className="whitespace-nowrap">
+                  {tile.value.split(" ")[0]}
+                </span>
+                {tile.value.includes(" ")
+                  ? ` ${tile.value.slice(tile.value.indexOf(" ") + 1)}`
+                  : ""}
+              </>
+            ) : (
+              tile.value
+            )}
           </dd>
         </div>
       ))}
@@ -292,10 +303,10 @@ function AttemptTable({
       >
         <thead>
           <tr className="border-b border-border bg-surface text-xs font-semibold tracking-wide text-muted uppercase">
-            <th scope="col" className="px-3 py-2 text-left font-semibold">
+            <th scope="col" className="px-2 py-2 text-left font-semibold">
               Attempt
             </th>
-            <th scope="col" className="px-3 py-2 text-left font-semibold">
+            <th scope="col" className="px-2 py-2 text-left font-semibold">
               Status
             </th>
             {DURATION_COLUMNS.map((column) => (
@@ -303,18 +314,18 @@ function AttemptTable({
                 key={column.key}
                 scope="col"
                 title={column.definition}
-                className="px-3 py-2 text-right font-semibold"
+                className="px-2 py-2 text-right font-semibold"
               >
                 {column.label}
               </th>
             ))}
-            <th scope="col" className="px-3 py-2 text-right font-semibold">
+            <th scope="col" className="px-2 py-2 text-right font-semibold">
               Events
             </th>
-            <th scope="col" className="px-3 py-2 text-left font-semibold">
+            <th scope="col" className="px-2 py-2 text-left font-semibold">
               Checks
             </th>
-            <th scope="col" className="px-3 py-2 text-right font-semibold">
+            <th scope="col" className="px-2 py-2 text-right font-semibold">
               Cost
             </th>
           </tr>
@@ -346,11 +357,11 @@ function AttemptRow({
 }) {
   const validation = checks(attempt.validation);
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-3 py-2 font-semibold whitespace-nowrap">
+    <tr className="border-b border-border align-top last:border-b-0">
+      <td className="px-2 py-2 font-semibold whitespace-nowrap">
         #{attempt.attempt_number}
       </td>
-      <td className="px-3 py-2 whitespace-nowrap">
+      <td className="px-2 py-2 whitespace-nowrap">
         {attempt.status === "active" ? (
           <span className="flex flex-wrap items-baseline gap-2">
             <span className="text-sm font-semibold text-accent">active</span>
@@ -364,7 +375,7 @@ function AttemptRow({
           </span>
         )}
         {attempt.failure_code && (
-          <p className="max-w-48 font-mono text-xs break-all whitespace-normal text-danger">
+          <p className="min-w-[10rem] max-w-[12rem] font-mono text-xs break-all whitespace-normal text-danger">
             {attempt.failure_code}
           </p>
         )}
@@ -372,18 +383,20 @@ function AttemptRow({
       {DURATION_COLUMNS.map((column) => (
         <td
           key={column.key}
-          className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums"
+          className="px-2 py-2 text-right font-mono whitespace-nowrap tabular-nums"
         >
           {duration(attempt[column.key])}
         </td>
       ))}
-      <td className="px-3 py-2 text-right font-mono tabular-nums">
+      <td className="px-2 py-2 text-right font-mono tabular-nums">
         {attempt.event_count}
       </td>
-      <td className={`px-3 py-2 whitespace-nowrap ${validation.tone}`}>
-        {validation.text}
+      <td className={`px-2 py-2 ${validation.tone}`}>
+        <p className="max-w-[10rem] break-words whitespace-normal">
+          {validation.text}
+        </p>
       </td>
-      <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
+      <td className="px-2 py-2 text-right font-mono whitespace-nowrap tabular-nums">
         {cost(attempt.cost)}
       </td>
     </tr>
@@ -393,7 +406,7 @@ function AttemptRow({
 function InsightsSkeleton() {
   return (
     <div aria-label="Loading execution insights" className="animate-pulse">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         {[0, 1, 2, 3, 4].map((i) => (
           <div key={i} className="h-14 rounded bg-surface" />
         ))}

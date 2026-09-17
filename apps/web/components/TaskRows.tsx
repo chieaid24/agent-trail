@@ -14,13 +14,13 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
           <li key={t.id} className="border-b border-border">
             <Link
               href={`/tasks/${t.id}`}
-              className="grid grid-cols-[10rem_1fr_auto] items-baseline gap-x-4 px-2 py-2 hover:bg-surface"
+              className="grid grid-cols-1 items-baseline gap-x-4 gap-y-1 md:grid-cols-[10rem_minmax(0,1fr)_auto] px-2 py-2 hover:bg-surface"
             >
               <StatusBadge status={t.status} />
-              <span className="truncate text-base text-foreground">
+              <span className="min-w-0 truncate text-base text-foreground">
                 {t.title}
               </span>
-              <span className="flex items-baseline gap-4 text-sm text-muted">
+              <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-muted">
                 {t.source_issue_number !== null && (
                   <span>issue #{t.source_issue_number}</span>
                 )}
@@ -31,7 +31,7 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
                   </span>
                 )}
                 {runtime !== null && <span>{formatDuration(runtime)}</span>}
-                <span className="font-mono text-sm">
+                <span className="font-mono text-sm whitespace-nowrap">
                   {formatDateTime(t.created_at)}
                 </span>
               </span>

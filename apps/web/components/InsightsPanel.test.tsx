@@ -93,7 +93,9 @@ describe("InsightsPanel", () => {
     const summary = screen.getByLabelText("Overall summary");
     expect(within(summary).getByText("12s")).toBeTruthy();
     expect(within(summary).getByText("$0.0425")).toBeTruthy();
-    expect(within(summary).getByText("3/3 passed")).toBeTruthy();
+    expect(within(summary).getByTitle("3/3 passed").textContent).toBe(
+      "3/3 passed",
+    );
     expect(within(summary).getByText("14")).toBeTruthy();
 
     const table = screen.getByRole("table", { name: "Attempt comparison" });
@@ -177,7 +179,8 @@ describe("InsightsPanel", () => {
     expect(within(row).getByText("failed")).toBeTruthy();
     expect(within(row).getByText("validation_failed")).toBeTruthy();
     expect(
-      within(row).getByText("1/3 passed (1 failed, 1 error)").className,
+      within(row).getByText("1/3 passed (1 failed, 1 error)").parentElement
+        ?.className,
     ).toContain("text-danger");
   });
 

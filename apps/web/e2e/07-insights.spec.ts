@@ -118,7 +118,42 @@ async function screenshots(page: Page, name: string): Promise<void> {
       () => document.documentElement.scrollWidth > window.innerWidth,
     );
     expect(overflow).toBe(false);
+    const fraction = page.getByLabel("Overall summary").locator("dd > span");
+    if ((await fraction.count()) > 0) {
+      expect(
+        await fraction.evaluate((element) => element.getClientRects().length),
+      ).toBe(1);
+      expect(
+        await fraction.evaluate(
+          (element) =>
+            element.getBoundingClientRect().width <=
+            element.parentElement!.clientWidth,
+        ),
+      ).toBe(true);
+    }
+    await page.evaluate(() => window.scrollTo(0, 0));
     await shoot(page, `task-insights-${name}-${width}`);
+    const table = page.getByRole("table", { name: "Attempt comparison" });
+    if (
+      width >= 1024 &&
+      (await table.count()) > 0 &&
+      ["populated", "multi-attempt", "long-content"].includes(name)
+    ) {
+      const scrolling = table.locator("..");
+      if (
+        await scrolling.evaluate(
+          (element) => element.scrollWidth > element.clientWidth,
+        )
+      ) {
+        await scrolling.evaluate((element) => {
+          element.scrollLeft = element.scrollWidth;
+        });
+        await shoot(page, `task-insights-${name}-${width}-right`);
+        await scrolling.evaluate((element) => {
+          element.scrollLeft = 0;
+        });
+      }
+    }
     if (
       width === 390 &&
       (await page.getByRole("list", { name: "Attempt details" }).count()) > 0
@@ -378,6 +413,35 @@ test("execution insights match the persisted executed task", async ({
     );
   }
   await screenshots(page, "persisted");
+  await page.goto("/");
+  await expect(
+    page.getByRole("link", { name: new RegExp(EXECUTED_TASK_TITLE) }),
+  ).toBeVisible();
+  const taskTitle = page
+    .getByRole("link", { name: new RegExp(EXECUTED_TASK_TITLE) })
+    .getByText(EXECUTED_TASK_TITLE, { exact: true });
+  expect(
+    await taskTitle.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    ),
+  ).toBeGreaterThan(100);
+  const repositoryNames = page.locator(
+    'a[href^="/repositories/"] > span:first-child > span:first-child',
+  );
+  for (const repositoryName of await repositoryNames.all()) {
+    expect(
+      await repositoryName.evaluate(
+        (element) => element.getBoundingClientRect().width,
+      ),
+    ).toBeGreaterThan(100);
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shoot(page, "task-insights-mobile-navigation-populated-390");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    ),
+  ).toBe(false);
 });
 
 test("mobile navigation remains visible through dashboard states", async ({
