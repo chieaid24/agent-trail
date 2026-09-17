@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
+# local telemetry smoke; overrides: COMPOSE_PROJECT_NAME, *_PORT, TELEMETRY_API_PORT,
+# TELEMETRY_FIXTURE_PORT, TELEMETRY_EVIDENCE_DIR
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
+fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+
+for dep in docker node go curl openssl; do
+  command -v "$dep" >/dev/null || fail "$dep is required"
+done
+
+# raw writes: console.log colorizes numbers under FORCE_COLOR
 allocate_ports() {
   node <<'NODE'
 const net = require("node:net");
@@ -18,7 +27,7 @@ const net = require("node:net");
     });
     servers.push(server);
   }
-  for (const server of servers) console.log(server.address().port);
+  for (const server of servers) process.stdout.write(`${server.address().port}\n`);
   await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
 })().catch((error) => {
   console.error(error);
@@ -28,9 +37,13 @@ NODE
 }
 
 mapfile -t available_ports < <(allocate_ports)
+[ "${#available_ports[@]}" -eq 6 ] || fail "expected 6 free ports, got ${#available_ports[@]}"
+for port in "${available_ports[@]}"; do
+  [[ "$port" =~ ^[0-9]+$ ]] || fail "port allocation returned '$port'"
+done
 
 project_prefix=${COMPOSE_PROJECT_NAME:-agent-trail-telemetry}
-project="$project_prefix-$(date +%s%N)-$$"
+project="$project_prefix-${RANDOM}${RANDOM}-$$"
 export COMPOSE_PROJECT_NAME=$project
 export POSTGRES_PORT=${POSTGRES_PORT:-${available_ports[0]}}
 export GRAFANA_PORT=${GRAFANA_PORT:-${available_ports[1]}}
@@ -61,7 +74,7 @@ stop_processes() {
 }
 
 cleanup() {
-  local status=$?
+  local status=${1:-$?}
   trap - EXIT INT TERM
   stop_processes
   compose logs --no-color otel-lgtm >"$evidence/otel-lgtm.log" 2>&1 || true
@@ -72,7 +85,9 @@ cleanup() {
   fi
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'cleanup 130' INT
+trap 'cleanup 143' TERM
 
 wait_for_url() {
   local name=$1
@@ -93,7 +108,7 @@ grafana_url="http://127.0.0.1:$GRAFANA_PORT"
 fixture_url="http://127.0.0.1:$fixture_port"
 api_url="http://127.0.0.1:$api_port"
 
-compose up -d --wait postgres otel-lgtm
+compose up -d --wait --wait-timeout 300 postgres otel-lgtm
 wait_for_url Grafana "$grafana_url/api/health"
 
 mkdir -p "$run_dir/bin" "$run_dir/workspaces"
@@ -228,7 +243,7 @@ wait_for_query() {
 wait_for_query metric query_metric "$evidence/metric-before-restart.json"
 wait_for_query trace query_trace "$evidence/trace-before-restart.json"
 
-compose restart otel-lgtm >/dev/null
+compose up -d --force-recreate --wait --wait-timeout 300 otel-lgtm >/dev/null
 wait_for_url Grafana "$grafana_url/api/health"
 wait_for_query persisted-metric query_metric "$evidence/metric-after-restart.json"
 wait_for_query persisted-trace query_trace "$evidence/trace-after-restart.json"
@@ -241,7 +256,7 @@ PromQL: $metric_query
 TraceQL: $trace_query
 Services: agent-trail-api, agent-trail-worker
 Task: $task_id (awaiting_review with draft PR)
-Persistence: metric and trace found after otel-lgtm restart
+Persistence: metric and trace found after otel-lgtm container replacement
 Application logs: stdout only; no OTLP log exporter is configured
 EOF
 
