@@ -58,7 +58,7 @@ spec:
             - name: CONFLICT_LLM_MODEL
               value: "${CONFLICT_LLM_MODEL}"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+              value: "cloudwatch-agent-collector.amazon-cloudwatch.svc.cluster.local:4317"
             - name: GITHUB_API_BASE_URL
               value: "${GITHUB_API_BASE_URL}"
           resources:
