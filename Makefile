@@ -6,7 +6,7 @@ SHELL := /usr/bin/env bash
 DATABASE_URL ?= postgres://agent_trail:agent_trail@localhost:5432/agent_trail?sslmode=disable
 TEST_DATABASE_URL ?= $(DATABASE_URL)
 
-.PHONY: dev infra migrate seed test integration-test e2e bench slice clean hooks
+.PHONY: dev infra migrate seed test integration-test e2e bench slice telemetry-smoke clean hooks
 
 dev: infra migrate
 	bash scripts/dev.sh
@@ -35,6 +35,9 @@ bench:
 
 slice:
 	cd apps/api && DATABASE_URL="$(DATABASE_URL)" go run ./cmd/slice
+
+telemetry-smoke:
+	bash scripts/verify-local-telemetry.sh
 
 clean:
 	docker compose down -v --remove-orphans
