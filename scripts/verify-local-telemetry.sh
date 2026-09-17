@@ -29,7 +29,8 @@ NODE
 
 mapfile -t available_ports < <(allocate_ports)
 
-project=${COMPOSE_PROJECT_NAME:-agent-trail-telemetry-$$}
+project_prefix=${COMPOSE_PROJECT_NAME:-agent-trail-telemetry}
+project="$project_prefix-$(date +%s%N)-$$"
 export COMPOSE_PROJECT_NAME=$project
 export POSTGRES_PORT=${POSTGRES_PORT:-${available_ports[0]}}
 export GRAFANA_PORT=${GRAFANA_PORT:-${available_ports[1]}}
@@ -154,6 +155,15 @@ const fs=require("node:fs");
 const result=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
 if(result.task_status!=="awaiting_review"||result.pr_open!==true)process.exit(1);
 ' "$evidence/task.json"
+task_id=$(node -e '
+const fs=require("node:fs");
+const result=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+process.stdout.write(result.task_id||"");
+' "$evidence/task.json")
+if [ -z "$task_id" ]; then
+  printf 'fixture verification returned no task ID\n' >&2
+  exit 1
+fi
 
 kill -TERM "$api_pid"
 wait "$api_pid"
@@ -176,7 +186,7 @@ if [ -z "$prometheus_uid" ] || [ -z "$tempo_uid" ]; then
 fi
 
 metric_query='agent_trail_webhook_invalid_signature_total'
-trace_query='{ resource.service.name = "agent-trail-worker" }'
+trace_query="{ resource.service.name = \"agent-trail-worker\" && span.task.id = \"$task_id\" }"
 
 query_metric() {
   local output=$1
@@ -230,7 +240,7 @@ OTLP gRPC endpoint: $otel_endpoint
 PromQL: $metric_query
 TraceQL: $trace_query
 Services: agent-trail-api, agent-trail-worker
-Task result: awaiting_review with draft PR
+Task: $task_id (awaiting_review with draft PR)
 Persistence: metric and trace found after otel-lgtm restart
 Application logs: stdout only; no OTLP log exporter is configured
 EOF

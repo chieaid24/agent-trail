@@ -15,8 +15,9 @@ make hooks    # activate the pre-commit hook (once per clone)
 ```
 
 `make dev` serves the API on :8080, the dashboard on :3000, and Grafana on
-http://127.0.0.1:3300. Log in to Grafana with `admin` / `admin`. See the
-[Makefile](Makefile) for every target and port.
+http://127.0.0.1:3300. Log in to Grafana with `admin` / `admin`. See
+[.env.example](.env.example) for port settings and the [Makefile](Makefile) for
+available targets.
 
 ## Observability data
 
@@ -29,14 +30,17 @@ host ports with `GRAFANA_PORT`, `OTLP_GRPC_PORT`, and `OTLP_HTTP_PORT`; keep
 
 Compose stores Prometheus and Tempo data in the `otel-lgtm-data` named volume,
 so `docker compose down` preserves it across container replacement. Run
-`make clean` to remove the volume. The applications continue to write
-structured logs to stdout; they do not export application logs through OTLP.
+`make clean` to remove both the local PostgreSQL and LGTM volumes. The
+applications continue to write structured logs to stdout; they do not export
+application logs through OTLP.
 
 Run `make telemetry-smoke` to start an isolated Compose project on unused
 ports, execute a real fake-provider task, query one `agent_trail_*` metric and
 one worker trace through Grafana, restart LGTM, and query both signals again.
 The script writes the exact PromQL and TraceQL queries, service names, task
 result, API and worker logs, LGTM logs, and query responses under `artifacts/`.
+It appends a unique suffix to `COMPOSE_PROJECT_NAME` and removes that isolated
+project's PostgreSQL and LGTM volumes after the persistence check.
 
 The worker also batches completed task-scoped spans into PostgreSQL for the
 dashboard. `GET /api/v1/tasks/{id}/trace` returns a `spans` array ordered by
@@ -63,7 +67,7 @@ The repository runner image supports the fake provider used by `scripts/verify-k
 
 - `apps/api/` - Go control plane: `api` (HTTP), `worker` (process runner or Kubernetes controller), `migrate` (goose)
 - `apps/web/` - Next.js dashboard
-- `deploy/dev/` - local infrastructure support files
+- `docker-compose.yml` - local PostgreSQL and Grafana LGTM infrastructure
 - `scripts/` - CI, app runner, benchmark, and telemetry verification scripts
 - `docs/` - benchmark plans and measured results
 
