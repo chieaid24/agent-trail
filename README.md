@@ -41,7 +41,7 @@ The repository runner image supports the fake provider used by `scripts/verify-k
 - `apps/web/` - Next.js dashboard
 - `deploy/dev/` - compose configs for the local infrastructure
 - `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner)
-- `docs/` - benchmark results and dashboard screenshots
+- `docs/` - benchmark plans and measured results
 
 ## Documentation
 
