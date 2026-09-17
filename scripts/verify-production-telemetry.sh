@@ -50,7 +50,7 @@ docker run --rm --name "$CONTAINER" --platform linux/amd64 \
   --entrypoint /opt/aws/amazon-cloudwatch-agent/bin/config-translator \
   "$IMAGE" \
   -output /tmp/health.toml \
-  -mode auto \
+  -mode onPremise \
   -os linux
 
 printf 'PASS: CloudWatch agent accepted the production OTLP configuration\n'

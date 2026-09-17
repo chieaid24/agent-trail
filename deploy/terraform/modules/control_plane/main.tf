@@ -322,7 +322,7 @@ resource "aws_ecs_task_definition" "this" {
           "-output",
           "/tmp/health.toml",
           "-mode",
-          "auto",
+          "onPremise",
           "-os",
           "linux",
         ]
