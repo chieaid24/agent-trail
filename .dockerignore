@@ -1,0 +1,12 @@
+# build context is the repo root; keep host artifacts out of every image
+.git
+.worktrees
+**/node_modules
+**/.next
+**/coverage
+apps/web/e2e/.artifacts
+apps/web/test-results
+apps/api/bin
+apps/api/internal/bench/.artifacts
+.env
+.env.*

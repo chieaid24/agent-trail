@@ -19,6 +19,16 @@ http://127.0.0.1:3300. Log in to Grafana with `admin` / `admin`. See
 [.env.example](.env.example) for port settings and the [Makefile](Makefile) for
 available targets.
 
+Run the offline infrastructure checks before opening a pull request:
+
+```bash
+bash scripts/gate.sh
+bash scripts/verify-production-telemetry.sh
+bash scripts/verify-k8s-runner.sh
+```
+
+The Kubernetes check renders the production collector endpoint as `off` inside its isolated kind cluster.
+
 ## Observability data
 
 The local Grafana LGTM service receives OpenTelemetry Protocol (OTLP) metrics
@@ -49,13 +59,21 @@ identity, optional attempt ID, name, kind, start and end timestamps,
 attributes, and status. The dashboard polls this eventually consistent read
 model after a run ends and constructs the waterfall in the browser.
 
+Production sends the same OTLP metrics and traces to CloudWatch without changing application instrumentation. Each Fargate control-plane task runs a pinned ARM64 CloudWatch agent sidecar and exports to `localhost:4317`. The EKS runner controller and its Jobs export to `cloudwatch-agent-collector.amazon-cloudwatch.svc.cluster.local:4317`; the runner NetworkPolicy permits TCP 4317 only to CloudWatch agent pods in the `amazon-cloudwatch` namespace. The kind verifier renders the endpoint as `off`, so isolated verification does not contact AWS.
+
+The Fargate task role grants `cloudwatch:PutMetricData` and `xray:PutTraceSegments`. ECS shares one task role across every container in a task, so the API container can technically use those actions even though the sidecar sends the telemetry. In EKS, only the `amazon-cloudwatch/cloudwatch-agent` ServiceAccount can assume the dedicated collector role. The pinned `amazon-cloudwatch-observability` add-on keeps Enhanced Container Insights, Application Signals, and container logging enabled while adding the OTLP gRPC and HTTP receivers.
+
+Terraform enables account- and Region-wide Transaction Search from the dev root, routes X-Ray segments to CloudWatch Logs, indexes 1 percent of spans, and sets 30-day retention on `aws/spans` and `/aws/application-signals/data`. Dev and prod must use the same AWS account and Region, and dev must be applied first because prod shares that account-level configuration. Metrics retain their `agent_trail_*` names and bounded labels for PromQL in [CloudWatch Query Studio](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-PromQL-QueryStudio.html); traces retain their OpenTelemetry resource and span attributes for [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html).
+
+CloudWatch charges OTLP metrics by ingested volume and stores them for up to 15 months; span costs include ingestion, CloudWatch Logs storage, and the configured Transaction Search indexing percentage. Container Insights, Application Signals, and container log ingestion add their own usage. Review the [CloudWatch pricing model](https://aws.amazon.com/cloudwatch/pricing/) before applying either environment. The application does not emit OTLP logs: ECS still sends structured stdout through `awslogs`, while the EKS add-on owns its container log path. The existing ALB, RDS, SQS queue-age, and dead-letter alarms remain because they measure infrastructure signals outside application telemetry.
+
 The task header derives its cost total and per-attempt breakdown from `agent.cost_update` events delivered over SSE. A `total_cost_usd` value replaces the current attempt total, a `cost_usd` value increments it, and the header sums attempt totals. Tasks without a valid cost event show `not reported`.
 
 Span attributes and error descriptions persist as instrumentation records them and remain with the task audit record. Do not attach credentials, source content, or other secrets to span attributes or status messages.
 
 ## Kubernetes backend
 
-Set `RUNNER_TYPE=kubernetes` and provide a version-pinned `RUNNER_IMAGE` to run the worker as an in-cluster controller. Apply `deploy/k8s/runner/namespace.yaml` and `serviceaccount.yaml`, render `networkpolicy.yaml` with the Kubernetes API Service ClusterIP as a `/32`, create the Secrets below, and then render `controller.yaml`. The controller ServiceAccount can manage Jobs only.
+Set `RUNNER_TYPE=kubernetes` and provide a version-pinned `RUNNER_IMAGE` to run the worker as an in-cluster controller. Apply `deploy/k8s/runner/namespace.yaml` and `serviceaccount.yaml`, render `networkpolicy.yaml` with the Kubernetes API Service ClusterIP as a `/32`, create the Secrets below, and then render `controller.yaml`. The controller ServiceAccount can manage Jobs only. The production controller manifest sets the CloudWatch agent Service endpoint directly, and every controller-created Job inherits it.
 
 - `runner-database`: `url`
 - `runner-github`: `webhook-secret`, `app-id`, and `key.pem`
@@ -63,12 +81,19 @@ Set `RUNNER_TYPE=kubernetes` and provide a version-pinned `RUNNER_IMAGE` to run 
 
 The repository runner image supports the fake provider used by `scripts/verify-k8s-runner.sh`. For `AGENT_PROVIDER=claude-code`, build the pinned Claude CLI into the runner image and set `AGENT_CLI_VERSION`. The kind verifier creates the controller, checks its RBAC, runs one task to `awaiting_review`, and confirms TTL cleanup.
 
+## Production layout
+
+Terraform (`deploy/terraform/envs/dev` and `envs/prod`) runs the API and the dashboard as two Fargate services in one ECS cluster behind one Application Load Balancer, so the API's `SameSite=Lax` session cookie works without cross-origin handling; the worker runs on the EKS runner cluster from the same root. Listener rules send `/webhooks/*`, `/auth/*`, `/api/*`, `/healthz`, `/readyz`, and `/me` to the `control-plane` service, answer `/metrics` with 404, and send every other path to the `dashboard` service. The dashboard forwards `/backend/*` to `API_PROXY_TARGET`, read per request, which the task definition sets to `http://control-plane:8080`, the API's ECS Service Connect name, so that traffic never leaves the VPC. Each environment root requires `control_plane_image` and `dashboard_image` (immutable tag or digest) from the `control-plane` and `web` ECR repositories; the `runner` repository holds the worker image. `docker build -f deploy/docker/Dockerfile --target web .` builds the dashboard image; `scripts/verify-web-image.sh` builds it and checks that it serves `/healthz`, forwards `/backend/*` to the run-time `API_PROXY_TARGET`, and runs as uid 65532 on a read-only root filesystem.
+
 ## Layout
 
 - `apps/api/` - Go control plane: `api` (HTTP), `worker` (process runner or Kubernetes controller), `migrate` (goose)
 - `apps/web/` - Next.js dashboard
 - `docker-compose.yml` - local PostgreSQL and Grafana LGTM infrastructure
-- `scripts/` - CI, app runner, benchmark, and telemetry verification scripts
+- `deploy/docker/` - one Dockerfile with the `control-plane`, `runner`, `tools`, and `web` targets
+- `deploy/k8s/` - `runner/` controller and Job manifests, `local/` kind verification manifests
+- `deploy/terraform/` - AWS foundations: `modules/` and one root per environment under `envs/`
+- `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner), `verify-local-telemetry.sh` (Grafana LGTM smoke), `verify-production-telemetry.sh` (CloudWatch agent config check), `verify-web-image.sh` (dashboard image check), `verify-k8s-runner.sh` (kind verifier)
 - `docs/` - benchmark plans and measured results
 
 ## Documentation

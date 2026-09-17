@@ -19,6 +19,11 @@ variable "control_plane_image" {
   type        = string
 }
 
+variable "dashboard_image" {
+  description = "Dashboard image (immutable tag or digest)."
+  type        = string
+}
+
 variable "github_repository" {
   description = "owner/repo allowed to deploy via CI."
   type        = string

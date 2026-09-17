@@ -1,5 +1,5 @@
 locals {
-  repositories = ["control-plane", "runner"]
+  repositories = ["control-plane", "runner", "web"]
 }
 
 resource "aws_ecr_repository" "this" {

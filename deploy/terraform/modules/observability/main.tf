@@ -1,3 +1,86 @@
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}
+
+data "aws_region" "current" {}
+
+resource "aws_cloudwatch_log_group" "transaction_spans" {
+  count = var.enable_transaction_search ? 1 : 0
+
+  name              = "aws/spans"
+  retention_in_days = var.trace_retention_days
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "application_signals" {
+  count = var.enable_transaction_search ? 1 : 0
+
+  name              = "/aws/application-signals/data"
+  retention_in_days = var.trace_retention_days
+
+  tags = var.tags
+}
+
+data "aws_iam_policy_document" "transaction_search" {
+  count = var.enable_transaction_search ? 1 : 0
+
+  statement {
+    sid     = "TransactionSearchXRayAccess"
+    actions = ["logs:PutLogEvents"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:aws/spans:*",
+      "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/application-signals/data:*",
+    ]
+
+    principals {
+      type        = "Service"
+      identifiers = ["xray.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:${data.aws_partition.current.partition}:xray:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_resource_policy" "transaction_search" {
+  count = var.enable_transaction_search ? 1 : 0
+
+  policy_name     = "agent-trail-transaction-search"
+  policy_document = data.aws_iam_policy_document.transaction_search[0].json
+}
+
+resource "aws_xray_trace_segment_destination" "transaction_search" {
+  count = var.enable_transaction_search ? 1 : 0
+
+  destination = "CloudWatchLogs"
+
+  depends_on = [aws_cloudwatch_log_resource_policy.transaction_search]
+}
+
+resource "aws_xray_indexing_rule" "transaction_search" {
+  count = var.enable_transaction_search ? 1 : 0
+
+  name = "Default"
+
+  rule {
+    probabilistic {
+      desired_sampling_percentage = var.trace_indexing_percentage
+    }
+  }
+
+  depends_on = [aws_xray_trace_segment_destination.transaction_search]
+}
+
 resource "aws_sns_topic" "alerts" {
   name = "${var.name}-alerts"
 

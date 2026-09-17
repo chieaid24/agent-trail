@@ -34,3 +34,24 @@ RUN apk add --no-cache ca-certificates git git-daemon wget \
 COPY --from=build /out/migrate /out/seed /out/fixture-github /usr/local/bin/
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/migrate"]
+
+FROM node:24-alpine3.23 AS web-build
+WORKDIR /src
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY apps/web/package.json apps/web/package-lock.json ./
+COPY apps/web/vendor/ ./vendor/
+RUN npm ci
+COPY apps/web/ ./
+# public/ is optional in the source tree; create it so the runtime stage can always copy it
+RUN npm run build && mkdir -p public
+
+FROM node:24-alpine3.23 AS web
+RUN addgroup -g 65532 nonroot && adduser -D -u 65532 -G nonroot nonroot
+WORKDIR /app
+COPY --from=web-build /src/.next/standalone ./
+COPY --from=web-build /src/.next/static ./.next/static
+COPY --from=web-build /src/public ./public
+USER 65532:65532
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
+EXPOSE 3000
+ENTRYPOINT ["node", "server.js"]

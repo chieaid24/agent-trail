@@ -84,6 +84,27 @@ module "control_plane" {
   }
 }
 
+module "dashboard" {
+  source = "../../modules/dashboard"
+
+  name               = local.name
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  image              = var.dashboard_image
+  desired_count      = 1
+  cpu                = 256
+  memory             = 512
+
+  cluster_arn                   = module.control_plane.cluster_arn
+  https_listener_arn            = module.control_plane.https_listener_arn
+  api_target_group_arn          = module.control_plane.target_group_arn
+  alb_security_group_id         = module.control_plane.alb_security_group_id
+  api_security_group_id         = module.control_plane.service_security_group_id
+  api_port                      = module.control_plane.container_port
+  service_connect_namespace_arn = module.control_plane.service_connect_namespace_arn
+  api_proxy_target              = module.control_plane.service_connect_url
+}
+
 module "database" {
   source = "../../modules/database"
 
@@ -115,8 +136,9 @@ module "runner_cluster" {
 module "observability" {
   source = "../../modules/observability"
 
-  name        = local.name
-  alert_email = var.alert_email
+  name                      = local.name
+  alert_email               = var.alert_email
+  enable_transaction_search = true
 
   alb_arn_suffix           = module.control_plane.alb_arn_suffix
   target_group_arn_suffix  = module.control_plane.target_group_arn_suffix
@@ -133,7 +155,13 @@ module "github_oidc_ci" {
   ecr_repository_arns = [
     module.container_registry.repository_arns["control-plane"],
     module.container_registry.repository_arns["runner"],
+    module.container_registry.repository_arns["web"],
   ]
   ecs_cluster_name = module.control_plane.cluster_name
   ecs_service_name = module.control_plane.service_name
+  task_role_arns = [
+    module.control_plane.execution_role_arn,
+    module.control_plane.task_role_arn,
+    module.dashboard.execution_role_arn,
+  ]
 }

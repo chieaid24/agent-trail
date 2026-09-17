@@ -110,8 +110,8 @@ render deploy/k8s/runner/controller.yaml \
   "CONFLICT_LLM_ENABLED=false" \
   "CONFLICT_LLM_PROVIDER=fake" \
   "CONFLICT_LLM_MODEL=claude-sonnet-4-6" \
-  "OTEL_EXPORTER_OTLP_ENDPOINT=off" \
   "GITHUB_API_BASE_URL=http://fixture.agent-trail-local.svc.cluster.local:8080" \
+  | sed 's|cloudwatch-agent-collector.amazon-cloudwatch.svc.cluster.local:4317|off|' \
   | "${KUBECTL[@]}" apply -f - >/dev/null
 "${KUBECTL[@]}" -n agent-trail-runners rollout status deployment/runner-controller --timeout=180s >/dev/null
 
