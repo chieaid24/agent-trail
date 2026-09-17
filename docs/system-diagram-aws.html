@@ -15,7 +15,7 @@
   .group { position: absolute; border: 1.5px solid #b08d2f; border-radius: 10px;
            background: rgba(255,255,255,0.28); z-index: 1; }
   .group-title { position: absolute; font-size: 12px; font-weight: 600; color: #7a6420;
-                 padding: 6px 12px; z-index: 2; }
+                 padding: 6px 12px; background: #fdf3d8; z-index: 5; }
   .box { position: absolute; box-sizing: border-box; border-radius: 8px;
          padding: 8px 10px; text-align: center; font-size: 10.5px; line-height: 1.35;
          color: #222; z-index: 2; }
@@ -28,7 +28,7 @@
   .cyl  { background: #dcc8f0; border: 1.5px solid #a07cc9;
           border-radius: 14px 14px 14px 14px / 28px 28px 10px 10px; padding-top: 14px; }
   .dashed { border-style: dashed; }
-  .legend { position: absolute; left: 950px; top: 258px; width: 250px; z-index: 3;
+  .legend { position: absolute; left: 950px; top: 258px; width: 250px; z-index: 5;
             background: #fffdf6; border: 1px solid #ccc; border-radius: 8px;
             padding: 8px 10px; font-size: 10.5px; line-height: 1.55; }
   .legend .chip { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
@@ -61,7 +61,8 @@
     <div><span class="chip" style="background:#ffffff;border:1.5px solid #666;"></span>Self-managed workload (container)</div>
     <div><span class="chip" style="background:#cde6f9;border:1.5px solid #6fa8dc;"></span>External service</div>
     <div><span class="chip" style="background:#7ed488;border:1.5px solid #3f9e4d;"></span>People / notification endpoint</div>
-    <div><span class="chip" style="background:#fff;border:1.5px dashed #888;"></span>Intended - provisioned or planned, not wired yet</div>
+    <div><span class="chip" style="background:#fff;border:1.5px dashed #888;"></span>Requires separate deployment configuration</div>
+    <div style="margin-top:4px;">Runner connections require RDS ingress and workload egress policies applied separately.</div>
   </div>
 
   <!-- ======================= actors ======================= -->
@@ -150,7 +151,7 @@
   </div>
 
   <div class="box aws" style="left:470px; top:1230px; width:200px; height:64px;">
-    <b>NAT Gateway</b>private-subnet egress: GitHub, Anthropic
+    <b>NAT Gateway</b>GitHub / Anthropic egress requires workload policies
   </div>
 
   <!-- ======================= observability ======================= -->
@@ -206,16 +207,16 @@
     <!-- dispatch + claims -->
     <path class="dash" d="M 900 782 C 800 860 500 885 292 928" marker-end="url(#a)"/>
     <text class="bg" x="600" y="856">intended: dispatch trigger</text>
-    <path d="M 290 928 C 350 880 460 845 545 822" marker-end="url(#a)"/>
+    <path class="dash" d="M 290 928 C 350 880 460 845 545 822" marker-end="url(#a)"/>
     <text class="bg" x="415" y="860">lists dispatchable attempts</text>
     <line x1="402" y1="990" x2="458" y2="990" marker-end="url(#a)"/>
-    <path d="M 630 918 C 620 885 610 855 600 822" marker-end="url(#a)"/>
+    <path class="dash" d="M 630 918 C 620 885 610 855 600 822" marker-end="url(#a)"/>
     <text class="bg" x="640" y="872">claims own attempt | events | spans</text>
 
     <!-- job pod out -->
-    <path d="M 458 1100 C 250 1100 70 1080 70 900 L 70 400 C 70 375 100 366 148 362" marker-end="url(#a)"/>
+    <path class="dash" d="M 458 1100 C 250 1100 70 1080 70 900 L 70 400 C 70 375 100 366 148 362" marker-end="url(#a)"/>
     <text class="bg" x="140" y="1088">git push | draft PR + evidence | check run | comment</text>
-    <line x1="600" y1="1162" x2="576" y2="1228" marker-end="url(#a)"/>
+    <line class="dash" x1="600" y1="1162" x2="576" y2="1228" marker-end="url(#a)"/>
     <text class="bg" x="600" y="1200">egress</text>
     <line x1="468" y1="1262" x2="402" y2="1262" marker-end="url(#a)"/>
     <path class="dash" d="M 852 1090 C 885 1090 915 1090 948 1090" marker-end="url(#a)"/>

@@ -50,7 +50,7 @@
   <div class="box" style="left:60px; top:1382px; width:1120px; background:transparent; border:none; font-size:12px;">
     OpenTelemetry Go SDK (traces + metrics, W3C tracecontext) -&gt; OTLP gRPC :4317 -&gt; collector (local: debug exporter; "off" in isolated runs)
     &nbsp;|&nbsp; worker persists task-scoped spans -&gt; <b style="display:inline">task_spans</b> -&gt; dashboard trace waterfall
-    &nbsp;|&nbsp; API serves GET /metrics (Prometheus format, ~25 agent_trail_* series)
+    &nbsp;|&nbsp; API serves GET /metrics (Prometheus format, agent_trail_* instruments)
     &nbsp;|&nbsp; cloud: CloudWatch logs + 6 alarms -&gt; SNS email
   </div>
 
