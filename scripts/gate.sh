@@ -31,17 +31,21 @@ go_fmt_gate() {
 }
 go_in() { local dir=$1; shift; (cd "$dir" && "$@"); }
 
-found_go=0
-while IFS= read -r mod; do
-  found_go=1
-  dir=$(dirname "$mod")
-  gate "go: gofmt ($dir)" go_fmt_gate "$dir"
-  gate "go: vet ($dir)" go_in "$dir" go vet ./...
-  gate "go: test ($dir)" go_in "$dir" go test ./...
-  gate "go: build ($dir)" go_in "$dir" go build ./...
-done < <(find . -name go.mod \
-  -not -path './.git/*' -not -path '*/node_modules/*' -not -path './.worktrees/*')
-[ "$found_go" = 1 ] || skip "go: format/vet/test/build" "no go.mod"
+if command -v go >/dev/null 2>&1; then
+  found_go=0
+  while IFS= read -r mod; do
+    found_go=1
+    dir=$(dirname "$mod")
+    gate "go: gofmt ($dir)" go_fmt_gate "$dir"
+    gate "go: vet ($dir)" go_in "$dir" go vet ./...
+    gate "go: test ($dir)" go_in "$dir" go test ./...
+    gate "go: build ($dir)" go_in "$dir" go build ./...
+  done < <(find . -name go.mod \
+    -not -path './.git/*' -not -path '*/node_modules/*' -not -path './.worktrees/*')
+  [ "$found_go" = 1 ] || skip "go: format/vet/test/build" "no go.mod"
+else
+  skip "go: format/vet/test/build" "go not installed"
+fi
 
 tf_validate_gate() {
   (cd "$1" && terraform init -backend=false -input=false -no-color >/dev/null &&
