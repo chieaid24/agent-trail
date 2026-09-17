@@ -66,12 +66,20 @@ data "aws_iam_policy_document" "ci" {
     resources = var.ecr_repository_arns
   }
 
+  # task definition actions carry no ecs:cluster key, so they cannot share the scoped statement
+  statement {
+    sid = "EcsTaskDefinitions"
+    actions = [
+      "ecs:DescribeTaskDefinition",
+      "ecs:RegisterTaskDefinition",
+    ]
+    resources = ["*"]
+  }
+
   statement {
     sid = "EcsDeploy"
     actions = [
       "ecs:DescribeServices",
-      "ecs:DescribeTaskDefinition",
-      "ecs:RegisterTaskDefinition",
       "ecs:UpdateService",
     ]
     resources = ["*"]
@@ -86,7 +94,7 @@ data "aws_iam_policy_document" "ci" {
   statement {
     sid       = "PassTaskRoles"
     actions   = ["iam:PassRole"]
-    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.name}-control-plane*"]
+    resources = var.task_role_arns
 
     condition {
       test     = "StringEquals"

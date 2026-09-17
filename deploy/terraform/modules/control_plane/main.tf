@@ -1,5 +1,8 @@
 locals {
   container_name = "control-plane"
+  port_name      = "http"
+  # Service Connect name; the dashboard proxies to http://control-plane:<container_port>
+  discovery_name = "control-plane"
 }
 
 resource "aws_security_group" "alb" {
@@ -194,6 +197,13 @@ resource "aws_ecs_cluster" "this" {
   tags = var.tags
 }
 
+resource "aws_service_discovery_http_namespace" "this" {
+  name        = var.name
+  description = "Service Connect namespace for ${var.name}"
+
+  tags = var.tags
+}
+
 resource "aws_ecs_task_definition" "this" {
   family                   = "${var.name}-control-plane"
   requires_compatibilities = ["FARGATE"]
@@ -216,8 +226,10 @@ resource "aws_ecs_task_definition" "this" {
 
       portMappings = [
         {
+          name          = local.port_name
           containerPort = var.container_port
           protocol      = "tcp"
+          appProtocol   = "http"
         }
       ]
 
@@ -277,6 +289,21 @@ resource "aws_ecs_service" "this" {
   deployment_circuit_breaker {
     enable   = true
     rollback = true
+  }
+
+  service_connect_configuration {
+    enabled   = true
+    namespace = aws_service_discovery_http_namespace.this.arn
+
+    service {
+      port_name      = local.port_name
+      discovery_name = local.discovery_name
+
+      client_alias {
+        port     = var.container_port
+        dns_name = local.discovery_name
+      }
+    }
   }
 
   depends_on = [aws_lb_listener.https]

@@ -35,12 +35,19 @@ Set `RUNNER_TYPE=kubernetes` and provide a version-pinned `RUNNER_IMAGE` to run 
 
 The repository runner image supports the fake provider used by `scripts/verify-k8s-runner.sh`. For `AGENT_PROVIDER=claude-code`, build the pinned Claude CLI into the runner image and set `AGENT_CLI_VERSION`. The kind verifier creates the controller, checks its RBAC, runs one task to `awaiting_review`, and confirms TTL cleanup.
 
+## Production layout
+
+Terraform (`deploy/terraform/envs/dev` and `envs/prod`) runs the API and the dashboard as two Fargate services in one ECS cluster behind one Application Load Balancer, so the API's `SameSite=Lax` session cookie works without cross-origin handling; the worker runs on the EKS runner cluster from the same root. Listener rules send `/webhooks/*`, `/auth/*`, `/api/*`, `/healthz`, `/readyz`, and `/me` to the `control-plane` service, answer `/metrics` with 404, and send every other path to the `dashboard` service. The dashboard forwards `/backend/*` to `API_PROXY_TARGET`, read per request, which the task definition sets to `http://control-plane:8080`, the API's ECS Service Connect name, so that traffic never leaves the VPC. Each environment root requires `control_plane_image` and `dashboard_image` (immutable tag or digest) from the `control-plane` and `web` ECR repositories; the `runner` repository holds the worker image. `docker build -f deploy/docker/Dockerfile --target web .` builds the dashboard image; `scripts/verify-web-image.sh` builds it and checks that it serves `/healthz`, forwards `/backend/*` to the run-time `API_PROXY_TARGET`, and runs as uid 65532 on a read-only root filesystem.
+
 ## Layout
 
 - `apps/api/` - Go control plane: `api` (HTTP), `worker` (process runner or Kubernetes controller), `migrate` (goose)
 - `apps/web/` - Next.js dashboard
 - `deploy/dev/` - compose configs for the local infrastructure
-- `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner)
+- `deploy/docker/` - one Dockerfile with the `control-plane`, `runner`, `tools`, and `web` targets
+- `deploy/k8s/` - `runner/` controller and Job manifests, `local/` kind verification manifests
+- `deploy/terraform/` - AWS foundations: `modules/` and one root per environment under `envs/`
+- `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner), `verify-web-image.sh` (dashboard image check), `verify-k8s-runner.sh` (kind verifier)
 - `docs/` - benchmark plans and measured results
 
 ## Documentation

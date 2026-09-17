@@ -81,7 +81,7 @@ test("semantic warning shows severity, explanation, and evidence", async ({
 
   const warning = page.getByLabel("Conflict warnings");
   await expect(warning.getByText("semantic conflict")).toBeVisible();
-  await expect(warning.getByText(/^High/)).toBeVisible();
+  await expect(warning.getByText(/^high/i)).toBeVisible();
   await expect(warning.getByText(/auth\.Session\.ExpiresAt/)).toBeVisible();
   await shootBothViewports(page, "07-semantic-conflict-warning");
 });

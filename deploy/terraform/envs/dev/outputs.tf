@@ -17,3 +17,8 @@ output "runner_cluster_name" {
   description = "EKS cluster running task Jobs."
   value       = module.runner_cluster.cluster_name
 }
+
+output "dashboard_service_name" {
+  description = "ECS service CI updates to roll out the dashboard."
+  value       = module.dashboard.service_name
+}

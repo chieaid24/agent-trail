@@ -52,6 +52,8 @@ jobs:
       # job must stay named test: branch protection requires this check
       - name: Gate
         run: bash scripts/gate.sh
+      - name: Verify dashboard image
+        run: bash scripts/verify-web-image.sh
       - name: Install kind
         run: |
           go install sigs.k8s.io/kind@v0.30.0
