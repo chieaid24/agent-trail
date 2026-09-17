@@ -66,12 +66,20 @@ data "aws_iam_policy_document" "ci" {
     resources = var.ecr_repository_arns
   }
 
+  # task definition actions carry no ecs:cluster key, so they cannot share the scoped statement
+  statement {
+    sid = "EcsTaskDefinitions"
+    actions = [
+      "ecs:DescribeTaskDefinition",
+      "ecs:RegisterTaskDefinition",
+    ]
+    resources = ["*"]
+  }
+
   statement {
     sid = "EcsDeploy"
     actions = [
       "ecs:DescribeServices",
-      "ecs:DescribeTaskDefinition",
-      "ecs:RegisterTaskDefinition",
       "ecs:UpdateService",
     ]
     resources = ["*"]
