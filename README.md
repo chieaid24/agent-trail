@@ -42,19 +42,23 @@ host ports with `GRAFANA_PORT`, `OTLP_GRPC_PORT`, and `OTLP_HTTP_PORT`; keep
 
 Compose mounts the `otel-lgtm-data` named volume at `/data`, where Grafana,
 Prometheus, Tempo, and Loki keep their state, so `docker compose down`
-preserves it across container replacement. Run `make clean` to remove both the
+preserves it across container replacement. Tempo writes a completed block to
+the volume about 30 seconds after the last span; traces still in its live
+store are lost when the container stops. Run `make clean` to remove both the
 local PostgreSQL and LGTM volumes. The applications write structured logs to
 stdout and do not export logs through OTLP.
 
 Run `make telemetry-smoke` to start an isolated Compose project on free ports
 (exported port variables take precedence), run one task through the fake
 provider to `awaiting_review`, query one `agent_trail_*` metric and one worker
-trace through Grafana, replace the LGTM container, and query both signals
-again. The script writes the exact PromQL and TraceQL queries, service names,
-task result, API and worker logs, LGTM logs, and query responses under
-`artifacts/`. It appends a unique suffix to `COMPOSE_PROJECT_NAME` and removes
-that isolated project's PostgreSQL and LGTM volumes after the persistence
-check. It requires Docker, `curl`, and `openssl`.
+trace through Grafana, wait for Tempo to complete a block on the volume,
+replace the LGTM container, then query the metric again and fetch the same
+trace by ID. The script writes the exact PromQL and TraceQL queries, trace ID,
+service names, task result, API and worker logs, LGTM logs, and query
+responses under `artifacts/`. It appends a unique suffix to
+`COMPOSE_PROJECT_NAME` and removes that isolated project's PostgreSQL and LGTM
+volumes after the persistence check. It requires Docker, `curl`, and
+`openssl`.
 
 The worker also batches completed task-scoped spans into PostgreSQL for the
 dashboard. `GET /api/v1/tasks/{id}/trace` returns a `spans` array ordered by

@@ -242,11 +242,37 @@ wait_for_query() {
 
 wait_for_query metric query_metric "$evidence/metric-before-restart.json"
 wait_for_query trace query_trace "$evidence/trace-before-restart.json"
+trace_id=$(node -e '
+const fs=require("node:fs");
+const response=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+process.stdout.write(response.traces[0].traceID||"");
+' "$evidence/trace-before-restart.json")
+[ -n "$trace_id" ] || fail "trace search returned no trace ID"
 
+# Tempo drops live-store traces at shutdown; only a completed block under /data survives
+block_completed() {
+  compose exec -T otel-lgtm sh -c 'find /data/tempo/blocks -name meta.json | grep -q .'
+}
+
+# search without a range covers only Tempo's live store; lookup by ID covers completed blocks too
+query_trace_by_id() {
+  local output=$1
+  curl -fsS -u admin:admin \
+    "$grafana_url/api/datasources/proxy/uid/$tempo_uid/api/traces/$trace_id" \
+    -o "$output" &&
+    node -e '
+const fs=require("node:fs");
+const response=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+const batches=response.batches||response.resourceSpans||response.trace?.resourceSpans||[];
+if(batches.length===0)process.exit(1);
+' "$output"
+}
+
+wait_for_query completed-block block_completed
 compose up -d --force-recreate --wait --wait-timeout 300 otel-lgtm >/dev/null
 wait_for_url Grafana "$grafana_url/api/health"
 wait_for_query persisted-metric query_metric "$evidence/metric-after-restart.json"
-wait_for_query persisted-trace query_trace "$evidence/trace-after-restart.json"
+wait_for_query persisted-trace query_trace_by_id "$evidence/trace-after-restart.json"
 
 cat >"$evidence/summary.txt" <<EOF
 Compose project: $project
@@ -254,9 +280,10 @@ Grafana URL: $grafana_url
 OTLP gRPC endpoint: $otel_endpoint
 PromQL: $metric_query
 TraceQL: $trace_query
+Trace ID: $trace_id
 Services: agent-trail-api, agent-trail-worker
 Task: $task_id (awaiting_review with draft PR)
-Persistence: metric and trace found after otel-lgtm container replacement
+Persistence: metric queryable and trace $trace_id fetched by ID after otel-lgtm container replacement
 Application logs: stdout only; no OTLP log exporter is configured
 EOF
 
