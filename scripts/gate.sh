@@ -20,7 +20,7 @@ skip() { printf 'SKIP  %s (%s)\n' "$1" "$2"; }
 ascii_gate() {
   ! grep -rPn '[^\x20-\x7E\t]' --include='*.md' \
     --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.worktrees \
-    --exclude-dir=.next .
+    --exclude-dir=.next --exclude-dir=.artifacts --exclude-dir=test-results .
 }
 gate "docs: markdown is printable ASCII" ascii_gate
 

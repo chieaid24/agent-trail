@@ -246,7 +246,7 @@ type claudeLine struct {
 	Message      json.RawMessage `json:"message"`
 	Result       string          `json:"result"`
 	IsError      bool            `json:"is_error"`
-	TotalCostUSD float64         `json:"total_cost_usd"`
+	TotalCostUSD *float64        `json:"total_cost_usd"`
 	DurationMS   int64           `json:"duration_ms"`
 	NumTurns     int             `json:"num_turns"`
 	Usage        json.RawMessage `json:"usage"`
@@ -287,10 +287,13 @@ func (s *claudeSession) normalize(line []byte, toolNames map[string]string, sawR
 	case "rate_limit_event":
 	case "result":
 		*sawResult = true
-		s.emit(EventCostUpdate, map[string]any{
-			"total_cost_usd": l.TotalCostUSD, "duration_ms": l.DurationMS,
-			"num_turns": l.NumTurns, "usage": rawOrNull(l.Usage),
-		})
+		cost := map[string]any{
+			"duration_ms": l.DurationMS, "num_turns": l.NumTurns, "usage": rawOrNull(l.Usage),
+		}
+		if l.TotalCostUSD != nil {
+			cost["total_cost_usd"] = *l.TotalCostUSD
+		}
+		s.emit(EventCostUpdate, cost)
 		s.mu.Lock()
 		s.summary = l.Result
 		s.mu.Unlock()

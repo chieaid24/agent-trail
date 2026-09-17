@@ -25,6 +25,7 @@ type Server struct {
 	dashboard   DashboardService
 	conflicts   ConflictService
 	traces      TraceService
+	insights    InsightService
 	webhook     http.Handler
 	metrics     http.Handler
 	auth        AuthService
@@ -80,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/conflicts", s.handleTaskConflicts)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/trace", s.handleTaskTrace)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/insights", s.handleTaskInsights)
 	api.HandleFunc("GET /api/v1/organizations", s.handleListOrganizations)
 	api.HandleFunc("GET /api/v1/organizations/{organizationId}", s.handleGetOrganization)
 	api.HandleFunc("GET /api/v1/organizations/{organizationId}/repositories", s.handleOrganizationRepositories)

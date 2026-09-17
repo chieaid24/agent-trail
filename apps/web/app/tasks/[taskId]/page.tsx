@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { CancelButton } from "@/components/CancelButton";
 import { ConflictWarning } from "@/components/ConflictWarning";
 import { EvidencePanel } from "@/components/EvidencePanel";
+import { InsightsPanel } from "@/components/InsightsPanel";
 import { LogViewer } from "@/components/LogViewer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Timeline } from "@/components/Timeline";
@@ -27,6 +28,7 @@ import {
   shortSha,
 } from "@/lib/format";
 import { changedFiles, latestPlan } from "@/lib/timeline";
+import { useTaskInsights } from "@/lib/useTaskInsights";
 import { useTaskStream, type StreamState } from "@/lib/useTaskStream";
 import type {
   StoredEvidence,
@@ -76,6 +78,13 @@ export default function TaskPage({
   const [trace, setTrace] = useState<TraceState>({ phase: "loading" });
   const [tab, setTab] = useState<TabKey>("timeline");
   const stream = useTaskStream(taskId);
+  const running = state.phase === "ready" && !isTerminal(state.task.status);
+  const { state: insights, retry: retryInsights } = useTaskInsights(
+    taskId,
+    stream.events.length,
+    stream.state === "done",
+    running,
+  );
 
   const loadTask = useCallback(async () => {
     try {
@@ -185,7 +194,6 @@ export default function TaskPage({
   }, [stream.state, loadTrace]);
 
   // poll for sibling publishes; they never reach this task's stream
-  const running = state.phase === "ready" && !isTerminal(state.task.status);
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => {
@@ -202,7 +210,7 @@ export default function TaskPage({
 
   return (
     <AppShell>
-      <div className="px-8 py-6">
+      <div className="px-4 py-6 sm:px-8">
         <nav aria-label="Breadcrumb" className="text-sm text-muted">
           <Link href="/" className="hover:text-foreground">
             Tasks
@@ -222,27 +230,30 @@ export default function TaskPage({
             onRetryConflicts={loadConflicts}
             onTaskChanged={(t) => setState({ phase: "ready", task: t })}
           >
-            <TabBar
-              tab={tab}
-              onSelect={setTab}
-              counts={{
-                timeline: stream.events.length,
-                trace: trace.phase === "ready" ? trace.spans.length : null,
-                logs: null,
-                validations: validations.length,
-                evidence: null,
-                files: files.length,
-              }}
-            />
-            <div role="tabpanel" className="mt-4">
-              {tab === "timeline" && <Timeline events={stream.events} />}
-              {tab === "trace" && <TraceWaterfall state={trace} />}
-              {tab === "logs" && <LogViewer events={stream.events} />}
-              {tab === "validations" && (
-                <ValidationList results={validations} />
-              )}
-              {tab === "evidence" && <EvidencePanel evidence={evidence} />}
-              {tab === "files" && <FileList files={files} />}
+            <InsightsPanel state={insights} onRetry={retryInsights} />
+            <div className="mt-6">
+              <TabBar
+                tab={tab}
+                onSelect={setTab}
+                counts={{
+                  timeline: stream.events.length,
+                  trace: trace.phase === "ready" ? trace.spans.length : null,
+                  logs: null,
+                  validations: validations.length,
+                  evidence: null,
+                  files: files.length,
+                }}
+              />
+              <div role="tabpanel" className="mt-4">
+                {tab === "timeline" && <Timeline events={stream.events} />}
+                {tab === "trace" && <TraceWaterfall state={trace} />}
+                {tab === "logs" && <LogViewer events={stream.events} />}
+                {tab === "validations" && (
+                  <ValidationList results={validations} />
+                )}
+                {tab === "evidence" && <EvidencePanel evidence={evidence} />}
+                {tab === "files" && <FileList files={files} />}
+              </div>
             </div>
           </TaskDetail>
         )}
@@ -286,7 +297,7 @@ function TaskDetail({
             <CancelButton task={task} onCancelled={onTaskChanged} />
           )}
         </div>
-        <div className="mt-2 flex items-baseline gap-4">
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <StatusBadge status={task.status} />
           <StreamChip state={streamState} />
           {task.cancel_requested_at && !terminal && (
@@ -296,7 +307,7 @@ function TaskDetail({
           )}
         </div>
         {task.status === "failed" || task.status === "timed_out" ? (
-          <p className="mt-3 max-w-[72ch] text-sm text-danger">
+          <p className="mt-3 max-w-[72ch] text-sm break-words text-danger">
             {task.failure_code && (
               <span className="font-mono">{task.failure_code}: </span>
             )}
@@ -342,7 +353,7 @@ function TaskDetail({
           )}
         </div>
 
-        <dl className="mt-4 grid grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 text-sm lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
+        <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 text-sm lg:grid-cols-[auto_1fr_auto_1fr_auto_1fr]">
           {task.source_issue_number !== null && (
             <Meta label="issue" value={`#${task.source_issue_number}`} />
           )}
@@ -487,7 +498,10 @@ function TabBar({
   counts: Record<TabKey, number | null>;
 }) {
   return (
-    <div role="tablist" className="flex gap-1 border-b border-border">
+    <div
+      role="tablist"
+      className="flex gap-1 overflow-x-auto border-b border-border"
+    >
       {(Object.keys(TAB_LABELS) as TabKey[]).map((key) => {
         const active = key === tab;
         return (

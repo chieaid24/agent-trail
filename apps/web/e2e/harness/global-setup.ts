@@ -61,6 +61,7 @@ export default async function globalSetup(): Promise<void> {
   const apiAddr = `127.0.0.1:${E2E.apiPort}`;
   const apiEnv = {
     API_ADDR: apiAddr,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "off",
     DATABASE_URL: databaseUrl,
     GITHUB_OAUTH_CLIENT_ID: "e2e-client-id",
     GITHUB_OAUTH_CLIENT_SECRET: "e2e-client-secret",
@@ -72,6 +73,7 @@ export default async function globalSetup(): Promise<void> {
   const api = spawnDaemon(apiBin, "api.log", apiEnv);
   const worker = spawnDaemon(path.join(binDir, "worker"), "worker.log", {
     DATABASE_URL: databaseUrl,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "off",
   });
 
   await waitFor("api readiness", 30_000, async () => {

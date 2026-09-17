@@ -301,3 +301,43 @@ func TestClaudeCodeRejectsBadWorkspace(t *testing.T) {
 		t.Fatal("missing workspace dir accepted")
 	}
 }
+
+func TestClaudeCodePreservesCostPresence(t *testing.T) {
+	requireSh(t)
+	for _, tc := range []struct {
+		name, cost string
+		reported   bool
+	}{
+		{"absent", "", false}, {"null", `,"total_cost_usd":null`, false}, {"zero", `,"total_cost_usd":0`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := `printf '%s\n' '{"type":"result","subtype":"success","result":"done"` + tc.cost + `}'`
+			sess, err := NewClaudeCode(ClaudeCodeOptions{CLIPath: stubCLI(t, stub)}).Start(t.Context(), Request{WorkspaceDir: t.TempDir(), Instructions: "x"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := drain(t, sess)
+			found := false
+			for _, event := range events {
+				if event.Type != EventCostUpdate {
+					continue
+				}
+				found = true
+				var payload map[string]any
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				value, reported := payload["total_cost_usd"]
+				if reported != tc.reported || (reported && value != float64(0)) {
+					t.Fatalf("cost payload = %s", event.Payload)
+				}
+			}
+			if !found {
+				t.Fatal("missing usage event")
+			}
+			if _, err := sess.Wait(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/github"
 	"github.com/chieaid24/agent-trail/apps/api/internal/httpapi"
+	"github.com/chieaid24/agent-trail/apps/api/internal/insights"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
@@ -80,7 +81,8 @@ func run() error {
 		apiOptions = append(apiOptions,
 			httpapi.WithDashboard(dashboard.NewStore(db)),
 			httpapi.WithConflicts(conflict.NewStore(db)),
-			httpapi.WithTraces(observability.NewTraceStore(db)))
+			httpapi.WithTraces(observability.NewTraceStore(db)),
+			httpapi.WithInsights(insights.NewStore(db)))
 	}
 
 	// refuse a half-configured session layer instead of silently serving without one
