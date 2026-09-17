@@ -41,12 +41,10 @@ The repository runner image supports the fake provider used by `scripts/verify-k
 - `apps/web/` - Next.js dashboard
 - `deploy/dev/` - compose configs for the local infrastructure
 - `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner)
-- `docs/` - architecture diagrams, benchmark results, and verification screenshots
+- `docs/` - benchmark plans and measured results
 
 ## Documentation
 
-- [docs/system-diagram.html](docs/system-diagram.html) - local system topology
-- [docs/system-diagram-aws.html](docs/system-diagram-aws.html) - production AWS topology and deployment requirements
 - [docs/testing/benchmarks.md](docs/testing/benchmarks.md) - benchmark and failure-injection plan
 - [docs/testing/benchmark-results.md](docs/testing/benchmark-results.md) - measured results
 
