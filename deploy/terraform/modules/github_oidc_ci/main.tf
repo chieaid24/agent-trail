@@ -86,7 +86,7 @@ data "aws_iam_policy_document" "ci" {
   statement {
     sid       = "PassTaskRoles"
     actions   = ["iam:PassRole"]
-    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.name}-control-plane*"]
+    resources = var.task_role_arns
 
     condition {
       test     = "StringEquals"

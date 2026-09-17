@@ -34,6 +34,11 @@ variable "ecs_service_name" {
   type        = string
 }
 
+variable "task_role_arns" {
+  description = "Execution and task roles CI may pass when registering task definitions."
+  type        = list(string)
+}
+
 variable "create_oidc_provider" {
   description = "Create the GitHub OIDC provider; false reuses an existing one in the account."
   type        = bool
