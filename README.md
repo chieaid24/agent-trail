@@ -15,7 +15,8 @@ make hooks    # activate the pre-commit hook (once per clone)
 ```
 
 `make dev` serves the API on :8080, the dashboard on :3000, and Grafana on
-http://127.0.0.1:3300. Log in to Grafana with `admin` / `admin`. See
+http://127.0.0.1:3300. Grafana grants anonymous Admin access on localhost; the
+built-in `admin` / `admin` account also authenticates HTTP API calls. See
 [.env.example](.env.example) for port settings and the [Makefile](Makefile) for
 available targets.
 
@@ -31,26 +32,29 @@ The Kubernetes check renders the production collector endpoint as `off` inside i
 
 ## Observability data
 
-The local Grafana LGTM service receives OpenTelemetry Protocol (OTLP) metrics
-and traces from the API and worker at `localhost:4317`. Open Grafana at
+The local `grafana/otel-lgtm` Compose service (Loki, Grafana, Tempo, and
+Prometheus) receives OpenTelemetry Protocol (OTLP) metrics and traces from the
+API and worker at `localhost:4317`. Open Grafana at
 http://127.0.0.1:3300, then use the Prometheus data source for
 `agent_trail_*` metrics and the Tempo data source for traces. Override the
 host ports with `GRAFANA_PORT`, `OTLP_GRPC_PORT`, and `OTLP_HTTP_PORT`; keep
 `OTEL_EXPORTER_OTLP_ENDPOINT` synchronized with `OTLP_GRPC_PORT`.
 
-Compose stores Prometheus and Tempo data in the `otel-lgtm-data` named volume,
-so `docker compose down` preserves it across container replacement. Run
-`make clean` to remove both the local PostgreSQL and LGTM volumes. The
-applications continue to write structured logs to stdout; they do not export
-application logs through OTLP.
+Compose mounts the `otel-lgtm-data` named volume at `/data`, where Grafana,
+Prometheus, Tempo, and Loki keep their state, so `docker compose down`
+preserves it across container replacement. Run `make clean` to remove both the
+local PostgreSQL and LGTM volumes. The applications write structured logs to
+stdout and do not export logs through OTLP.
 
-Run `make telemetry-smoke` to start an isolated Compose project on unused
-ports, execute a real fake-provider task, query one `agent_trail_*` metric and
-one worker trace through Grafana, restart LGTM, and query both signals again.
-The script writes the exact PromQL and TraceQL queries, service names, task
-result, API and worker logs, LGTM logs, and query responses under `artifacts/`.
-It appends a unique suffix to `COMPOSE_PROJECT_NAME` and removes that isolated
-project's PostgreSQL and LGTM volumes after the persistence check.
+Run `make telemetry-smoke` to start an isolated Compose project on free ports
+(exported port variables take precedence), run one task through the fake
+provider to `awaiting_review`, query one `agent_trail_*` metric and one worker
+trace through Grafana, replace the LGTM container, and query both signals
+again. The script writes the exact PromQL and TraceQL queries, service names,
+task result, API and worker logs, LGTM logs, and query responses under
+`artifacts/`. It appends a unique suffix to `COMPOSE_PROJECT_NAME` and removes
+that isolated project's PostgreSQL and LGTM volumes after the persistence
+check. It requires Docker, `curl`, and `openssl`.
 
 The worker also batches completed task-scoped spans into PostgreSQL for the
 dashboard. `GET /api/v1/tasks/{id}/trace` returns a `spans` array ordered by
