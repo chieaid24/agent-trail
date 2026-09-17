@@ -10,6 +10,7 @@ import type {
   StoredEvidence,
   Task,
   TaskConflict,
+  TaskInsights,
   TaskTrace,
   TaskStatus,
   ValidationResult,
@@ -145,6 +146,10 @@ export function getTask(taskId: string): Promise<Task> {
 
 export function getTaskTrace(taskId: string): Promise<TaskTrace> {
   return request<TaskTrace>(`/tasks/${encodeURIComponent(taskId)}/trace`);
+}
+
+export function getTaskInsights(taskId: string): Promise<TaskInsights> {
+  return request<TaskInsights>(`/tasks/${encodeURIComponent(taskId)}/insights`);
 }
 
 export function cancelTask(taskId: string, reason?: string): Promise<Task> {

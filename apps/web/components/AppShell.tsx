@@ -41,15 +41,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     },
   ];
   return (
-    <div className="flex min-h-screen">
-      <aside className="fixed inset-y-0 left-0 flex w-56 flex-col border-r border-border bg-surface px-4 py-6">
+    <div className="flex min-h-screen flex-col sm:flex-row">
+      <aside className="relative flex w-full flex-wrap items-center gap-3 border-b border-border bg-surface px-4 py-3 sm:fixed sm:inset-y-0 sm:left-0 sm:w-56 sm:flex-col sm:items-stretch sm:gap-0 sm:border-r sm:border-b-0 sm:py-6">
         <Link
           href="/"
           className="text-base font-semibold tracking-tight text-foreground"
         >
           Agent Trail
         </Link>
-        <nav aria-label="Primary" className="mt-8">
+        <nav
+          aria-label="Primary"
+          className="ml-auto flex gap-3 sm:mt-8 sm:ml-0 sm:block"
+        >
           {items.map((item) => (
             <Link
               key={item.href}
@@ -65,7 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
-        <div className="mt-auto">
+        <div className="w-full sm:mt-auto">
           {user === null ? (
             <p className="text-sm text-muted">local control plane</p>
           ) : (
@@ -73,7 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </div>
       </aside>
-      <main className="ml-56 min-w-0 flex-1">{children}</main>
+      <main className="min-w-0 flex-1 sm:ml-56">{children}</main>
     </div>
   );
 }
@@ -81,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 function UserChip({ user }: { user: CurrentUser }) {
   const [error, setError] = useState("");
   return (
-    <div>
+    <div className="flex flex-wrap items-center justify-between gap-2 sm:block">
       <div className="flex items-center gap-2">
         {user.avatar_url !== "" && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -112,7 +115,7 @@ function UserChip({ user }: { user: CurrentUser }) {
             );
           }
         }}
-        className="mt-2 text-sm text-muted hover:text-foreground"
+        className="text-sm text-muted hover:text-foreground sm:mt-2"
       >
         Sign out
       </button>

@@ -12,7 +12,9 @@ test("executed task shows timeline, logs, validations, evidence, files", async (
   await expect(
     page.getByRole("heading", { name: EXECUTED_TASK_TITLE }),
   ).toBeVisible();
-  await expect(page.getByText("completed", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("article > header").getByText("completed", { exact: true }),
+  ).toBeVisible();
 
   await expect(page.getByText("stream ended")).toBeVisible();
 
@@ -49,10 +51,16 @@ test("failed task surfaces its failure loudly", async ({ page }) => {
   const task = await apiTaskByTitle("Upgrade the TLS library");
   await page.goto(`/tasks/${task.id}`);
 
-  await expect(page.getByText("failed", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("article > header").getByText("failed", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByText(/2 of 148 tests failed after the upgrade/),
   ).toBeVisible();
-  await expect(page.getByText("validation_failed")).toBeVisible();
+  await expect(
+    page
+      .locator("article > header")
+      .getByText("validation_failed", { exact: false }),
+  ).toBeVisible();
   await shoot(page, "task-detail-failed");
 });

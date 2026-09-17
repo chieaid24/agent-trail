@@ -4,6 +4,7 @@ import {
   cancelTask,
   eventCursor,
   getEvidence,
+  getTaskInsights,
   getRepository,
   getRunner,
   listOrganizations,
@@ -92,6 +93,28 @@ describe("api client", () => {
 
     await expect(getRepository("r1")).resolves.toMatchObject({ id: "r1" });
     await expect(getRunner("w1")).resolves.toMatchObject({ id: "w1" });
+  });
+
+  it("loads task insights through the task read API", async () => {
+    const body = { task_id: "task-a", attempts: [] };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, body));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getTaskInsights("task/a")).resolves.toEqual(body);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/v1/tasks/task%2Fa/insights",
+      undefined,
+    );
+  });
+
+  it("surfaces an unknown insights task as 404", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse(404, { error: "task not found" })),
+    );
+    await expect(getTaskInsights("missing")).rejects.toMatchObject({
+      status: 404,
+      message: "task not found",
+    });
   });
 
   it("treats a missing evidence report as null, not an error", async () => {

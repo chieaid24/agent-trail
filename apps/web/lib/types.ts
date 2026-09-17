@@ -92,6 +92,57 @@ export interface TaskTrace {
   spans: TaskSpan[];
 }
 
+export type AttemptStatus =
+  "active" | "superseded" | "completed" | "failed" | "cancelled" | "timed_out";
+
+export interface ValidationSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  timed_out: number;
+  error: number;
+  trusted: number;
+}
+
+export interface CostSummary {
+  total_usd: number;
+  update_count: number;
+}
+
+// null durations mean a boundary was never recorded; the server never guesses
+export interface AttemptInsight {
+  attempt_id: string;
+  attempt_number: number;
+  status: AttemptStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  failure_code: string | null;
+  queue_wait_ms: number | null;
+  provisioning_ms: number | null;
+  agent_session_ms: number | null;
+  validation_ms: number | null;
+  publishing_ms: number | null;
+  total_runtime_ms: number | null;
+  event_count: number;
+  validation: ValidationSummary | null;
+  cost: CostSummary | null;
+}
+
+export interface OverallInsight {
+  attempt_count: number;
+  total_runtime_ms: number | null;
+  event_count: number;
+  validation: ValidationSummary | null;
+  cost: CostSummary | null;
+}
+
+export interface TaskInsights {
+  task_id: string;
+  task_status: TaskStatus;
+  overall: OverallInsight;
+  attempts: AttemptInsight[];
+}
+
 export type ValidationStatus = "passed" | "failed" | "timed_out" | "error";
 
 export type ValidationCategory =

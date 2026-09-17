@@ -15,7 +15,9 @@ test("a queued task cancels after inline confirmation", async ({ page }) => {
     "Stay queued so the cancellation flow can be exercised.",
   );
   await page.goto(`/tasks/${created.id}`);
-  await expect(page.getByText("queued", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("article header").getByText("queued", { exact: true }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Cancel task" }).click();
   await expect(page.getByText("Cancel this task?")).toBeVisible();
@@ -28,7 +30,9 @@ test("a queued task cancels after inline confirmation", async ({ page }) => {
   await page.getByLabel("Cancellation reason").fill("e2e cancellation drill");
   await page.getByRole("button", { name: "Confirm cancel" }).click();
 
-  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("article header").getByText("cancelled", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel task" })).toHaveCount(
     0,
   );
