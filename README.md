@@ -17,6 +17,16 @@ make hooks    # activate the pre-commit hook (once per clone)
 `make dev` serves the API on :8080 and the dashboard on :3000. See the
 [Makefile](Makefile) for every target and port.
 
+Run the offline infrastructure checks before opening a pull request:
+
+```bash
+bash scripts/gate.sh
+bash scripts/verify-production-telemetry.sh
+bash scripts/verify-k8s-runner.sh
+```
+
+The Kubernetes check renders the production collector endpoint as `off` inside its isolated kind cluster.
+
 ## Observability data
 
 The worker exports spans to the configured OpenTelemetry Protocol (OTLP) collector and batches completed task-scoped spans into PostgreSQL for the dashboard. `GET /api/v1/tasks/{id}/trace` returns a `spans` array ordered by start time, trace ID, and span ID. Each span includes its trace and parent identity, optional attempt ID, name, kind, start and end timestamps, attributes, and status. The dashboard polls this eventually consistent read model after a run ends and constructs the waterfall in the browser.
@@ -25,7 +35,7 @@ Production sends the same OTLP metrics and traces to CloudWatch without changing
 
 The Fargate task role grants `cloudwatch:PutMetricData` and `xray:PutTraceSegments`. ECS shares one task role across every container in a task, so the API container can technically use those actions even though the sidecar sends the telemetry. In EKS, only the `amazon-cloudwatch/cloudwatch-agent` ServiceAccount can assume the dedicated collector role. The pinned `amazon-cloudwatch-observability` add-on keeps Enhanced Container Insights, Application Signals, and container logging enabled while adding the OTLP gRPC and HTTP receivers.
 
-Terraform enables account- and Region-wide Transaction Search from the dev root, routes X-Ray segments to CloudWatch Logs, indexes 1 percent of spans, and sets 30-day retention on `aws/spans` and `/aws/application-signals/data`. The prod root shares that account-level configuration. Metrics retain their `agent_trail_*` names and bounded labels for PromQL in [CloudWatch Query Studio](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch-query-studio.html); traces retain their OpenTelemetry resource and span attributes for [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html).
+Terraform enables account- and Region-wide Transaction Search from the dev root, routes X-Ray segments to CloudWatch Logs, indexes 1 percent of spans, and sets 30-day retention on `aws/spans` and `/aws/application-signals/data`. Dev and prod must use the same AWS account and Region, and dev must be applied first because prod shares that account-level configuration. Metrics retain their `agent_trail_*` names and bounded labels for PromQL in [CloudWatch Query Studio](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-PromQL-QueryStudio.html); traces retain their OpenTelemetry resource and span attributes for [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html).
 
 CloudWatch charges OTLP metrics by ingested volume and stores them for up to 15 months; span costs include ingestion, CloudWatch Logs storage, and the configured Transaction Search indexing percentage. Container Insights, Application Signals, and container log ingestion add their own usage. Review the [CloudWatch pricing model](https://aws.amazon.com/cloudwatch/pricing/) before applying either environment. The application does not emit OTLP logs: ECS still sends structured stdout through `awslogs`, while the EKS add-on owns its container log path. The existing ALB, RDS, SQS queue-age, and dead-letter alarms remain because they measure infrastructure signals outside application telemetry.
 

@@ -318,8 +318,13 @@ resource "aws_ecs_task_definition" "this" {
       healthCheck = {
         command = [
           "CMD",
-          "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent",
-          "--version",
+          "/opt/aws/amazon-cloudwatch-agent/bin/config-translator",
+          "-output",
+          "/tmp/health.toml",
+          "-mode",
+          "auto",
+          "-os",
+          "linux",
         ]
         interval    = 15
         timeout     = 5

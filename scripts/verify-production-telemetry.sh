@@ -5,16 +5,16 @@ cd "$(dirname "$0")/.."
 
 CONFIG=deploy/terraform/modules/control_plane/cloudwatch-agent.json
 IMAGE="public.ecr.aws/cloudwatch-agent/cloudwatch-agent:1.300071.0b1720-amd64@sha256:f5680928b37cd5afacb5fd3de1b7ef7bfba57976f4f8b4227b49615467460cf2"
-TEMP_CONFIG=$(mktemp -t agent-trail-cloudwatch-agent-XXXXXX.json)
+VALIDATION_CONFIG=$(mktemp -t agent-trail-cloudwatch-agent-XXXXXX.json)
 CONTAINER="agent-trail-cloudwatch-agent-verify-$$"
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  rm -f "$TEMP_CONFIG"
+  rm -f "$VALIDATION_CONFIG"
 }
 trap cleanup EXIT
 
-python3 - "$CONFIG" "$TEMP_CONFIG" <<'PY'
+python3 - "$CONFIG" "$VALIDATION_CONFIG" <<'PY'
 import json
 import sys
 
@@ -37,7 +37,7 @@ PY
 
 docker run --rm --name "$CONTAINER" --platform linux/amd64 \
   --entrypoint /opt/aws/amazon-cloudwatch-agent/bin/config-translator \
-  --mount "type=bind,src=$TEMP_CONFIG,dst=/config/cloudwatch-agent.json,readonly" \
+  --mount "type=bind,src=$VALIDATION_CONFIG,dst=/config/cloudwatch-agent.json,readonly" \
   "$IMAGE" \
   -input /config/cloudwatch-agent.json \
   -output /tmp/cloudwatch-agent.toml \
@@ -45,8 +45,12 @@ docker run --rm --name "$CONTAINER" --platform linux/amd64 \
   -os linux
 
 docker run --rm --name "$CONTAINER" --platform linux/amd64 \
-  --entrypoint /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent \
+  --env CW_CONFIG_CONTENT="$(cat "$CONFIG")" \
+  --env AWS_REGION=us-east-1 \
+  --entrypoint /opt/aws/amazon-cloudwatch-agent/bin/config-translator \
   "$IMAGE" \
-  --version
+  -output /tmp/health.toml \
+  -mode auto \
+  -os linux
 
 printf 'PASS: CloudWatch agent accepted the production OTLP configuration\n'
