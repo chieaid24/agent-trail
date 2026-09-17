@@ -9,6 +9,29 @@ variable "alert_email" {
   default     = ""
 }
 
+variable "enable_transaction_search" {
+  description = "Whether this environment owns the account and Region Transaction Search configuration."
+  type        = bool
+  default     = false
+}
+
+variable "trace_retention_days" {
+  description = "Retention for Transaction Search and Application Signals span log groups."
+  type        = number
+  default     = 30
+}
+
+variable "trace_indexing_percentage" {
+  description = "Percentage of Transaction Search spans indexed as X-Ray trace summaries."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.trace_indexing_percentage >= 0 && var.trace_indexing_percentage <= 100
+    error_message = "trace_indexing_percentage must be between 0 and 100."
+  }
+}
+
 variable "alb_arn_suffix" {
   description = "ALB ARN suffix for HTTP metrics."
   type        = string

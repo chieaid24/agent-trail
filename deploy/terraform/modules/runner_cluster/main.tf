@@ -116,7 +116,73 @@ resource "aws_iam_openid_connect_provider" "this" {
 }
 
 locals {
-  oidc_hostpath = replace(aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")
+  oidc_hostpath              = replace(aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")
+  cloudwatch_namespace       = "amazon-cloudwatch"
+  cloudwatch_service_account = "cloudwatch-agent"
+  cloudwatch_otlp_endpoint   = "cloudwatch-agent-collector.${local.cloudwatch_namespace}.svc.cluster.local:4317"
+}
+
+data "aws_iam_policy_document" "cloudwatch_agent_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.this.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_hostpath}:sub"
+      values   = ["system:serviceaccount:${local.cloudwatch_namespace}:${local.cloudwatch_service_account}"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_hostpath}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cloudwatch_agent" {
+  name               = "${var.name}-cloudwatch-agent"
+  assume_role_policy = data.aws_iam_policy_document.cloudwatch_agent_assume.json
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
+  role       = aws_iam_role.cloudwatch_agent.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_eks_addon" "cloudwatch_observability" {
+  cluster_name             = aws_eks_cluster.this.name
+  addon_name               = "amazon-cloudwatch-observability"
+  addon_version            = var.cloudwatch_observability_addon_version
+  service_account_role_arn = aws_iam_role.cloudwatch_agent.arn
+
+  configuration_values = jsonencode({
+    applicationSignals = {
+      enabled = true
+    }
+    containerInsights = {
+      enabled = true
+    }
+    containerLogs = {
+      enabled = true
+    }
+    agent = {
+      config = "default:otel"
+    }
+  })
+
+  resolve_conflicts_on_update = "PRESERVE"
+
+  depends_on = [aws_iam_role_policy_attachment.cloudwatch_agent]
+
+  tags = var.tags
 }
 
 # job-create rbac lives in deploy/k8s manifests, not iam
