@@ -1,6 +1,8 @@
 locals {
-  container_name = "control-plane"
-  port_name      = "http"
+  container_name                  = "control-plane"
+  cloudwatch_agent_container_name = "cloudwatch-agent"
+  cloudwatch_agent_image          = "public.ecr.aws/cloudwatch-agent/cloudwatch-agent:1.300071.0b1720-arm64@sha256:b063fe88e714d31c6e4f2f0f217fc5fe328855ad314e453901d3f97398acb4b7"
+  port_name                       = "http"
   # Service Connect name; the dashboard proxies to http://control-plane:<container_port>
   discovery_name = "control-plane"
 }
@@ -178,6 +180,15 @@ data "aws_iam_policy_document" "task" {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = var.secret_arns
   }
+
+  statement {
+    sid = "PublishOTLPTelemetry"
+    actions = [
+      "cloudwatch:PutMetricData",
+      "xray:PutTraceSegments",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "task" {
@@ -234,7 +245,9 @@ resource "aws_ecs_task_definition" "this" {
       ]
 
       environment = [
-        for k, v in var.environment : { name = k, value = v }
+        for k, v in merge(var.environment, {
+          OTEL_EXPORTER_OTLP_ENDPOINT = "localhost:4317"
+        }) : { name = k, value = v }
       ]
 
       secrets = [
@@ -242,6 +255,13 @@ resource "aws_ecs_task_definition" "this" {
       ]
 
       readonlyRootFilesystem = true
+
+      dependsOn = [
+        {
+          containerName = local.cloudwatch_agent_container_name
+          condition     = "HEALTHY"
+        }
+      ]
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -258,6 +278,53 @@ resource "aws_ecs_task_definition" "this" {
         timeout     = 5
         retries     = 3
         startPeriod = 15
+      }
+    },
+    {
+      name              = local.cloudwatch_agent_container_name
+      image             = local.cloudwatch_agent_image
+      essential         = true
+      cpu               = 128
+      memory            = 512
+      memoryReservation = 256
+
+      environment = [
+        {
+          name  = "CW_CONFIG_CONTENT"
+          value = file("${path.module}/cloudwatch-agent.json")
+        }
+      ]
+
+      portMappings = [
+        {
+          containerPort = 4317
+          protocol      = "tcp"
+        },
+        {
+          containerPort = 4318
+          protocol      = "tcp"
+        }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.this.name
+          "awslogs-region"        = data.aws_region.current.region
+          "awslogs-stream-prefix" = "cloudwatch-agent"
+        }
+      }
+
+      healthCheck = {
+        command = [
+          "CMD",
+          "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent",
+          "--version",
+        ]
+        interval    = 15
+        timeout     = 5
+        retries     = 3
+        startPeriod = 20
       }
     }
   ])
