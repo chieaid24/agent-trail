@@ -14,12 +14,36 @@ make test     # unit tests for both apps
 make hooks    # activate the pre-commit hook (once per clone)
 ```
 
-`make dev` serves the API on :8080 and the dashboard on :3000. See the
+`make dev` serves the API on :8080, the dashboard on :3000, and Grafana on
+http://127.0.0.1:3300. Log in to Grafana with `admin` / `admin`. See the
 [Makefile](Makefile) for every target and port.
 
 ## Observability data
 
-The worker exports spans to the configured OpenTelemetry Protocol (OTLP) collector and batches completed task-scoped spans into PostgreSQL for the dashboard. `GET /api/v1/tasks/{id}/trace` returns a `spans` array ordered by start time, trace ID, and span ID. Each span includes its trace and parent identity, optional attempt ID, name, kind, start and end timestamps, attributes, and status. The dashboard polls this eventually consistent read model after a run ends and constructs the waterfall in the browser.
+The local Grafana LGTM service receives OpenTelemetry Protocol (OTLP) metrics
+and traces from the API and worker at `localhost:4317`. Open Grafana at
+http://127.0.0.1:3300, then use the Prometheus data source for
+`agent_trail_*` metrics and the Tempo data source for traces. Override the
+host ports with `GRAFANA_PORT`, `OTLP_GRPC_PORT`, and `OTLP_HTTP_PORT`; keep
+`OTEL_EXPORTER_OTLP_ENDPOINT` synchronized with `OTLP_GRPC_PORT`.
+
+Compose stores Prometheus and Tempo data in the `otel-lgtm-data` named volume,
+so `docker compose down` preserves it across container replacement. Run
+`make clean` to remove the volume. The applications continue to write
+structured logs to stdout; they do not export application logs through OTLP.
+
+Run `make telemetry-smoke` to start an isolated Compose project on unused
+ports, execute a real fake-provider task, query one `agent_trail_*` metric and
+one worker trace through Grafana, restart LGTM, and query both signals again.
+The script writes the exact PromQL and TraceQL queries, service names, task
+result, API and worker logs, LGTM logs, and query responses under `artifacts/`.
+
+The worker also batches completed task-scoped spans into PostgreSQL for the
+dashboard. `GET /api/v1/tasks/{id}/trace` returns a `spans` array ordered by
+start time, trace ID, and span ID. Each span includes its trace and parent
+identity, optional attempt ID, name, kind, start and end timestamps,
+attributes, and status. The dashboard polls this eventually consistent read
+model after a run ends and constructs the waterfall in the browser.
 
 The task header derives its cost total and per-attempt breakdown from `agent.cost_update` events delivered over SSE. A `total_cost_usd` value replaces the current attempt total, a `cost_usd` value increments it, and the header sums attempt totals. Tasks without a valid cost event show `not reported`.
 
@@ -39,8 +63,8 @@ The repository runner image supports the fake provider used by `scripts/verify-k
 
 - `apps/api/` - Go control plane: `api` (HTTP), `worker` (process runner or Kubernetes controller), `migrate` (goose)
 - `apps/web/` - Next.js dashboard
-- `deploy/dev/` - compose configs for the local infrastructure
-- `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner)
+- `deploy/dev/` - local infrastructure support files
+- `scripts/` - CI, app runner, benchmark, and telemetry verification scripts
 - `docs/` - benchmark plans and measured results
 
 ## Documentation
