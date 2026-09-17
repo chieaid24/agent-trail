@@ -1,0 +1,13 @@
+{
+  "agent": {
+    "logfile": ""
+  },
+  "opentelemetry": {
+    "collect": {
+      "otlp": {
+        "grpc_endpoint": "0.0.0.0:4317",
+        "http_endpoint": "0.0.0.0:4318"
+      }
+    }
+  }
+}

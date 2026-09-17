@@ -172,8 +172,8 @@ func TestControllerManifestRenders(t *testing.T) {
 		"AGENT_CLI_PATH": "claude", "AGENT_MODEL": "fake-model",
 		"AGENT_PERMISSION_MODE": "acceptEdits", "AGENT_CLI_VERSION": "unused",
 		"CONFLICT_LLM_ENABLED": "false", "CONFLICT_LLM_PROVIDER": "fake",
-		"CONFLICT_LLM_MODEL":          "claude-sonnet-4-6",
-		"OTEL_EXPORTER_OTLP_ENDPOINT": "off", "GITHUB_API_BASE_URL": "http://fixture:8080",
+		"CONFLICT_LLM_MODEL":  "claude-sonnet-4-6",
+		"GITHUB_API_BASE_URL": "http://fixture:8080",
 	} {
 		rendered = strings.ReplaceAll(rendered, "${"+key+"}", value)
 	}
@@ -193,6 +193,13 @@ func TestControllerManifestRenders(t *testing.T) {
 		pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
 		t.Errorf("controller identity = %q/%v", pod.ServiceAccountName,
 			pod.AutomountServiceAccountToken)
+	}
+	env := map[string]string{}
+	for _, item := range pod.Containers[0].Env {
+		env[item.Name] = item.Value
+	}
+	if got := env["OTEL_EXPORTER_OTLP_ENDPOINT"]; got != "cloudwatch-agent-collector.amazon-cloudwatch.svc.cluster.local:4317" {
+		t.Errorf("controller OTLP endpoint = %q", got)
 	}
 }
 
@@ -219,6 +226,21 @@ func TestNetworkPolicyRestrictsControllerToAPICIDR(t *testing.T) {
 		policy.Spec.Egress[0].To[0].IPBlock == nil ||
 		policy.Spec.Egress[0].To[0].IPBlock.CIDR != "10.96.0.1/32" {
 		t.Errorf("controller API egress = %+v", policy.Spec.Egress)
+	}
+	otlp := policies["allow-cloudwatch-otlp"]
+	if len(otlp.Spec.Egress) != 1 || len(otlp.Spec.Egress[0].To) != 1 ||
+		len(otlp.Spec.Egress[0].Ports) != 1 ||
+		otlp.Spec.Egress[0].Ports[0].Port == nil ||
+		otlp.Spec.Egress[0].Ports[0].Port.IntVal != 4317 {
+		t.Errorf("OTLP egress = %+v", otlp.Spec.Egress)
+	}
+	peer := otlp.Spec.Egress[0].To[0]
+	if peer.NamespaceSelector == nil ||
+		peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "amazon-cloudwatch" ||
+		peer.PodSelector == nil ||
+		peer.PodSelector.MatchLabels["app.kubernetes.io/name"] != "cloudwatch-agent" ||
+		peer.PodSelector.MatchLabels["app.kubernetes.io/component"] != "amazon-cloudwatch-agent" {
+		t.Errorf("OTLP peer = %+v", peer)
 	}
 }
 

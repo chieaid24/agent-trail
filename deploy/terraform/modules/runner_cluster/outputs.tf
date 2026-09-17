@@ -27,3 +27,13 @@ output "runner_namespace" {
   description = "Namespace runner Jobs execute in."
   value       = var.runner_namespace
 }
+
+output "cloudwatch_agent_role_arn" {
+  description = "IAM role assumed only by the CloudWatch agent service account."
+  value       = aws_iam_role.cloudwatch_agent.arn
+}
+
+output "cloudwatch_otlp_endpoint" {
+  description = "In-cluster OTLP gRPC endpoint for runner telemetry."
+  value       = local.cloudwatch_otlp_endpoint
+}

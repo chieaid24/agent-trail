@@ -136,8 +136,9 @@ module "runner_cluster" {
 module "observability" {
   source = "../../modules/observability"
 
-  name        = local.name
-  alert_email = var.alert_email
+  name                      = local.name
+  alert_email               = var.alert_email
+  enable_transaction_search = true
 
   alb_arn_suffix           = module.control_plane.alb_arn_suffix
   target_group_arn_suffix  = module.control_plane.target_group_arn_suffix

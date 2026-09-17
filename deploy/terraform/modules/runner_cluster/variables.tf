@@ -14,6 +14,12 @@ variable "kubernetes_version" {
   default     = "1.33"
 }
 
+variable "cloudwatch_observability_addon_version" {
+  description = "Pinned Amazon CloudWatch Observability EKS add-on version."
+  type        = string
+  default     = "v6.6.0-eksbuild.1"
+}
+
 variable "node_instance_types" {
   description = "Instance types for the runner node group."
   type        = list(string)
