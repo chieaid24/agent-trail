@@ -174,14 +174,44 @@ func RunCommandRequest(secret []byte, installationID, repositoryID, issueNumber 
 			"title":  "Record the run in the fixture file",
 			"body":   "Scripted issue driving the full vertical slice.",
 		},
-		"repository": map[string]any{
-			"id": repositoryID,
-			"owner": map[string]any{
-				"id": installationID, "login": "acme", "type": "Organization",
-			},
-		},
+		"repository":   fixtureRepository(installationID, repositoryID),
 		"installation": map[string]any{"id": installationID},
 	}
+	return signedRequest(secret, "issue_comment", payload)
+}
+
+// closed delivery for a pull request whose head branch was pushed to the fixture repository
+func PullRequestClosedRequest(secret []byte, installationID, repositoryID, number int, headRef string, merged bool) (*http.Request, error) {
+	payload := map[string]any{
+		"action": "closed",
+		"number": number,
+		"pull_request": map[string]any{
+			"number": number,
+			"state":  "closed",
+			"merged": merged,
+			"head": map[string]any{
+				"ref":  headRef,
+				"repo": map[string]any{"id": repositoryID},
+			},
+			"base": map[string]any{"ref": "main"},
+		},
+		"repository":   fixtureRepository(installationID, repositoryID),
+		"installation": map[string]any{"id": installationID},
+	}
+	return signedRequest(secret, "pull_request", payload)
+}
+
+func fixtureRepository(installationID, repositoryID int) map[string]any {
+	return map[string]any{
+		"id":        repositoryID,
+		"full_name": "acme/fixture",
+		"owner": map[string]any{
+			"id": installationID, "login": "acme", "type": "Organization",
+		},
+	}
+}
+
+func signedRequest(secret []byte, event string, payload map[string]any) (*http.Request, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -195,7 +225,7 @@ func RunCommandRequest(secret []byte, installationID, repositoryID, issueNumber 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Event", "issue_comment")
+	req.Header.Set("X-GitHub-Event", event)
 	req.Header.Set("X-GitHub-Delivery", fmt.Sprintf("fixture-%d", time.Now().UnixNano()))
 	req.Header.Set("X-Hub-Signature-256", sig)
 	return req, nil

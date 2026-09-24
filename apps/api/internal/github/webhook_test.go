@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/dbtest"
+	"github.com/chieaid24/agent-trail/apps/api/internal/githubfixture"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
@@ -208,5 +209,76 @@ func TestWebhookIssueCommentCreatesTask(t *testing.T) {
 		WHERE github_delivery_id = 'd-e2e-comment'`).Scan(&status)
 	if err != nil || status != "processed" {
 		t.Fatalf("comment delivery status = %q err = %v", status, err)
+	}
+}
+
+func TestWebhookPullRequestMergedCompletesTask(t *testing.T) {
+	db := dbtest.Open(t)
+	store := NewStore(db)
+	tasks := task.NewStore(db)
+	api := &fakeAPI{
+		repos:      []Repository{testRepo(501, "acme/service")},
+		permission: "write",
+		headSHA:    "0123456789012345678901234567890123456789",
+	}
+	proc := NewProcessor(store, tasks, api, testLogger(), observability.NewRegistry())
+	h := NewWebhook(testSecret, store, proc, testLogger(), observability.NewRegistry())
+	deliver := func(req *http.Request) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("delivery: status %d body %s", rec.Code, rec.Body.String())
+		}
+		proc.Wait()
+	}
+
+	install := installationJSON(t, "created")
+	deliver(webhookRequest(install, "d-pr-install", "installation", sign(testSecret, install)))
+	run, err := githubfixture.RunCommandRequest(testSecret, 999, 501, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliver(run)
+
+	ctx := context.Background()
+	repo, err := store.RepositoryByGitHubID(ctx, 501)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, active, err := tasks.ActiveTaskForIssue(ctx, repo.ID, 15)
+	if err != nil || !active {
+		t.Fatalf("task not created: active=%v err=%v", active, err)
+	}
+	if _, _, err := tasks.EnsureGitContext(ctx, created.ID, strings.Repeat("a", 40), reviewBranch); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning,
+		task.StatusExecuting, task.StatusValidating, task.StatusPublishing,
+		task.StatusAwaitingReview} {
+		if _, err := tasks.Transition(ctx, created.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+
+	closed, err := githubfixture.PullRequestClosedRequest(testSecret, 999, 501, 12, reviewBranch, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliver(closed)
+
+	final, err := tasks.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != task.StatusCompleted {
+		t.Fatalf("task = %s, want completed", final.Status)
+	}
+	var status string
+	err = db.QueryRow(`
+		SELECT processing_status FROM github_webhook_deliveries
+		WHERE event_type = 'pull_request'`).Scan(&status)
+	if err != nil || status != "processed" {
+		t.Fatalf("pull_request delivery status = %q err = %v", status, err)
 	}
 }
