@@ -62,6 +62,80 @@ make test     # unit tests for both apps
 http://127.0.0.1:3300.
 
 
+## Production Deployment
+
+Terraform (`deploy/terraform/envs/prod`) creates the network, RDS instance,
+ECR repositories, both Fargate services, the EKS runner cluster, and
+CloudWatch monitoring. You push the images, store the secrets, run
+migrations, and apply the runner manifests yourself. You need an AWS account
+with a Route 53 hosted zone for your domain, an S3 bucket for Terraform
+state, Terraform 1.9+, Docker with `buildx`, `aws`, and `kubectl`. Apply
+`envs/dev` first: it creates the account-wide GitHub OIDC provider and
+CloudWatch Transaction Search that `envs/prod` reuses. Run every command
+below from the repository root.
+
+1. Write `prod.tfvars` with `zone_name`, `domain_name`, `control_plane_image`,
+   `dashboard_image`, and optionally `alert_email`, then create the ECR
+   repositories and the empty Secrets Manager entries:
+
+   ```bash
+   terraform -chdir=deploy/terraform/envs/prod init -backend-config="bucket=<state-bucket>" -backend-config="key=prod.tfstate" -backend-config="region=us-east-1"
+   terraform -chdir=deploy/terraform/envs/prod apply -target=module.container_registry -target=module.secrets -var-file=prod.tfvars
+   ```
+
+2. Build and push the three images for ARM64 (Fargate and the runner nodes
+   both run Graviton), tagged with the commit SHA. `control_plane_image` and
+   `dashboard_image` are the `control-plane` and `web` URLs:
+
+   ```bash
+   REGISTRY=<account-id>.dkr.ecr.us-east-1.amazonaws.com
+   aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+   for target in control-plane web runner; do
+     IMAGE="$REGISTRY/agent-trail-prod/$target:$(git rev-parse HEAD)"
+     docker build --platform linux/arm64 -f deploy/docker/Dockerfile --target "$target" -t "$IMAGE" .
+     docker push "$IMAGE"
+   done
+   ```
+
+3. Store the secret values Terraform deliberately leaves empty, then apply the
+   rest of the environment:
+
+   ```bash
+   aws secretsmanager put-secret-value --secret-id agent-trail-prod/github-webhook-secret --secret-string "$(openssl rand -hex 32)"
+   terraform -chdir=deploy/terraform/envs/prod apply -var-file=prod.tfvars
+   ```
+
+   Repeat `put-secret-value` for `github-app-private-key` (the App's PEM),
+   `agent-provider-api-key`, and `dashboard-auth-secret`.
+
+4. Run migrations from a host inside the VPC with the `tools` image and the
+   RDS master credentials Terraform stored in Secrets Manager:
+
+   ```bash
+   docker build -f deploy/docker/Dockerfile --target tools -t agent-trail-tools .
+   docker run --rm -e DATABASE_URL="postgres://..." agent-trail-tools up
+   ```
+
+5. Start the runner controller on the EKS cluster: apply
+   `deploy/k8s/runner/namespace.yaml` and `serviceaccount.yaml`, create the
+   `runner-database`, `runner-github`, and `runner-agent` Secrets in
+   `agent-trail-runners`, then render and apply `networkpolicy.yaml` and
+   `controller.yaml` with `RUNNER_IMAGE` set to the `runner` image you
+   pushed. `scripts/verify-k8s-runner.sh` lists every placeholder and Secret
+   key the manifests take.
+
+   ```bash
+   aws eks update-kubeconfig --name "$(terraform -chdir=deploy/terraform/envs/prod output -raw runner_cluster_name)"
+   kubectl apply -f deploy/k8s/runner/namespace.yaml -f deploy/k8s/runner/serviceaccount.yaml
+   ```
+
+6. Register a GitHub App with the webhook URL
+   `https://<domain_name>/webhooks/github`, the webhook secret you stored
+   above, and a subscription to issue comment events. Install it on the
+   repositories agents should work in, then comment `/agent-trail run` on an
+   issue. The dashboard is at `https://<domain_name>`.
+
+
 ## Layout
 
 - `apps/api/` - Go control plane: `api` (HTTP), `worker` (process runner or Kubernetes controller), `migrate` (goose)
