@@ -31,7 +31,7 @@ func SanitizeBranch(raw string) (string, error) {
 	return BranchPrefix + slug, nil
 }
 
-// push guard: a hand-built branch cannot bypass SanitizeBranch and escape the namespace
-func validBranch(name string) bool {
+// namespace guard for pushes and pull request lookups; a hand-built branch cannot bypass SanitizeBranch
+func ValidBranch(name string) bool {
 	return safeBranch.MatchString(name)
 }

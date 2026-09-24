@@ -96,7 +96,7 @@ func (m *Manager) CleanupStale(ctx context.Context, repo RepoRef, attemptID, bra
 
 	_, _ = m.git.run(ctx, mirror, "worktree", "remove", "--force", path)
 	removeErr := os.RemoveAll(path)
-	if validBranch(branch) {
+	if ValidBranch(branch) {
 		_, _ = m.git.run(ctx, mirror, "branch", "-D", branch)
 	}
 	_, pruneErr := m.git.run(ctx, mirror, "worktree", "prune")
