@@ -39,7 +39,7 @@ Recovery is lease-driven. Expiry, not runner status, makes an attempt claimable 
 | Go | 1.26.5 | Language for `api`, `worker`, `migrate`, `seed`, `slice`, `fixture-github` | API, Worker, runner-controller, Job pod |
 | `api` binary | - | Webhook receiver, `/api/v1` REST, SSE stream, OAuth, `/metrics`, `/healthz`, `/readyz`; hosts the webhook processor goroutine | API control-plane :8080 |
 | `worker` binary | - | Process runner (`RUNNER_TYPE=process`) or Kubernetes controller (`RUNNER_TYPE=kubernetes`); same binary runs inside each Job with `TASK_ATTEMPT_ID` | Worker, runner-controller, Hardened Job pod |
-| goose | v3.27.3 | Embedded SQL migrations `00001_init` through `00009_task_spans` | RDS PostgreSQL (schema) |
+| goose | v3.27.3 | Embedded SQL migrations `00001_init` through `00010_task_branch_lookup` | RDS PostgreSQL (schema) |
 | ECS Fargate | Terraform `control_plane` | Runs the `api` container, ARM64, deployment circuit breaker with rollback; prod: 2 tasks at 1024 CPU / 2048 MiB | ECS Fargate group |
 | Next.js | 16.2.12 | Dashboard: `/`, `/tasks/[id]`, `/repositories/[id]`, `/runners/[id]`, `/installations`, `/login`; proxies `/backend/*` to the API | Dashboard (Next.js) |
 | React | 19.2.8 | Dashboard UI runtime | Dashboard (Next.js) |
