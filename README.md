@@ -84,7 +84,8 @@ for Terraform state.
    `deploy/k8s/runner/` to the EKS cluster with `RUNNER_IMAGE` set to the
    runner image.
 4. Register a GitHub App pointing at `https://<domain>/webhooks/github`,
-   install it on a repository, and comment `/agent-trail run` on an issue.
+   subscribed to the `issue_comment` and `pull_request` events, install it
+   on a repository, and comment `/agent-trail run` on an issue.
 
 
 ## Layout
