@@ -277,7 +277,8 @@ func TestWebhookPullRequestMergedCompletesTask(t *testing.T) {
 	var status string
 	err = db.QueryRow(`
 		SELECT processing_status FROM github_webhook_deliveries
-		WHERE event_type = 'pull_request'`).Scan(&status)
+		WHERE github_delivery_id = $1`,
+		closed.Header.Get("X-GitHub-Delivery")).Scan(&status)
 	if err != nil || status != "processed" {
 		t.Fatalf("pull_request delivery status = %q err = %v", status, err)
 	}
