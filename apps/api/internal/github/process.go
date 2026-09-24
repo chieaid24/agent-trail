@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
@@ -32,6 +33,8 @@ type Delivery struct {
 type TaskService interface {
 	Create(ctx context.Context, p task.CreateParams) (task.Task, error)
 	ActiveTaskForIssue(ctx context.Context, repositoryID string, issueNumber int64) (task.Task, bool, error)
+	TaskForBranch(ctx context.Context, repositoryID, workingBranch string) (task.Task, bool, error)
+	Transition(ctx context.Context, id string, p task.TransitionParams) (task.Task, error)
 	AppendEvent(ctx context.Context, taskID, eventType, source string, payload map[string]string) error
 }
 
@@ -139,6 +142,8 @@ func (p *Processor) handle(ctx context.Context, d Delivery, payload []byte) (str
 		return p.handleInstallationRepositories(ctx, payload)
 	case "issue_comment":
 		return p.handleIssueComment(ctx, d, payload)
+	case "pull_request":
+		return p.handlePullRequest(ctx, d, payload)
 	default:
 		return "ignored", nil
 	}
@@ -383,6 +388,100 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 			"kind": "task_ack", "issue": strconv.FormatInt(ev.Issue.Number, 10),
 		})
 	}
+	return "processed", nil
+}
+
+type pullRequestPayload struct {
+	Action      string `json:"action"`
+	PullRequest struct {
+		Number int64 `json:"number"`
+		Merged bool  `json:"merged"`
+		Head   struct {
+			Ref  string `json:"ref"`
+			Repo *struct {
+				ID int64 `json:"id"`
+			} `json:"repo"` // null once a fork is deleted
+		} `json:"head"`
+	} `json:"pull_request"`
+	Repository struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+}
+
+// merged -> completed, closed unmerged -> cancelled; only review-phase tasks move
+func (p *Processor) handlePullRequest(ctx context.Context, d Delivery, payload []byte) (string, error) {
+	var ev pullRequestPayload
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		return "", fmt.Errorf("parse pull_request payload: %w", err)
+	}
+	if ev.Action != "closed" {
+		return "ignored", nil
+	}
+	number := ev.PullRequest.Number
+	if number <= 0 || ev.Repository.ID == 0 {
+		return "", errors.New("pull_request payload without number or repository id")
+	}
+	branch := ev.PullRequest.Head.Ref
+	// a fork can name any branch, so only heads pushed to this repository map to tasks
+	if !gitworkspace.ValidBranch(branch) || ev.PullRequest.Head.Repo == nil ||
+		ev.PullRequest.Head.Repo.ID != ev.Repository.ID {
+		return "ignored", nil
+	}
+	repo, err := p.store.RepositoryByGitHubID(ctx, ev.Repository.ID)
+	if errors.Is(err, ErrRepositoryNotFound) {
+		return "ignored", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	t, found, err := p.tasks.TaskForBranch(ctx, repo.ID, branch)
+	if err != nil {
+		return "", err
+	}
+	if !found || t.Status.Terminal() {
+		return "ignored", nil
+	}
+	logInfo := func(msg, event string, status task.Status) {
+		p.logger.LogAttrs(ctx, slog.LevelInfo, msg,
+			slog.String("event", event),
+			slog.String("trace_id", d.TraceID),
+			slog.String("delivery_id", d.ID),
+			slog.String("task_id", t.ID),
+			slog.String("repository", repo.FullName),
+			slog.Int64("pull_request", number),
+			slog.Bool("merged", ev.PullRequest.Merged),
+			slog.String("status", string(status)),
+		)
+	}
+	if t.Phase != task.PhaseReview {
+		logInfo("pull request closed before task reached review",
+			"github_pull_request_closed_ignored", t.Status)
+		return "ignored", nil
+	}
+
+	params := task.TransitionParams{
+		To:             task.StatusCompleted,
+		Source:         "system",
+		Reason:         fmt.Sprintf("pull request #%d merged", number),
+		IdempotencyKey: fmt.Sprintf("pull_request:%d:closed", number),
+	}
+	if !ev.PullRequest.Merged {
+		params.To = task.StatusCancelled
+		params.Reason = fmt.Sprintf("pull request #%d closed without merge", number)
+	}
+	next, err := p.tasks.Transition(ctx, t.ID, params)
+	var invalid *task.InvalidTransitionError
+	if errors.As(err, &invalid) {
+		// task left review between the lookup and the row lock
+		logInfo("pull request closed after task left review",
+			"github_pull_request_closed_ignored", invalid.From)
+		return "ignored", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("finalize task %s: %w", t.ID, err)
+	}
+	logInfo("task finalized from pull request", "github_task_finalized", next.Status)
 	return "processed", nil
 }
 
