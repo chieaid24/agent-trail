@@ -451,7 +451,7 @@ func (p *Processor) handlePullRequest(ctx context.Context, d Delivery, payload [
 			slog.String("repository", repo.FullName),
 			slog.Int64("pull_request", number),
 			slog.Bool("merged", ev.PullRequest.Merged),
-			slog.String("status", string(status)),
+			slog.String("task_status", string(status)),
 		)
 	}
 	if t.Phase != task.PhaseReview {
