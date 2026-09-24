@@ -1,6 +1,6 @@
 # Agent Trail - Architecture Overview
 
-Agent Trail turns a GitHub issue comment into an evidence-backed draft pull request. A signed webhook creates a durable task, a worker claims it from a PostgreSQL queue, a coding agent runs in an isolated Git worktree, the platform validates the result outside the agent's session, and a draft PR opens with an evidence report and a check run. A human merges.
+Agent Trail turns a GitHub issue comment into an evidence-backed draft pull request. A signed webhook creates a durable task, a worker claims it from a PostgreSQL queue, a coding agent runs in an isolated Git worktree, the platform validates the result outside the agent's session, and a draft PR opens with an evidence report and a check run. A human reviews: merging the pull request completes the task, closing it without merge cancels the task.
 
 This file pairs with the two HTML diagrams in `docs/`: `system-diagram.html` (local development topology) and `system-diagram-aws.html` (production topology on AWS). Diagram node names below match the box titles in those files.
 
@@ -16,7 +16,7 @@ Each step names the diagram node it runs in and the durable record it leaves beh
 6. **Planning and executing** - the agent adapter (`fake` or `claude-code`) streams normalized events (`agent.started`, `plan.created`, `command.*`, `file.changed`, `agent.cost_update`, ...) into `activity_events`. The executor extends the lease throughout and stops on `ErrLeaseLost` rather than racing a new owner. Node: Agent adapter -> Anthropic API. Record: `activity_events`.
 7. **Validating** - after the agent session ends, the platform runs the checks declared in the repository's `.agent-trail/validation.yaml` as argv arrays with no shell, bounded at 20 checks, 300 s per check by default, 3600 s total. Each check lands in `validation_results` with `trusted_execution = true`. The evidence generator then writes one `evidence_reports` row per attempt. Node: Trusted validation -> Evidence report. Records: `validation_results`, `evidence_reports`.
 8. **Publishing** - the worker commits, pushes the branch, runs conflict detection against sibling tasks (file overlap, adjacent lines, merge conflict, migration, dependency, and semantic via the Anthropic Messages API), then creates or updates a draft PR whose body is the evidence report, upserts the check run `Agent Trail Task` keyed by attempt id, and comments the PR link on the issue. Conflict detection failure never blocks publishing. Node: Hardened Job pod -> NAT Gateway -> GitHub. Records: `task_conflicts`, `task_attempts.pull_request_number`.
-9. **Awaiting review** - the task rests at `awaiting_review` until a human merges. Throughout, the dashboard streams `activity_events` over Server-Sent Events (1 s poll, `Last-Event-ID` cursor, 15 s heartbeat) and, after the run, polls `GET /api/v1/tasks/{id}/trace` to build the waterfall from `task_spans`. Node: Reviewer -> Dashboard -> API.
+9. **Review and completion** - the task rests at `awaiting_review` until its draft pull request closes. GitHub delivers `pull_request` with action `closed`; the processor maps the head branch (`agent-trail/...`, pushed to the same repository) to the task and, if it is in the review phase, transitions it to `completed` on merge or `cancelled` on close without merge, recording a `system` event that names the pull request. A pull request closed while the task is still running leaves it untouched, and a redelivered event is a no-op through the transition idempotency key. Throughout, the dashboard streams `activity_events` over Server-Sent Events (1 s poll, `Last-Event-ID` cursor, 15 s heartbeat) and, after the run, polls `GET /api/v1/tasks/{id}/trace` to build the waterfall from `task_spans`. Node: Reviewer -> GitHub (App) -> API -> RDS. Records: `tasks.status`, `activity_events`.
 
 Recovery is lease-driven. Expiry, not runner status, makes an attempt claimable again; a heartbeat reaper marks silent runners `lost`; a recovered attempt reattaches a surviving worktree, otherwise republishes from the pushed branch, otherwise fails as `workspace_lost`.
 
@@ -26,7 +26,7 @@ Recovery is lease-driven. Expiry, not runner status, makes an attempt claimable 
 
 | Technology | Version | Role | Diagram node |
 |---|---|---|---|
-| GitHub App | - | Webhook source (`installation`, `installation_repositories`, `issue_comment`), REST client for tokens, permissions, comments, PRs, check runs | GitHub (App) |
+| GitHub App | - | Webhook source (`installation`, `installation_repositories`, `issue_comment`, `pull_request`), REST client for tokens, permissions, comments, PRs, check runs | GitHub (App) |
 | GitHub OAuth | - | Dashboard login; session token stored as SHA-256 only | GitHub (App) -> API |
 | smee.io | - | Local-only webhook tunnel to `localhost:8080` | smee.io tunnel (local diagram only) |
 | Route53 + ACM | Terraform `dns_tls` | Hosted zone, alias record, TLS certificate | Route53 + ACM |
