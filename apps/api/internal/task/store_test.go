@@ -534,3 +534,97 @@ func TestEnsureGitContextUnknownTask(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func createRepository(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	ctx := context.Background()
+	var orgID string
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO organizations (name, slug, github_account_id,
+			github_account_login, github_account_type)
+		VALUES ('Test Org', 'test-org', 1, 'test-org', 'Organization')
+		RETURNING id`).Scan(&orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var repoID string
+	err = db.QueryRowContext(ctx, `
+		INSERT INTO repositories (organization_id, github_repository_id,
+			owner, name, full_name, clone_url)
+		VALUES ($1, 1, 'test-org', 'fixture', 'test-org/fixture',
+			'https://example.com/test-org/fixture.git')
+		RETURNING id`, orgID).Scan(&repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repoID
+}
+
+func createBranchTask(t *testing.T, s *Store, repoID, branch string) Task {
+	t.Helper()
+	tk, err := s.Create(context.Background(), CreateParams{
+		Title: "branch task", Instructions: "do the thing", RepositoryID: &repoID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("a", 40)
+	if _, _, err := s.EnsureGitContext(context.Background(), tk.ID, sha, branch); err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
+func TestTaskForBranchPrefersNonTerminalTask(t *testing.T) {
+	db := testDB(t)
+	s := NewStore(db)
+	repoID := createRepository(t, db)
+	const branch = "agent-trail/branch-task"
+
+	older := createBranchTask(t, s, repoID, branch)
+	if _, err := s.Cancel(context.Background(), older.ID, "superseded"); err != nil {
+		t.Fatal(err)
+	}
+	newer := createBranchTask(t, s, repoID, branch)
+
+	got, found, err := s.TaskForBranch(context.Background(), repoID, branch)
+	if err != nil || !found {
+		t.Fatalf("found = %v err = %v", found, err)
+	}
+	if got.ID != newer.ID {
+		t.Fatalf("task = %s, want the non-terminal %s over cancelled %s", got.ID, newer.ID, older.ID)
+	}
+
+	if _, err := s.Cancel(context.Background(), newer.ID, "done"); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err = s.TaskForBranch(context.Background(), repoID, branch)
+	if err != nil || !found {
+		t.Fatalf("found = %v err = %v", found, err)
+	}
+	if got.ID != newer.ID || got.Status != StatusCancelled {
+		t.Fatalf("all-terminal lookup = %s/%s, want newest %s", got.ID, got.Status, newer.ID)
+	}
+}
+
+func TestTaskForBranchUnknownInputs(t *testing.T) {
+	db := testDB(t)
+	s := NewStore(db)
+	repoID := createRepository(t, db)
+	createBranchTask(t, s, repoID, "agent-trail/branch-task")
+
+	cases := map[string][2]string{
+		"other branch":   {repoID, "agent-trail/other"},
+		"empty branch":   {repoID, ""},
+		"other repo":     {"00000000-0000-0000-0000-000000000000", "agent-trail/branch-task"},
+		"malformed repo": {"not-a-uuid", "agent-trail/branch-task"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, found, err := s.TaskForBranch(context.Background(), tc[0], tc[1])
+			if err != nil || found {
+				t.Fatalf("found = %v err = %v, want no match", found, err)
+			}
+		})
+	}
+}
