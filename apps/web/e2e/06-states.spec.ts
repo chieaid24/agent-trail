@@ -30,6 +30,7 @@ function wireTask(overrides: Record<string, unknown>): Record<string, unknown> {
     cancel_requested_at: null,
     failure_code: null,
     failure_message: null,
+    status_reason: null,
     created_at: "2026-07-28T12:00:00Z",
     updated_at: "2026-07-28T12:00:00Z",
     version: 1,

@@ -52,6 +52,8 @@ export interface Task {
   cancel_requested_at: string | null;
   failure_code: string | null;
   failure_message: string | null;
+  // reason recorded with the latest transition, e.g. "pull request #7 merged"
+  status_reason: string | null;
   created_at: string;
   updated_at: string;
   version: number;
@@ -260,6 +262,7 @@ export interface DashboardTask {
   started_at: string | null;
   completed_at: string | null;
   failure_message: string | null;
+  status_reason: string | null;
   created_at: string;
   updated_at: string;
 }

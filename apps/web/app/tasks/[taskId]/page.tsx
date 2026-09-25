@@ -24,6 +24,7 @@ import { aggregateCost, type CostSummary } from "@/lib/cost";
 import {
   formatDateTime,
   formatDuration,
+  outcomeReason,
   runtimeMs,
   shortSha,
 } from "@/lib/format";
@@ -284,6 +285,7 @@ function TaskDetail({
   const terminal = isTerminal(task.status);
   const now = useNow(1000, !terminal);
   const runtime = runtimeMs(task.started_at, task.completed_at);
+  const reason = outcomeReason(task);
   void now; // tick forces re-render for live runtime
 
   return (
@@ -300,6 +302,11 @@ function TaskDetail({
         <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <StatusBadge status={task.status} />
           <StreamChip state={streamState} />
+          {reason && (
+            <span className="max-w-[72ch] text-sm break-words text-muted">
+              {reason}
+            </span>
+          )}
           {task.cancel_requested_at && !terminal && (
             <span className="text-sm text-warning">
               cancellation requested {formatDateTime(task.cancel_requested_at)}

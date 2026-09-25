@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { StatusBadge } from "./StatusBadge";
-import { formatDateTime, formatDuration, runtimeMs } from "@/lib/format";
+import {
+  formatDateTime,
+  formatDuration,
+  outcomeReason,
+  runtimeMs,
+} from "@/lib/format";
 import type { Task } from "@/lib/types";
 
 export function TaskRows({ tasks }: { tasks: Task[] }) {
@@ -10,6 +15,7 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
     <ul>
       {tasks.map((t) => {
         const runtime = runtimeMs(t.started_at, t.completed_at);
+        const reason = outcomeReason(t);
         return (
           <li key={t.id} className="border-b border-border">
             <Link
@@ -31,6 +37,11 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
                   </span>
                 )}
                 {runtime !== null && <span>{formatDuration(runtime)}</span>}
+                {reason && (
+                  <span className="max-w-[32ch] truncate" title={reason}>
+                    {reason}
+                  </span>
+                )}
                 <span className="font-mono text-sm whitespace-nowrap">
                   {formatDateTime(t.created_at)}
                 </span>
