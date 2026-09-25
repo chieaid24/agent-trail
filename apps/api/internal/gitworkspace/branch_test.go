@@ -32,8 +32,8 @@ func TestSanitizeBranch(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("SanitizeBranch(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
-			if tc.wantErr == nil && !validBranch(got) {
-				t.Fatalf("SanitizeBranch(%q) = %q, which validBranch rejects", tc.raw, got)
+			if tc.wantErr == nil && !ValidBranch(got) {
+				t.Fatalf("SanitizeBranch(%q) = %q, which ValidBranch rejects", tc.raw, got)
 			}
 		})
 	}
@@ -48,7 +48,7 @@ func TestSanitizeBranchLengthCap(t *testing.T) {
 	if len(slug) != maxSlug {
 		t.Fatalf("slug length = %d, want %d", len(slug), maxSlug)
 	}
-	if !validBranch(got) {
+	if !ValidBranch(got) {
 		t.Fatalf("capped branch %q is invalid", got)
 	}
 }
@@ -70,8 +70,8 @@ func TestValidBranch(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := validBranch(tc.in); got != tc.want {
-				t.Fatalf("validBranch(%q) = %v, want %v", tc.in, got, tc.want)
+			if got := ValidBranch(tc.in); got != tc.want {
+				t.Fatalf("ValidBranch(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}

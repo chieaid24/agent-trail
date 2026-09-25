@@ -444,6 +444,26 @@ func (s *Store) ActiveTaskForIssue(ctx context.Context, repositoryID string, iss
 	return t, true, nil
 }
 
+// newest non-terminal task outranks a finished predecessor that reused the branch
+func (s *Store) TaskForBranch(ctx context.Context, repositoryID, workingBranch string) (Task, bool, error) {
+	if !IsUUID(repositoryID) || workingBranch == "" {
+		return Task{}, false, nil
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT `+taskColumns+` FROM tasks
+		WHERE repository_id = $1 AND working_branch = $2
+		ORDER BY phase = 'terminal', created_at DESC, id DESC
+		LIMIT 1`, repositoryID, workingBranch)
+	t, err := scanTask(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, fmt.Errorf("task for branch: %w", err)
+	}
+	return t, true, nil
+}
+
 func isUniqueViolation(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) &&

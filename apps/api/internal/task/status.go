@@ -79,7 +79,7 @@ var happyPath = map[Status][]Status{
 	StatusValidating:        {StatusPublishing},
 	StatusPublishing:        {StatusAwaitingReview},
 	StatusAwaitingReview:    {StatusCompleted, StatusRevisionRequested},
-	StatusRevisionRequested: {StatusQueued},
+	StatusRevisionRequested: {StatusQueued, StatusCompleted},
 }
 
 func CanTransition(from, to Status) bool {

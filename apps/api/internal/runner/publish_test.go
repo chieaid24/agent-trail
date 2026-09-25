@@ -634,6 +634,8 @@ func TestPublishCleanupFailureRemainsRecoverable(t *testing.T) {
 	}
 
 	f.exec.fenceLeaseHook = nil
+	// short lease was only for the fault pass; lease/3 op deadline starves recovery on slow ci
+	f.exec.LeaseDuration = time.Minute
 	c2 := f.claim(t)
 	if err := f.exec.Execute(context.Background(), f.runner.ID, c2); err != nil {
 		t.Fatal(err)
