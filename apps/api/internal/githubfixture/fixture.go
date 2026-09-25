@@ -15,23 +15,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
+// the platform authenticates as the app, so every comment it posts carries the bot identity
+var botUser = map[string]any{"id": 1, "login": "agent-trail[bot]", "type": "Bot"}
+
+var humanUser = map[string]any{"id": 9, "login": "fixture-user", "type": "User"}
+
 type Server struct {
 	origin string
 
-	mu       sync.Mutex
-	prBody   string
-	prOpen   bool
-	checks   []map[string]any
-	comments []string
+	mu             sync.Mutex
+	prBody         string
+	prOpen         bool
+	prHead         string
+	checks         []map[string]any
+	checkUpdates   map[int64]map[string]any
+	comments       []map[string]any
+	reviewComments []map[string]any
 }
 
 func NewServer(origin string) *Server {
-	return &Server{origin: origin}
+	return &Server{origin: origin, checkUpdates: map[int64]map[string]any{}}
 }
 
 func (g *Server) PROpen() bool {
@@ -46,10 +55,56 @@ func (g *Server) PRBody() string {
 	return g.prBody
 }
 
+// head branch recorded when the platform opened the pull request
+func (g *Server) PRHead() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.prHead
+}
+
 func (g *Server) CommentCount() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return len(g.comments)
+}
+
+// bodies of every comment the platform posted, oldest first
+func (g *Server) Comments() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	bodies := make([]string, 0, len(g.comments))
+	for _, c := range g.comments {
+		bodies = append(bodies, c["body"].(string))
+	}
+	return bodies
+}
+
+// conclusion of the latest update to a check run, "" when never updated
+func (g *Server) CheckRunConclusion(id int64) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if update, ok := g.checkUpdates[id]; ok {
+		conclusion, _ := update["conclusion"].(string)
+		return conclusion
+	}
+	return ""
+}
+
+func (g *Server) CheckRunCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.checks)
+}
+
+// a reviewer leaves an inline comment on the open pull request
+func (g *Server) AddReviewComment(path string, line int, body string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reviewComments = append(g.reviewComments, map[string]any{
+		"id": 1000 + len(g.reviewComments), "body": body, "path": path, "line": line,
+		"diff_hunk": "@@ -1 +1 @@", "user": humanUser,
+		"created_at": time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 func (g *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -71,13 +126,48 @@ func (g *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"commit": map[string]any{"sha": sha}})
 	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/fixture/collaborators/"):
 		writeJSON(w, map[string]any{"permission": "admin"})
-	case method == http.MethodPost && strings.HasPrefix(path, "/repos/acme/fixture/issues/"):
+	case method == http.MethodPost && strings.HasPrefix(path, "/repos/acme/fixture/issues/") && strings.HasSuffix(path, "/comments"):
 		var body struct {
 			Body string `json:"body"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		g.comments = append(g.comments, body.Body)
-		writeJSON(w, map[string]any{"id": len(g.comments)})
+		id := 100 + len(g.comments)
+		g.comments = append(g.comments, map[string]any{
+			"id": id, "body": body.Body, "user": botUser, "issue": issueNumber(path),
+			"created_at": time.Now().UTC().Format(time.RFC3339),
+		})
+		writeJSON(w, map[string]any{"id": id})
+	case method == http.MethodGet && strings.HasPrefix(path, "/repos/acme/fixture/issues/") && strings.HasSuffix(path, "/comments"):
+		number := issueNumber(path)
+		list := []map[string]any{}
+		for _, c := range g.comments {
+			if c["issue"] == number {
+				list = append(list, c)
+			}
+		}
+		writeJSON(w, list)
+	case method == http.MethodGet && path == "/repos/acme/fixture/pulls/1/reviews":
+		writeJSON(w, []map[string]any{})
+	case method == http.MethodGet && path == "/repos/acme/fixture/pulls/1/comments":
+		writeJSON(w, g.reviewComments)
+	case method == http.MethodGet && path == "/repos/acme/fixture/pulls/1":
+		if !g.prOpen {
+			http.NotFound(w, r)
+			return
+		}
+		sha, err := gitIn(g.origin, "rev-parse", "refs/heads/"+g.prHead)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"number": 1, "state": "open", "merged": false,
+			"html_url": "https://github.example/acme/fixture/pull/1",
+			"head": map[string]any{
+				"ref": g.prHead, "sha": sha,
+				"repo": map[string]any{"id": fixtureRepositoryID},
+			},
+		})
 	case method == http.MethodGet && path == "/repos/acme/fixture/pulls":
 		if g.prOpen {
 			writeJSON(w, []map[string]any{{
@@ -90,10 +180,12 @@ func (g *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case method == http.MethodPost && path == "/repos/acme/fixture/pulls":
 		var body struct {
 			Body string `json:"body"`
+			Head string `json:"head"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		g.prOpen = true
 		g.prBody = body.Body
+		g.prHead = body.Head
 		writeJSON(w, map[string]any{
 			"number": 1, "state": "open", "draft": true,
 			"html_url": "https://github.example/acme/fixture/pull/1",
@@ -116,10 +208,27 @@ func (g *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.checks = append(g.checks, body)
 		writeJSON(w, map[string]any{"id": len(g.checks)})
 	case method == http.MethodPatch && strings.HasPrefix(path, "/repos/acme/fixture/check-runs/"):
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		id, _ := strconv.ParseInt(strings.TrimPrefix(path, "/repos/acme/fixture/check-runs/"), 10, 64)
+		g.checkUpdates[id] = body
 		writeJSON(w, map[string]any{})
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// repository id the fixture serves; webhooks name the same id so the pull request head maps to it
+const fixtureRepositoryID = 424243
+
+// "/repos/acme/fixture/issues/7/comments" -> 7
+func issueNumber(path string) int {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 5 {
+		return 0
+	}
+	n, _ := strconv.Atoi(parts[4])
+	return n
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -167,12 +276,33 @@ func RunCommandRequest(secret []byte, installationID, repositoryID, issueNumber 
 		"comment": map[string]any{
 			"id":   1,
 			"body": "/agent-trail run",
-			"user": map[string]any{"id": 9, "login": "fixture-user", "type": "User"},
+			"user": humanUser,
 		},
 		"issue": map[string]any{
 			"number": issueNumber,
 			"title":  "Record the run in the fixture file",
 			"body":   "Scripted issue driving the full vertical slice.",
+		},
+		"repository":   fixtureRepository(installationID, repositoryID),
+		"installation": map[string]any{"id": installationID},
+	}
+	return signedRequest(secret, "issue_comment", payload)
+}
+
+// revise comment on the pull request the fixture opened; body doubles as the reviewer's ask
+func ReviseCommandRequest(secret []byte, installationID, repositoryID, pullNumber int, body string) (*http.Request, error) {
+	payload := map[string]any{
+		"action": "created",
+		"comment": map[string]any{
+			"id":   2,
+			"body": body,
+			"user": humanUser,
+		},
+		"issue": map[string]any{
+			"number":       pullNumber,
+			"title":        "Record the run in the fixture file",
+			"body":         "",
+			"pull_request": map[string]any{"url": "https://github.example/acme/fixture/pull/1"},
 		},
 		"repository":   fixtureRepository(installationID, repositoryID),
 		"installation": map[string]any{"id": installationID},

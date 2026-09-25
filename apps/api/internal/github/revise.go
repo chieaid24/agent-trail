@@ -160,11 +160,12 @@ func (p *Processor) replyProcessed(reply func(string) error, body string) (strin
 
 // human items after the cutoff, oldest first; the revise comment itself is the last entry
 func (p *Processor) gatherFeedback(ctx context.Context, instID int64, repo StoredRepository, number int64, cutoff *time.Time, ev issueCommentPayload) ([]feedbackEntry, error) {
+	// github stamps to the second, so the cutoff is the publish second, inclusive
 	var since time.Time
 	if cutoff != nil {
-		since = *cutoff
+		since = cutoff.UTC().Truncate(time.Second)
 	}
-	after := func(at time.Time) bool { return cutoff == nil || at.After(*cutoff) }
+	after := func(at time.Time) bool { return cutoff == nil || !at.Before(since) }
 
 	var entries []feedbackEntry
 	reviews, err := p.api.ListPullRequestReviews(ctx, instID, repo.Owner, repo.Name, number)
