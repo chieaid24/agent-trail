@@ -20,11 +20,13 @@ ARCHITECTURE.md and the code.
 - **Run command**: `/agent-trail run`, posted on an issue. Creates a task.
 - **Review feedback**: the reviewer text a revision acts on: every human-written
   review summary, inline review comment (with file path, line, and diff hunk),
-  and conversation comment posted on the pull request after the previous
-  attempt published, plus the revise command body. Bot comments are excluded.
+  and conversation comment posted on the pull request since the previous
+  revision was requested (every such comment for the first revision), plus the
+  revise command body. Bot comments and other commands are excluded.
 - **Publish**: the runner stage that pushes the working branch, creates or
-  updates the pull request body with the evidence report, and records the check
-  run for the attempt's final commit.
+  updates the pull request body with the evidence report and the attempts
+  history, records the check run for the attempt's final commit, completes the
+  trigger check run, and for a revision posts the revision summary.
 - **Revision limit**: the per-repository `max_attempts` setting (default 5)
   in repository settings. A revise command on a task already at the limit is
   refused with a reply comment and no attempt.
@@ -38,6 +40,8 @@ ARCHITECTURE.md and the code.
 - **Attempt selector**: the dashboard control on a task page that switches the
   timeline, validations, evidence, and trace between attempts; the latest
   attempt is selected by default.
-- **Trigger check run**: the `Agent Trail Task` check run created when a run or
-  revise command is accepted, before any commit exists. It is completed at
-  publish, failure, or cancellation with the attempt's conclusion.
+- **Trigger check run**: the `Agent Trail Task` check run created queued on the
+  trigger head (the default branch for a run, the pull request head for a
+  revise) when the command is accepted, before the attempt has a final commit.
+  It is completed with the attempt's conclusion at publish, no change, failure,
+  timeout, or cancellation.

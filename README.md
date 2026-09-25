@@ -2,7 +2,7 @@
 
 A more secure way to run coding agents.
 
-Comment `/agent-trail run` on a GitHub issue and it creates a task, runs an agent in an isolated container, streams every action to a dashboard, validates the result, and opens a draft pull request with evidence report. Review the pull request as usual, then comment `/agent-trail revise` and the agent continues the same branch with your feedback; merging the pull request completes the task.
+Comment `/agent-trail run` on a GitHub issue and it creates a task, runs an agent in an isolated container, streams every action to a dashboard, validates the result, and opens a draft pull request with evidence report. Review the pull request, then comment `/agent-trail revise` and the agent continues the same branch with your feedback; merging the pull request completes the task.
 
 
 <p align="center">
@@ -88,8 +88,8 @@ for Terraform state.
    on a repository, and comment `/agent-trail run` on an issue. Once the
    draft pull request is open, leave review feedback and comment
    `/agent-trail revise` on it to start a revision. Each repository allows
-   `max_attempts` attempts per task (default 5), set through the repository
-   settings API and shown on the repository page.
+   `max_attempts` attempts per task (default 5); set it through the
+   repository settings API, and the repository page shows it.
 
 
 ## Layout

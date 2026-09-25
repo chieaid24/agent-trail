@@ -4,8 +4,9 @@
 `overall`, and `attempts`, ordered by `attempt_number`. A revision started by
 `/agent-trail revise` supersedes the previous attempt and adds the next
 `attempt_number` with its own timings, events, validation, and cost; the
-pull request body's attempts history reports the same per-attempt validation
-outcome and reported cost. An unknown task
+pull request body's attempts history derives a trusted-only validation outcome
+(passed, failed, error) and the same reported cost from the same sources. An
+unknown task
 returns 404; an invalid UUID returns 400. The endpoint uses the existing
 session protection of the task API. Like the existing task read endpoints,
 it does not enforce repository membership; this read model adds no new
