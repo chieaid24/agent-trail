@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,6 +77,17 @@ func authedHandler(f *fakeAuth, options ...Option) http.Handler {
 func doWithCookie(t *testing.T, h http.Handler, method, path string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func doWithCookieAndBody(t *testing.T, h http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
@@ -299,6 +311,28 @@ func TestRepositoryEnablement(t *testing.T) {
 			sessionCookie("good-token"))
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", rec.Code)
+		}
+	})
+
+	t.Run("settings write follows the same membership gate", func(t *testing.T) {
+		member := authedHandler(validFakeAuth())
+		rec := doWithCookieAndBody(t, member, http.MethodPut, path+"/settings",
+			`{"max_attempts": 3}`, sessionCookie("good-token"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("member status = %d: %s", rec.Code, rec.Body.String())
+		}
+		if got := decodeBody(t, rec.Body.Bytes())["max_attempts"]; got != float64(3) {
+			t.Errorf("max_attempts = %v, want 3", got)
+		}
+		f := validFakeAuth()
+		f.member = false
+		rec = doWithCookieAndBody(t, authedHandler(f), http.MethodPut, path+"/settings",
+			`{"max_attempts": 3}`, sessionCookie("good-token"))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("non-member status = %d, want 403", rec.Code)
+		}
+		if rec := do(t, member, http.MethodPut, path+"/settings", `{"max_attempts": 3}`); rec.Code != http.StatusUnauthorized {
+			t.Errorf("unauthenticated status = %d, want 401", rec.Code)
 		}
 	})
 

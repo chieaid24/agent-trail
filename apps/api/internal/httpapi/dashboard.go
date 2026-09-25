@@ -8,6 +8,7 @@ import (
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/dashboard"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
+	"github.com/chieaid24/agent-trail/apps/api/internal/reposettings"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
@@ -17,6 +18,7 @@ type DashboardService interface {
 	ListRepositories(ctx context.Context, organizationID string, limit int) ([]dashboard.Repository, error)
 	GetRepository(ctx context.Context, id string) (dashboard.RepositoryDetail, error)
 	GetRepositorySettings(ctx context.Context, id string) (dashboard.RepositorySettings, error)
+	UpdateRepositorySettings(ctx context.Context, id string, patch dashboard.RepositorySettingsPatch) (dashboard.RepositorySettings, error)
 	SetRepositoryEnabled(ctx context.Context, id string, enabled bool) (dashboard.Repository, error)
 	ListRunners(ctx context.Context) ([]dashboard.Runner, error)
 	GetRunner(ctx context.Context, id string) (dashboard.RunnerDetail, error)
@@ -122,6 +124,50 @@ func (s *Server) handleRepositorySettings(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, settings)
 }
 
+type updateRepositorySettingsRequest struct {
+	MaxAttempts *int `json:"max_attempts"`
+}
+
+func (s *Server) handleUpdateRepositorySettings(w http.ResponseWriter, r *http.Request) {
+	if !s.dashboardAvailable(w) {
+		return
+	}
+	id, ok := pathUUID(w, r, "repositoryId")
+	if !ok {
+		return
+	}
+	actor, ok := s.authorizeRepositoryMember(w, r, id)
+	if !ok {
+		return
+	}
+	var req updateRepositorySettingsRequest
+	if !s.decodeJSON(w, r, &req) {
+		return
+	}
+	if req.MaxAttempts == nil {
+		writeError(w, http.StatusBadRequest, "max_attempts is required")
+		return
+	}
+	if err := reposettings.ValidateMaxAttempts(*req.MaxAttempts); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	settings, err := s.dashboard.UpdateRepositorySettings(r.Context(), id,
+		dashboard.RepositorySettingsPatch{MaxAttempts: req.MaxAttempts})
+	if err != nil {
+		s.writeDashboardError(w, r, err)
+		return
+	}
+	s.logger.LogAttrs(r.Context(), slog.LevelInfo, "repository settings changed",
+		slog.String("event", "repository_settings_changed"),
+		slog.String("trace_id", observability.TraceIDFrom(r.Context())),
+		slog.String("repository_id", id),
+		slog.Int("max_attempts", settings.MaxAttempts),
+		slog.String("actor", actor),
+	)
+	writeJSON(w, http.StatusOK, settings)
+}
+
 func (s *Server) handleRepositoryEnable(w http.ResponseWriter, r *http.Request) {
 	s.setRepositoryEnabled(w, r, true)
 }
@@ -139,24 +185,9 @@ func (s *Server) setRepositoryEnabled(w http.ResponseWriter, r *http.Request, en
 	if !ok {
 		return
 	}
-	actor := "unauthenticated"
-	if s.auth != nil {
-		user, ok := userFrom(r.Context())
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-		member, err := s.auth.MemberOfRepository(r.Context(), user.ID, id)
-		if err != nil {
-			s.writeDashboardError(w, r, err)
-			return
-		}
-		if !member {
-			writeError(w, http.StatusForbidden,
-				"not a member of this repository's organization")
-			return
-		}
-		actor = user.GitHubLogin
+	actor, ok := s.authorizeRepositoryMember(w, r, id)
+	if !ok {
+		return
 	}
 	repository, err := s.dashboard.SetRepositoryEnabled(r.Context(), id, enabled)
 	if err != nil {
@@ -171,6 +202,29 @@ func (s *Server) setRepositoryEnabled(w http.ResponseWriter, r *http.Request, en
 		slog.String("actor", actor),
 	)
 	writeJSON(w, http.StatusOK, repository)
+}
+
+// writes the 401/403 itself; actor is "unauthenticated" when auth is off
+func (s *Server) authorizeRepositoryMember(w http.ResponseWriter, r *http.Request, repositoryID string) (string, bool) {
+	if s.auth == nil {
+		return "unauthenticated", true
+	}
+	user, ok := userFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return "", false
+	}
+	member, err := s.auth.MemberOfRepository(r.Context(), user.ID, repositoryID)
+	if err != nil {
+		s.writeDashboardError(w, r, err)
+		return "", false
+	}
+	if !member {
+		writeError(w, http.StatusForbidden,
+			"not a member of this repository's organization")
+		return "", false
+	}
+	return user.GitHubLogin, true
 }
 
 func (s *Server) handleListRunners(w http.ResponseWriter, r *http.Request) {
@@ -227,6 +281,8 @@ func (s *Server) writeDashboardError(w http.ResponseWriter, r *http.Request, err
 		writeError(w, http.StatusNotFound, "repository not found")
 	case errors.Is(err, dashboard.ErrRunnerNotFound):
 		writeError(w, http.StatusNotFound, "runner not found")
+	case errors.Is(err, dashboard.ErrInvalidSettings):
+		writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		s.logger.LogAttrs(r.Context(), slog.LevelError, "dashboard request failed",
 			slog.String("event", "dashboard_request_failed"),

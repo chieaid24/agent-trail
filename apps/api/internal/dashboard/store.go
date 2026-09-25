@@ -7,10 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-)
 
-const defaultPolicy = "platform default"
-const defaultValidationFile = ".agent-trail/validation.yaml"
+	"github.com/chieaid24/agent-trail/apps/api/internal/reposettings"
+)
 
 type Store struct {
 	db *sql.DB
@@ -225,21 +224,48 @@ func scanRepository(row interface{ Scan(...any) error }) (Repository, error) {
 }
 
 func parseRepositorySettings(raw []byte) (RepositorySettings, error) {
-	settings := RepositorySettings{
-		DefaultPolicy: defaultPolicy, ValidationFile: defaultValidationFile,
+	return reposettings.Parse(raw)
+}
+
+// row lock so two concurrent patches never lose a field; validated before the write
+func (s *Store) UpdateRepositorySettings(ctx context.Context, id string, patch RepositorySettingsPatch) (RepositorySettings, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RepositorySettings{}, fmt.Errorf("update repository settings: %w", err)
 	}
-	var stored struct {
-		DefaultPolicy  string `json:"default_policy"`
-		ValidationFile string `json:"validation_file"`
+	defer func() { _ = tx.Rollback() }()
+
+	var raw []byte
+	err = tx.QueryRowContext(ctx,
+		`SELECT settings_json FROM repositories WHERE id = $1 FOR UPDATE`, id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RepositorySettings{}, ErrRepositoryNotFound
 	}
-	if err := json.Unmarshal(raw, &stored); err != nil {
-		return RepositorySettings{}, err
+	if err != nil {
+		return RepositorySettings{}, fmt.Errorf("update repository settings: %w", err)
 	}
-	if stored.DefaultPolicy != "" {
-		settings.DefaultPolicy = stored.DefaultPolicy
+	settings, err := parseRepositorySettings(raw)
+	if err != nil {
+		return RepositorySettings{}, fmt.Errorf("parse repository settings: %w", err)
 	}
-	if stored.ValidationFile != "" {
-		settings.ValidationFile = stored.ValidationFile
+	if patch.MaxAttempts != nil {
+		settings.MaxAttempts = *patch.MaxAttempts
+	}
+	if err := settings.Validate(); err != nil {
+		return RepositorySettings{}, fmt.Errorf("%w: %w", ErrInvalidSettings, err)
+	}
+	body, err := json.Marshal(settings)
+	if err != nil {
+		return RepositorySettings{}, fmt.Errorf("marshal repository settings: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE repositories SET settings_json = $2, updated_at = now()
+		WHERE id = $1`, id, body)
+	if err != nil {
+		return RepositorySettings{}, fmt.Errorf("update repository settings: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return RepositorySettings{}, fmt.Errorf("update repository settings: %w", err)
 	}
 	return settings, nil
 }

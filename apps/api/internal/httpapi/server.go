@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/repositories", s.handleListRepositories)
 	api.HandleFunc("GET /api/v1/repositories/{repositoryId}", s.handleGetRepository)
 	api.HandleFunc("GET /api/v1/repositories/{repositoryId}/settings", s.handleRepositorySettings)
+	api.HandleFunc("PUT /api/v1/repositories/{repositoryId}/settings", s.handleUpdateRepositorySettings)
 	api.HandleFunc("POST /api/v1/repositories/{repositoryId}/enable", s.handleRepositoryEnable)
 	api.HandleFunc("POST /api/v1/repositories/{repositoryId}/disable", s.handleRepositoryDisable)
 	api.HandleFunc("GET /api/v1/runners", s.handleListRunners)
