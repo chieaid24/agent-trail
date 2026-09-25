@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -513,5 +514,38 @@ func TestClaimSkipsPublishedAwaitingReview(t *testing.T) {
 	r := mustRegister(t, s)
 	if c, err := s.Claim(ctx, r.ID, time.Minute); err != nil || c != nil {
 		t.Fatalf("claim on published awaiting_review = %+v, %v; want nil, nil", c, err)
+	}
+}
+
+func TestClaimUsesRevisionAttemptInstructions(t *testing.T) {
+	_, s, ts := testStores(t)
+	ctx := context.Background()
+	r := mustRegister(t, s)
+	tk := mustCreateTask(t, ts)
+	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning,
+		task.StatusExecuting, task.StatusValidating, task.StatusPublishing,
+		task.StatusAwaitingReview} {
+		if _, err := ts.Transition(ctx, tk.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+	_, err := ts.RequestRevision(ctx, tk.ID, task.RevisionParams{
+		Instructions:     "revised instructions",
+		BaseCommitSHA:    strings.Repeat("c", 40),
+		RequestedByLogin: "alice",
+		TriggerCommentID: 1,
+		MaxAttempts:      5,
+		IdempotencyKey:   "revise:1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := s.Claim(ctx, r.ID, time.Minute)
+	if err != nil || c == nil {
+		t.Fatalf("claim = %+v, %v", c, err)
+	}
+	if c.AttemptNumber != 2 || c.Instructions != "revised instructions" || c.TaskStatus != task.StatusQueued {
+		t.Fatalf("claim = %+v, want attempt 2 with revision instructions", c)
 	}
 }

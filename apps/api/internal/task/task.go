@@ -63,6 +63,50 @@ type CreateParams struct {
 	SourceCommentID   *int64
 	OrganizationID    *string
 	RepositoryID      *string
+	// github login of the run commenter; recorded on attempt 1 with SourceCommentID as its trigger
+	RequestedByLogin string
+}
+
+// one reviewer item a revision was given; bodies live in the attempt instructions, not here
+type FeedbackItem struct {
+	Kind     string    `json:"kind"` // review, review_comment, comment, revise_command
+	Author   string    `json:"author"`
+	PostedAt time.Time `json:"posted_at"`
+	Location string    `json:"location,omitempty"` // "path:line" for inline review comments
+}
+
+type RevisionParams struct {
+	Instructions     string
+	BaseCommitSHA    string // pull request head at trigger
+	RequestedByLogin string
+	TriggerCommentID int64
+	Feedback         []FeedbackItem
+	// revision limit: attempts already on the task must stay below it
+	MaxAttempts    int
+	IdempotencyKey string
+	Reason         string
+}
+
+// task_attempts read model; nil pointers are columns the attempt never recorded
+type Attempt struct {
+	ID                         string         `json:"id"`
+	TaskID                     string         `json:"task_id"`
+	Number                     int            `json:"attempt_number"`
+	Status                     string         `json:"status"`
+	BaseCommitSHA              *string        `json:"base_commit_sha"`
+	FinalCommitSHA             *string        `json:"final_commit_sha"`
+	PullRequestNumber          *int64         `json:"pull_request_number"`
+	Instructions               *string        `json:"instructions"`
+	RequestedByLogin           *string        `json:"requested_by_login"`
+	TriggerCommentID           *int64         `json:"trigger_comment_id"`
+	TriggerCheckRunID          *int64         `json:"trigger_check_run_id"`
+	TriggerCheckRunCompletedAt *time.Time     `json:"trigger_check_run_completed_at"`
+	Feedback                   []FeedbackItem `json:"feedback"`
+	FailureCode                *string        `json:"failure_code"`
+	FailureMessage             *string        `json:"failure_message"`
+	StartedAt                  *time.Time     `json:"started_at"`
+	CompletedAt                *time.Time     `json:"completed_at"`
+	CreatedAt                  time.Time      `json:"created_at"`
 }
 
 type ListParams struct {
@@ -79,6 +123,8 @@ type TransitionParams struct {
 	// replay with an already-recorded key is a no-op, not a double transition
 	IdempotencyKey  string
 	ExpectedVersion int64
+	// set only by RequestRevision: fields for the attempt the supersede path inserts
+	revision *RevisionParams
 }
 
 var ErrNotFound = errors.New("task not found")
@@ -86,6 +132,11 @@ var ErrNotFound = errors.New("task not found")
 var ErrAttemptNotFound = errors.New("task attempt not found")
 
 var ErrActiveTaskExists = errors.New("issue already has an active task")
+
+var ErrRevisionLimit = errors.New("task has reached its revision limit")
+
+// the same trigger comment already started a revision
+var ErrRevisionReplayed = errors.New("revision already requested")
 
 type InvalidTransitionError struct {
 	From, To Status

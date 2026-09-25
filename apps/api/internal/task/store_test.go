@@ -628,3 +628,279 @@ func TestTaskForBranchUnknownInputs(t *testing.T) {
 		})
 	}
 }
+
+const revisionBase = "cccccccccccccccccccccccccccccccccccccccc"
+
+func reviewedTask(t *testing.T, s *Store) Task {
+	t.Helper()
+	tk := mustCreate(t, s)
+	for _, to := range []Status{StatusProvisioning, StatusPlanning,
+		StatusExecuting, StatusValidating, StatusPublishing, StatusAwaitingReview} {
+		mustTransition(t, s, tk.ID, to)
+	}
+	return tk
+}
+
+func revisionParams(commentID int64) RevisionParams {
+	return RevisionParams{
+		Instructions:     "revise: rename the helper",
+		BaseCommitSHA:    revisionBase,
+		RequestedByLogin: "alice",
+		TriggerCommentID: commentID,
+		Feedback: []FeedbackItem{{
+			Kind: "review_comment", Author: "alice",
+			PostedAt: time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC),
+			Location: "internal/a.go:7",
+		}},
+		MaxAttempts:    5,
+		IdempotencyKey: "revise:" + strings.Repeat("1", 3),
+		Reason:         "revision requested by @alice",
+	}
+}
+
+func TestRequestRevisionInsertsAttemptWithFields(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	tk := reviewedTask(t, s)
+
+	queued, err := s.RequestRevision(ctx, tk.ID, revisionParams(555))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Status != StatusQueued || queued.Phase != PhasePending {
+		t.Fatalf("task = %s/%s, want queued/pending", queued.Status, queued.Phase)
+	}
+
+	attempts, err := s.Attempts(ctx, tk.ID)
+	if err != nil || len(attempts) != 2 {
+		t.Fatalf("attempts = %d, err = %v", len(attempts), err)
+	}
+	first, second := attempts[0], attempts[1]
+	if first.Number != 1 || first.Status != "superseded" || first.CompletedAt == nil ||
+		first.Instructions != nil || first.RequestedByLogin != nil {
+		t.Fatalf("attempt 1 = %+v", first)
+	}
+	if second.Number != 2 || second.Status != "active" ||
+		second.Instructions == nil || *second.Instructions != "revise: rename the helper" ||
+		second.BaseCommitSHA == nil || *second.BaseCommitSHA != revisionBase ||
+		second.RequestedByLogin == nil || *second.RequestedByLogin != "alice" ||
+		second.TriggerCommentID == nil || *second.TriggerCommentID != 555 ||
+		len(second.Feedback) != 1 || second.Feedback[0].Location != "internal/a.go:7" ||
+		second.StartedAt != nil {
+		t.Fatalf("attempt 2 = %+v", second)
+	}
+	got, err := s.Attempt(ctx, second.ID)
+	if err != nil || got.ID != second.ID || got.Number != 2 {
+		t.Fatalf("Attempt = %+v, err = %v", got, err)
+	}
+
+	events, err := s.Events(ctx, tk.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requested, requeued := events[len(events)-2], events[len(events)-1]
+	if requested.EventType != "task.revision_requested" || requested.AttemptNumber != 1 {
+		t.Fatalf("revision event = %s on attempt %d", requested.EventType, requested.AttemptNumber)
+	}
+	if requeued.EventType != "task.queued" || requeued.AttemptNumber != 2 || requeued.SequenceNumber != 1 {
+		t.Fatalf("queued event = %s on attempt %d seq %d", requeued.EventType, requeued.AttemptNumber, requeued.SequenceNumber)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(requeued.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["reason"] != "revision requested by @alice" {
+		t.Fatalf("queued payload = %v", payload)
+	}
+}
+
+func TestRequestRevisionGuards(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+
+	t.Run("replayed trigger comment is a no-op", func(t *testing.T) {
+		tk := reviewedTask(t, s)
+		if _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); !errors.Is(err, ErrRevisionReplayed) {
+			t.Fatalf("replay err = %v", err)
+		}
+		attempts, _ := s.Attempts(ctx, tk.ID)
+		if len(attempts) != 2 {
+			t.Fatalf("attempts after replay = %d, want 2", len(attempts))
+		}
+	})
+
+	t.Run("limit counts existing attempts", func(t *testing.T) {
+		tk := reviewedTask(t, s)
+		p := revisionParams(2)
+		p.MaxAttempts = 1
+		if _, err := s.RequestRevision(ctx, tk.ID, p); !errors.Is(err, ErrRevisionLimit) {
+			t.Fatalf("limit err = %v", err)
+		}
+		if got := mustGet(t, s, tk.ID).Status; got != StatusAwaitingReview {
+			t.Fatalf("task after refused revision = %s", got)
+		}
+		p.MaxAttempts = 2
+		if _, err := s.RequestRevision(ctx, tk.ID, p); err != nil {
+			t.Fatalf("revision within limit: %v", err)
+		}
+	})
+
+	t.Run("only a task awaiting review can be revised", func(t *testing.T) {
+		running := mustCreate(t, s)
+		mustTransition(t, s, running.ID, StatusProvisioning)
+		var invalid *InvalidTransitionError
+		if _, err := s.RequestRevision(ctx, running.ID, revisionParams(3)); !errors.As(err, &invalid) {
+			t.Fatalf("running err = %v", err)
+		}
+		done := reviewedTask(t, s)
+		mustTransition(t, s, done.ID, StatusCompleted)
+		if _, err := s.RequestRevision(ctx, done.ID, revisionParams(4)); !errors.As(err, &invalid) {
+			t.Fatalf("terminal err = %v", err)
+		}
+	})
+
+	t.Run("incomplete params are rejected before any write", func(t *testing.T) {
+		tk := reviewedTask(t, s)
+		for name, mutate := range map[string]func(*RevisionParams){
+			"no instructions": func(p *RevisionParams) { p.Instructions = "" },
+			"bad base":        func(p *RevisionParams) { p.BaseCommitSHA = "abc" },
+			"no requester":    func(p *RevisionParams) { p.RequestedByLogin = "" },
+			"no comment":      func(p *RevisionParams) { p.TriggerCommentID = 0 },
+			"no limit":        func(p *RevisionParams) { p.MaxAttempts = 0 },
+		} {
+			p := revisionParams(5)
+			mutate(&p)
+			if _, err := s.RequestRevision(ctx, tk.ID, p); err == nil {
+				t.Errorf("%s accepted", name)
+			}
+		}
+		if got := mustGet(t, s, tk.ID).Status; got != StatusAwaitingReview {
+			t.Fatalf("task after rejected params = %s", got)
+		}
+	})
+}
+
+func mustGet(t *testing.T, s *Store, id string) Task {
+	t.Helper()
+	tk, err := s.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
+func TestCreateRecordsRequesterOnFirstAttempt(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	comment := int64(9001)
+	tk, err := s.Create(ctx, CreateParams{
+		Title: "t", Instructions: "i", RequestedByLogin: "alice", SourceCommentID: &comment,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts, err := s.Attempts(ctx, tk.ID)
+	if err != nil || len(attempts) != 1 {
+		t.Fatalf("attempts = %+v, err = %v", attempts, err)
+	}
+	a := attempts[0]
+	if a.RequestedByLogin == nil || *a.RequestedByLogin != "alice" ||
+		a.TriggerCommentID == nil || *a.TriggerCommentID != 9001 ||
+		a.Instructions != nil || a.TriggerCheckRunID != nil || len(a.Feedback) != 0 {
+		t.Fatalf("attempt 1 = %+v", a)
+	}
+	anonymous := mustCreate(t, s)
+	attempts, _ = s.Attempts(ctx, anonymous.ID)
+	if attempts[0].RequestedByLogin != nil || attempts[0].TriggerCommentID != nil {
+		t.Fatalf("api task attempt = %+v", attempts[0])
+	}
+}
+
+func TestTriggerCheckRunBookkeeping(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	tk := mustCreate(t, s)
+
+	if err := s.RecordTriggerCheckRun(ctx, tk.ID, 777); err != nil {
+		t.Fatal(err)
+	}
+	// replayed side effect keeps the first id
+	if err := s.RecordTriggerCheckRun(ctx, tk.ID, 778); err != nil {
+		t.Fatal(err)
+	}
+	attempts, _ := s.Attempts(ctx, tk.ID)
+	if attempts[0].TriggerCheckRunID == nil || *attempts[0].TriggerCheckRunID != 777 ||
+		attempts[0].TriggerCheckRunCompletedAt != nil {
+		t.Fatalf("attempt = %+v", attempts[0])
+	}
+	if err := s.MarkTriggerCheckRunCompleted(ctx, attempts[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	attempts, _ = s.Attempts(ctx, tk.ID)
+	if attempts[0].TriggerCheckRunCompletedAt == nil {
+		t.Fatalf("completion not recorded: %+v", attempts[0])
+	}
+
+	// no trigger check run recorded: completion is a no-op, not a constraint violation
+	other := mustCreate(t, s)
+	others, _ := s.Attempts(ctx, other.ID)
+	if err := s.MarkTriggerCheckRunCompleted(ctx, others[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	others, _ = s.Attempts(ctx, other.ID)
+	if others[0].TriggerCheckRunCompletedAt != nil {
+		t.Fatalf("completion recorded without a check run: %+v", others[0])
+	}
+	terminal := mustCreate(t, s)
+	if _, err := s.Cancel(ctx, terminal.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordTriggerCheckRun(ctx, terminal.ID, 1); !errors.Is(err, ErrAttemptNotFound) {
+		t.Fatalf("record on terminal task err = %v", err)
+	}
+}
+
+func TestPublishedAtReadsPullRequestEvents(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	tk := mustCreate(t, s)
+
+	at, err := s.PublishedAt(ctx, tk.ID)
+	if err != nil || at != nil {
+		t.Fatalf("PublishedAt before publish = %v, %v", at, err)
+	}
+	if err := s.AppendEvent(ctx, tk.ID, "pull_request.created", "runner", map[string]string{"number": "1"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.PublishedAt(ctx, tk.ID)
+	if err != nil || first == nil {
+		t.Fatalf("PublishedAt after create = %v, %v", first, err)
+	}
+	if err := s.AppendEvent(ctx, tk.ID, "pull_request.updated", "runner", map[string]string{"number": "1"}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.PublishedAt(ctx, tk.ID)
+	if err != nil || second == nil || second.Before(*first) {
+		t.Fatalf("PublishedAt after update = %v (first %v), %v", second, first, err)
+	}
+	if _, err := s.PublishedAt(ctx, "not-a-uuid"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bad id err = %v", err)
+	}
+}
+
+func TestAttemptsNotFound(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	if _, err := s.Attempts(ctx, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Attempts err = %v", err)
+	}
+	if _, err := s.Attempt(ctx, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrAttemptNotFound) {
+		t.Fatalf("Attempt err = %v", err)
+	}
+	if _, err := s.Attempt(ctx, "nope"); !errors.Is(err, ErrAttemptNotFound) {
+		t.Fatalf("Attempt bad id err = %v", err)
+	}
+}

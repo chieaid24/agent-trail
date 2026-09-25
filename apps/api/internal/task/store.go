@@ -32,6 +32,8 @@ const taskColumns = `id, organization_id, repository_id, source_type,
 var uuidRe = regexp.MustCompile(
 	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
+var shaRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
 func IsUUID(s string) bool { return uuidRe.MatchString(s) }
 
 // inserts task + first attempt, queues immediately; returns status queued at version 2
@@ -70,8 +72,10 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Task, error) {
 
 	var attemptID string
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO task_attempts (task_id, attempt_number)
-		VALUES ($1, 1) RETURNING id`, created.ID).Scan(&attemptID)
+		INSERT INTO task_attempts
+			(task_id, attempt_number, requested_by_login, trigger_comment_id)
+		VALUES ($1, 1, NULLIF($2, ''), $3) RETURNING id`,
+		created.ID, p.RequestedByLogin, p.SourceCommentID).Scan(&attemptID)
 	if err != nil {
 		return Task{}, fmt.Errorf("insert attempt: %w", err)
 	}
@@ -198,6 +202,62 @@ func (s *Store) Transition(ctx context.Context, id string, p TransitionParams) (
 		return Task{}, fmt.Errorf("commit: %w", err)
 	}
 	return next, nil
+}
+
+// awaiting_review -> revision_requested -> queued under one row lock; the limit and replay
+// checks share that lock so two revise commands cannot both pass
+func (s *Store) RequestRevision(ctx context.Context, id string, p RevisionParams) (Task, error) {
+	if !IsUUID(id) {
+		return Task{}, ErrNotFound
+	}
+	if p.Instructions == "" || !shaRe.MatchString(p.BaseCommitSHA) ||
+		p.RequestedByLogin == "" || p.TriggerCommentID <= 0 || p.MaxAttempts < 1 {
+		return Task{}, errors.New("revision params incomplete")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	cur, err := lockTask(ctx, tx, id)
+	if err != nil {
+		return Task{}, err
+	}
+	var attempts int
+	err = tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM task_attempts WHERE task_id = $1`, id).Scan(&attempts)
+	if err != nil {
+		return Task{}, fmt.Errorf("count attempts: %w", err)
+	}
+	if attempts >= p.MaxAttempts {
+		return Task{}, fmt.Errorf("%w: %d of %d attempts used", ErrRevisionLimit, attempts, p.MaxAttempts)
+	}
+	requested, err := applyTransition(ctx, tx, cur, TransitionParams{
+		To:             StatusRevisionRequested,
+		Source:         "system",
+		Reason:         p.Reason,
+		IdempotencyKey: p.IdempotencyKey,
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	if requested.Status != StatusRevisionRequested {
+		return Task{}, ErrRevisionReplayed
+	}
+	queued, err := applyTransition(ctx, tx, requested, TransitionParams{
+		To:       StatusQueued,
+		Source:   "system",
+		Reason:   p.Reason,
+		revision: &p,
+	})
+	if err != nil {
+		return Task{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Task{}, fmt.Errorf("commit: %w", err)
+	}
+	return queued, nil
 }
 
 // cancel of already-cancelled task is idempotent no-op; other terminal states reject
@@ -464,6 +524,154 @@ func (s *Store) TaskForBranch(ctx context.Context, repositoryID, workingBranch s
 	return t, true, nil
 }
 
+const attemptColumns = `id, task_id, attempt_number, status, base_commit_sha,
+	final_commit_sha, pull_request_number, instructions, requested_by_login,
+	trigger_comment_id, trigger_check_run_id, trigger_check_run_completed_at,
+	feedback_json, failure_code, failure_message, started_at, completed_at,
+	created_at`
+
+func (s *Store) Attempt(ctx context.Context, attemptID string) (Attempt, error) {
+	if !IsUUID(attemptID) {
+		return Attempt{}, ErrAttemptNotFound
+	}
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+attemptColumns+` FROM task_attempts WHERE id = $1`, attemptID)
+	a, err := scanAttempt(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Attempt{}, ErrAttemptNotFound
+	}
+	if err != nil {
+		return Attempt{}, fmt.Errorf("get attempt: %w", err)
+	}
+	return a, nil
+}
+
+func (s *Store) Attempts(ctx context.Context, taskID string) ([]Attempt, error) {
+	if !IsUUID(taskID) {
+		return nil, ErrNotFound
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+attemptColumns+` FROM task_attempts
+		WHERE task_id = $1 ORDER BY attempt_number`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list attempts: %w", err)
+	}
+	defer rows.Close()
+	attempts := []Attempt{}
+	for rows.Next() {
+		a, err := scanAttempt(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan attempt: %w", err)
+		}
+		attempts = append(attempts, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list attempts: %w", err)
+	}
+	if len(attempts) == 0 {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM tasks WHERE id = $1)`, taskID).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("check task: %w", err)
+		}
+		if !exists {
+			return nil, ErrNotFound
+		}
+	}
+	return attempts, nil
+}
+
+// first writer wins so a replayed side effect keeps the original check run
+func (s *Store) RecordTriggerCheckRun(ctx context.Context, taskID string, checkRunID int64) error {
+	if !IsUUID(taskID) {
+		return ErrNotFound
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET trigger_check_run_id = COALESCE(trigger_check_run_id, $2)
+		WHERE task_id = $1 AND status = 'active'`, taskID, checkRunID)
+	if err != nil {
+		return fmt.Errorf("record trigger check run: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("record trigger check run: %w", err)
+	}
+	if n == 0 {
+		return ErrAttemptNotFound
+	}
+	return nil
+}
+
+func (s *Store) MarkTriggerCheckRunCompleted(ctx context.Context, attemptID string) error {
+	if !IsUUID(attemptID) {
+		return ErrAttemptNotFound
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE task_attempts
+		SET trigger_check_run_completed_at = COALESCE(trigger_check_run_completed_at, now())
+		WHERE id = $1 AND trigger_check_run_id IS NOT NULL`, attemptID)
+	if err != nil {
+		return fmt.Errorf("mark trigger check run completed: %w", err)
+	}
+	return nil
+}
+
+// when the pull request last reflected an attempt's work; nil before the first publish
+func (s *Store) PublishedAt(ctx context.Context, taskID string) (*time.Time, error) {
+	if !IsUUID(taskID) {
+		return nil, ErrNotFound
+	}
+	var at sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		SELECT max(e."timestamp")
+		FROM activity_events e
+		JOIN task_attempts a ON a.id = e.task_attempt_id
+		WHERE a.task_id = $1
+			AND e.event_type IN ('pull_request.created', 'pull_request.updated')`,
+		taskID).Scan(&at)
+	if err != nil {
+		return nil, fmt.Errorf("published at: %w", err)
+	}
+	return nullTime(at), nil
+}
+
+func scanAttempt(row interface{ Scan(...any) error }) (Attempt, error) {
+	var a Attempt
+	var (
+		base, final, instructions, requestedBy, failureCode, failureMsg sql.NullString
+		prNumber, commentID, checkRunID                                 sql.NullInt64
+		checkRunCompletedAt, startedAt, completedAt                     sql.NullTime
+		feedback                                                        []byte
+	)
+	err := row.Scan(&a.ID, &a.TaskID, &a.Number, &a.Status, &base, &final,
+		&prNumber, &instructions, &requestedBy, &commentID, &checkRunID,
+		&checkRunCompletedAt, &feedback, &failureCode, &failureMsg,
+		&startedAt, &completedAt, &a.CreatedAt)
+	if err != nil {
+		return Attempt{}, err
+	}
+	a.BaseCommitSHA = nullStr(base)
+	a.FinalCommitSHA = nullStr(final)
+	a.PullRequestNumber = nullInt64(prNumber)
+	a.Instructions = nullStr(instructions)
+	a.RequestedByLogin = nullStr(requestedBy)
+	a.TriggerCommentID = nullInt64(commentID)
+	a.TriggerCheckRunID = nullInt64(checkRunID)
+	a.TriggerCheckRunCompletedAt = nullTime(checkRunCompletedAt)
+	a.FailureCode = nullStr(failureCode)
+	a.FailureMessage = nullStr(failureMsg)
+	a.StartedAt = nullTime(startedAt)
+	a.CompletedAt = nullTime(completedAt)
+	a.Feedback = []FeedbackItem{}
+	if len(feedback) > 0 {
+		if err := json.Unmarshal(feedback, &a.Feedback); err != nil {
+			return Attempt{}, fmt.Errorf("decode feedback: %w", err)
+		}
+	}
+	return a, nil
+}
+
 func isUniqueViolation(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) &&
@@ -549,12 +757,9 @@ func applyTransition(ctx context.Context, tx *sql.Tx, cur Task, p TransitionPara
 		if err != nil {
 			return Task{}, fmt.Errorf("supersede attempt: %w", err)
 		}
-		err = tx.QueryRowContext(ctx, `
-			INSERT INTO task_attempts (task_id, attempt_number)
-			VALUES ($1, $2) RETURNING id`,
-			cur.ID, attemptNumber+1).Scan(&eventAttemptID)
+		eventAttemptID, err = insertRevisionAttempt(ctx, tx, cur.ID, attemptNumber+1, p.revision)
 		if err != nil {
-			return Task{}, fmt.Errorf("insert attempt: %w", err)
+			return Task{}, err
 		}
 	case p.To == StatusProvisioning:
 		_, err = tx.ExecContext(ctx, `
@@ -604,6 +809,38 @@ func applyTransition(ctx context.Context, tx *sql.Tx, cur Task, p TransitionPara
 		return Task{}, err
 	}
 	return next, nil
+}
+
+// nil revision (public Transition path) inserts a bare attempt that inherits the task's instructions
+func insertRevisionAttempt(ctx context.Context, tx *sql.Tx, taskID string, number int, r *RevisionParams) (string, error) {
+	var id string
+	if r == nil {
+		err := tx.QueryRowContext(ctx, `
+			INSERT INTO task_attempts (task_id, attempt_number)
+			VALUES ($1, $2) RETURNING id`, taskID, number).Scan(&id)
+		if err != nil {
+			return "", fmt.Errorf("insert attempt: %w", err)
+		}
+		return id, nil
+	}
+	feedback, err := json.Marshal(r.Feedback)
+	if err != nil {
+		return "", fmt.Errorf("marshal feedback: %w", err)
+	}
+	if r.Feedback == nil {
+		feedback = []byte(`[]`)
+	}
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO task_attempts
+			(task_id, attempt_number, instructions, base_commit_sha,
+			 requested_by_login, trigger_comment_id, feedback_json)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		taskID, number, r.Instructions, r.BaseCommitSHA,
+		r.RequestedByLogin, r.TriggerCommentID, feedback).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("insert attempt: %w", err)
+	}
+	return id, nil
 }
 
 // callers hold task row lock so max+1 sequence cannot race
