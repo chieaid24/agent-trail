@@ -402,3 +402,103 @@ func TestEnsureMirrorSkipsCheckedOutAgentBranches(t *testing.T) {
 		t.Fatalf("EnsureMirror after push: %v", err)
 	}
 }
+
+// commits on top of origin's branch from a second clone, as a reviewer would
+func pushHumanCommit(t *testing.T, origin, branch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "clone", "-q", "--branch", branch, origin, "clone")
+	clone := filepath.Join(dir, "clone")
+	if err := os.WriteFile(filepath.Join(clone, "HUMAN.md"), []byte("review fix\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, clone, "add", "-A")
+	runGit(t, clone, "commit", "-q", "-m", "human follow-up")
+	runGit(t, clone, "push", "-q", "origin", branch)
+	return runGit(t, clone, "rev-parse", "HEAD")
+}
+
+func TestCreateWorktreeRequiresBranchTip(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	m := newTestManager(t)
+	origin, base := buildOrigin(t)
+	repo := RepoRef{ID: "repo-1", CloneURL: origin}
+
+	first, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-1", BaseSHA: base, BranchLabel: "x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(first.Path, "ONE.md"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tip, err := m.Commit(ctx, first, CommitParams{Message: "one", TaskID: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Push(ctx, first, PushParams{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Remove(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// revision continues the branch from its pushed tip
+	second, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-2", BaseSHA: tip, BranchLabel: "x", RequireBranchTip: true,
+	})
+	if err != nil {
+		t.Fatalf("revision worktree: %v", err)
+	}
+	if second.Branch != first.Branch || second.BaseSHA != tip {
+		t.Fatalf("revision workspace = %+v", second)
+	}
+	if head := runGit(t, second.Path, "rev-parse", "HEAD"); head != tip {
+		t.Fatalf("revision head = %s, want %s", head, tip)
+	}
+	if _, err := os.Stat(filepath.Join(second.Path, "ONE.md")); err != nil {
+		t.Fatalf("revision worktree lacks the previous attempt's work: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(second.Path, "TWO.md"), []byte("2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Commit(ctx, second, CommitParams{Message: "two", TaskID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Push(ctx, second, PushParams{}); err != nil {
+		t.Fatalf("fast-forward push of a revision: %v", err)
+	}
+	moved := runGit(t, origin, "rev-parse", "refs/heads/"+second.Branch)
+	if err := m.Remove(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+
+	// a human pushed after trigger: the recorded base is stale
+	pushHumanCommit(t, origin, second.Branch)
+	_, err = m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-3", BaseSHA: moved, BranchLabel: "x", RequireBranchTip: true,
+	})
+	if !errors.Is(err, ErrBranchTipMoved) {
+		t.Fatalf("moved tip err = %v, want ErrBranchTipMoved", err)
+	}
+	if m.WorkspaceExists("attempt-3") {
+		t.Fatal("refused revision left a workspace behind")
+	}
+
+	// branch never pushed: nothing to continue
+	_, err = m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-4", BaseSHA: base, BranchLabel: "never-pushed", RequireBranchTip: true,
+	})
+	if !errors.Is(err, ErrBranchTipMoved) {
+		t.Fatalf("missing branch err = %v, want ErrBranchTipMoved", err)
+	}
+
+	// without the flag the first-attempt path is unchanged
+	if _, err := m.CreateWorktree(ctx, CreateParams{
+		Repo: repo, AttemptID: "attempt-5", BaseSHA: base, BranchLabel: "fresh",
+	}); err != nil {
+		t.Fatalf("plain create: %v", err)
+	}
+}

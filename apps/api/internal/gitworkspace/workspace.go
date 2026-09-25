@@ -12,11 +12,15 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
 )
 
+var ErrBranchTipMoved = errors.New("gitworkspace: branch tip differs from the attempt base")
+
 type CreateParams struct {
 	Repo        RepoRef
 	AttemptID   string
 	BaseSHA     string
 	BranchLabel string
+	// revision: the branch already exists on origin and its tip must still equal BaseSHA
+	RequireBranchTip bool
 }
 
 func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace, error) {
@@ -42,6 +46,11 @@ func (m *Manager) CreateWorktree(ctx context.Context, p CreateParams) (Workspace
 
 	if err := m.verifyBaseSHA(ctx, mirror, p.BaseSHA); err != nil {
 		return Workspace{}, err
+	}
+	if p.RequireBranchTip {
+		if err := m.verifyBranchTip(ctx, mirror, branch, p.BaseSHA); err != nil {
+			return Workspace{}, err
+		}
 	}
 
 	path := filepath.Join(m.workDir, p.AttemptID)
@@ -138,6 +147,22 @@ func (m *Manager) Lookup(attemptID string, repo RepoRef, branch, baseSHA string)
 		Branch:    branch,
 		BaseSHA:   baseSHA,
 	}, true
+}
+
+// mirror was just fetched, so the remote-tracking ref is origin's tip at provisioning time
+func (m *Manager) verifyBranchTip(ctx context.Context, mirror, branch, want string) error {
+	tip, _, err := m.git.runExit(ctx, mirror, []int{1},
+		"rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)
+	if err != nil {
+		return fmt.Errorf("gitworkspace: resolve branch tip: %w", err)
+	}
+	if tip == "" {
+		return fmt.Errorf("%w: %s is not on origin", ErrBranchTipMoved, branch)
+	}
+	if tip != want {
+		return fmt.Errorf("%w: %s is at %s, attempt base is %s", ErrBranchTipMoved, branch, tip, want)
+	}
+	return nil
 }
 
 // must resolve to exactly that object, never a prefix or another ref
