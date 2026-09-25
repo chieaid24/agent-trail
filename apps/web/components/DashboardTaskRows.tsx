@@ -15,15 +15,20 @@ export function DashboardTaskRows({ tasks }: { tasks: DashboardTask[] }) {
               className="grid grid-cols-[9rem_1fr_auto] items-baseline gap-x-4 px-2 py-2 hover:bg-surface"
             >
               <StatusBadge status={task.status} />
-              <span className="truncate text-base">{task.title}</span>
+              <span className="min-w-0">
+                <span className="block truncate text-base">{task.title}</span>
+                {reason && (
+                  <span
+                    className="block truncate text-sm text-muted"
+                    title={reason}
+                  >
+                    {reason}
+                  </span>
+                )}
+              </span>
               <span className="flex gap-4 text-sm text-muted">
                 {task.source_issue_number !== null && (
                   <span>issue #{task.source_issue_number}</span>
-                )}
-                {reason && (
-                  <span className="max-w-[32ch] truncate" title={reason}>
-                    {reason}
-                  </span>
                 )}
                 <span className="font-mono">
                   {formatDateTime(task.updated_at)}

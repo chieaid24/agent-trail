@@ -23,8 +23,18 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
               className="grid grid-cols-1 items-baseline gap-x-4 gap-y-1 md:grid-cols-[10rem_minmax(0,1fr)_auto] px-2 py-2 hover:bg-surface"
             >
               <StatusBadge status={t.status} />
-              <span className="min-w-0 truncate text-base text-foreground">
-                {t.title}
+              <span className="min-w-0">
+                <span className="block truncate text-base text-foreground">
+                  {t.title}
+                </span>
+                {reason && (
+                  <span
+                    className="block truncate text-sm text-muted"
+                    title={reason}
+                  >
+                    {reason}
+                  </span>
+                )}
               </span>
               <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-muted">
                 {t.source_issue_number !== null && (
@@ -37,11 +47,6 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
                   </span>
                 )}
                 {runtime !== null && <span>{formatDuration(runtime)}</span>}
-                {reason && (
-                  <span className="max-w-[32ch] truncate" title={reason}>
-                    {reason}
-                  </span>
-                )}
                 <span className="font-mono text-sm whitespace-nowrap">
                   {formatDateTime(t.created_at)}
                 </span>
