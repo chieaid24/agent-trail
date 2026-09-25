@@ -362,6 +362,147 @@ func (c *Client) CreateDraftPullRequest(ctx context.Context, installationID int6
 	return resp, nil
 }
 
+type Author struct {
+	Login string `json:"login"`
+	Type  string `json:"type"`
+}
+
+func (a Author) Bot() bool { return a.Type == "Bot" }
+
+type PullRequestHead struct {
+	Ref    string
+	SHA    string
+	RepoID int64 // 0 once a fork is deleted
+}
+
+type PullRequestDetail struct {
+	Number  int64
+	State   string
+	Merged  bool
+	HTMLURL string
+	Head    PullRequestHead
+}
+
+func (c *Client) GetPullRequest(ctx context.Context, installationID int64, owner, repo string, number int64) (PullRequestDetail, error) {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return PullRequestDetail{}, err
+	}
+	var resp struct {
+		Number  int64  `json:"number"`
+		State   string `json:"state"`
+		Merged  bool   `json:"merged"`
+		HTMLURL string `json:"html_url"`
+		Head    struct {
+			Ref  string `json:"ref"`
+			SHA  string `json:"sha"`
+			Repo *struct {
+				ID int64 `json:"id"`
+			} `json:"repo"`
+		} `json:"head"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	if err := c.do(ctx, http.MethodGet, path, "Bearer "+token, nil, &resp); err != nil {
+		return PullRequestDetail{}, err
+	}
+	detail := PullRequestDetail{
+		Number: resp.Number, State: resp.State, Merged: resp.Merged,
+		HTMLURL: resp.HTMLURL,
+		Head:    PullRequestHead{Ref: resp.Head.Ref, SHA: resp.Head.SHA},
+	}
+	if resp.Head.Repo != nil {
+		detail.Head.RepoID = resp.Head.Repo.ID
+	}
+	return detail, nil
+}
+
+type Review struct {
+	ID          int64     `json:"id"`
+	Body        string    `json:"body"`
+	State       string    `json:"state"`
+	User        Author    `json:"user"`
+	SubmittedAt time.Time `json:"submitted_at"`
+}
+
+type ReviewComment struct {
+	ID           int64     `json:"id"`
+	Body         string    `json:"body"`
+	Path         string    `json:"path"`
+	Line         *int      `json:"line"`
+	OriginalLine *int      `json:"original_line"`
+	DiffHunk     string    `json:"diff_hunk"`
+	User         Author    `json:"user"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type IssueComment struct {
+	ID        int64     `json:"id"`
+	Body      string    `json:"body"`
+	User      Author    `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// no since filter on this endpoint; callers apply the cutoff
+func (c *Client) ListPullRequestReviews(ctx context.Context, installationID int64, owner, repo string, number int64) ([]Review, error) {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	return paginate[Review](ctx, c, token, path, nil)
+}
+
+func (c *Client) ListPullRequestReviewComments(ctx context.Context, installationID int64, owner, repo string, number int64, since time.Time) ([]ReviewComment, error) {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/comments",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	return paginate[ReviewComment](ctx, c, token, path, sinceQuery(since))
+}
+
+func (c *Client) ListIssueComments(ctx context.Context, installationID int64, owner, repo string, number int64, since time.Time) ([]IssueComment, error) {
+	token, err := c.InstallationToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments",
+		url.PathEscape(owner), url.PathEscape(repo), number)
+	return paginate[IssueComment](ctx, c, token, path, sinceQuery(since))
+}
+
+func sinceQuery(since time.Time) url.Values {
+	if since.IsZero() {
+		return nil
+	}
+	return url.Values{"since": {since.UTC().Format(time.RFC3339)}}
+}
+
+// bounded: github returns at most 100 per page; a short page ends the walk
+func paginate[T any](ctx context.Context, c *Client, token, path string, query url.Values) ([]T, error) {
+	const perPage = 100
+	var all []T
+	for page := 1; ; page++ {
+		q := url.Values{}
+		for k, v := range query {
+			q[k] = v
+		}
+		q.Set("per_page", fmt.Sprint(perPage))
+		q.Set("page", fmt.Sprint(page))
+		var items []T
+		if err := c.do(ctx, http.MethodGet, path+"?"+q.Encode(), "Bearer "+token, nil, &items); err != nil {
+			return nil, err
+		}
+		all = append(all, items...)
+		if len(items) < perPage {
+			return all, nil
+		}
+	}
+}
+
 // retries refresh the body rather than opening a second pr
 func (c *Client) UpdatePullRequestBody(ctx context.Context, installationID int64, owner, repo string, number int64, body string) error {
 	token, err := c.InstallationToken(ctx, installationID)

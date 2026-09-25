@@ -351,3 +351,101 @@ func TestUpdatePullRequestBodyPatchesNumber(t *testing.T) {
 		t.Fatalf("body = %v", got)
 	}
 }
+
+func TestGetPullRequestReadsHead(t *testing.T) {
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/pulls/12" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"number":12,"state":"open","merged":false,"html_url":"u",
+			"head":{"ref":"agent-trail/x","sha":"abc","repo":{"id":501}}}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	pr, err := c.GetPullRequest(context.Background(), 7, "o", "r", 12)
+	if err != nil || pr.Number != 12 || pr.Head.Ref != "agent-trail/x" ||
+		pr.Head.SHA != "abc" || pr.Head.RepoID != 501 {
+		t.Fatalf("GetPullRequest = %+v, %v", pr, err)
+	}
+}
+
+func TestGetPullRequestToleratesDeletedForkHead(t *testing.T) {
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"number":12,"head":{"ref":"x","sha":"abc","repo":null}}`)
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	pr, err := c.GetPullRequest(context.Background(), 7, "o", "r", 12)
+	if err != nil || pr.Head.RepoID != 0 {
+		t.Fatalf("GetPullRequest = %+v, %v", pr, err)
+	}
+}
+
+func TestReviewFeedbackListsPaginateAndPassSince(t *testing.T) {
+	since := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	var paths []string
+	srv := httptest.NewServer(tokenOr404(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path+"?"+r.URL.RawQuery)
+		switch r.URL.Path {
+		case "/repos/o/r/pulls/12/reviews":
+			if r.URL.Query().Get("since") != "" {
+				t.Errorf("reviews endpoint must not receive since: %s", r.URL.RawQuery)
+			}
+			if r.URL.Query().Get("page") == "1" {
+				var b strings.Builder
+				b.WriteString("[")
+				for i := range 100 {
+					if i > 0 {
+						b.WriteString(",")
+					}
+					fmt.Fprintf(&b, `{"id":%d,"body":"r%d","state":"COMMENTED","user":{"login":"alice","type":"User"},"submitted_at":"2026-09-24T11:00:00Z"}`, i+1, i+1)
+				}
+				b.WriteString("]")
+				fmt.Fprint(w, b.String())
+				return
+			}
+			fmt.Fprint(w, `[{"id":101,"body":"last","state":"APPROVED","user":{"login":"bob","type":"User"},"submitted_at":"2026-09-24T12:00:00Z"}]`)
+		case "/repos/o/r/pulls/12/comments":
+			if r.URL.Query().Get("since") != "2026-09-24T10:00:00Z" {
+				t.Errorf("review comments since = %q", r.URL.Query().Get("since"))
+			}
+			fmt.Fprint(w, `[{"id":5,"body":"rename","path":"a.go","line":7,"diff_hunk":"@@ -1 +1 @@","user":{"login":"alice","type":"User"},"created_at":"2026-09-24T11:30:00Z"},
+				{"id":6,"body":"outdated","path":"b.go","line":null,"original_line":3,"diff_hunk":"@@","user":{"login":"bot[bot]","type":"Bot"},"created_at":"2026-09-24T11:31:00Z"}]`)
+		case "/repos/o/r/issues/12/comments":
+			if r.URL.Query().Get("since") != "2026-09-24T10:00:00Z" {
+				t.Errorf("issue comments since = %q", r.URL.Query().Get("since"))
+			}
+			fmt.Fprint(w, `[{"id":9,"body":"/agent-trail revise","user":{"login":"alice","type":"User"},"created_at":"2026-09-24T12:30:00Z"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c, _ := newTestClient(t, srv.URL)
+	ctx := context.Background()
+	reviews, err := c.ListPullRequestReviews(ctx, 7, "o", "r", 12)
+	if err != nil || len(reviews) != 101 || reviews[100].User.Login != "bob" {
+		t.Fatalf("ListPullRequestReviews = %d, %v", len(reviews), err)
+	}
+	comments, err := c.ListPullRequestReviewComments(ctx, 7, "o", "r", 12, since)
+	if err != nil || len(comments) != 2 {
+		t.Fatalf("ListPullRequestReviewComments = %+v, %v", comments, err)
+	}
+	if comments[0].Line == nil || *comments[0].Line != 7 || comments[0].Path != "a.go" {
+		t.Fatalf("review comment = %+v", comments[0])
+	}
+	if comments[1].Line != nil || comments[1].OriginalLine == nil || !comments[1].User.Bot() {
+		t.Fatalf("outdated bot comment = %+v", comments[1])
+	}
+	issueComments, err := c.ListIssueComments(ctx, 7, "o", "r", 12, since)
+	if err != nil || len(issueComments) != 1 || issueComments[0].ID != 9 {
+		t.Fatalf("ListIssueComments = %+v, %v", issueComments, err)
+	}
+	if len(paths) != 4 {
+		t.Fatalf("requests = %v, want reviews x2, review comments, issue comments", paths)
+	}
+}
