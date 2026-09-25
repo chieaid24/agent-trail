@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 type DBPinger interface {
@@ -35,6 +36,17 @@ type Server struct {
 
 	streamPollInterval time.Duration
 	streamHeartbeat    time.Duration
+
+	cancelObserver CancelObserver
+}
+
+// notified after a cancel request lands; used to settle side effects the runner will never see
+type CancelObserver interface {
+	TaskCancelled(ctx context.Context, t task.Task)
+}
+
+func WithCancelObserver(observer CancelObserver) Option {
+	return func(s *Server) { s.cancelObserver = observer }
 }
 
 var _ DBPinger = (*sql.DB)(nil)

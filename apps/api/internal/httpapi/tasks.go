@@ -172,6 +172,9 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		s.writeTaskError(w, r, err)
 		return
 	}
+	if s.cancelObserver != nil && t.Status == task.StatusCancelled {
+		s.cancelObserver.TaskCancelled(r.Context(), t)
+	}
 	// "requested", not "cancelled": call may be a no-op; timeline holds the truth
 	s.logger.LogAttrs(r.Context(), slog.LevelInfo, "task cancel requested",
 		slog.String("event", "task_cancel_requested"),
