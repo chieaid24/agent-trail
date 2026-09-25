@@ -185,9 +185,7 @@ function Meta({
   return (
     <div className={wide ? "min-w-0 xl:col-span-2" : "min-w-0"}>
       <dt className="text-muted">{label}</dt>
-      <dd className={`mt-1 ${mono ? "font-mono break-all" : "break-words"}`}>
-        {value}
-      </dd>
+      <dd className={`mt-1 break-words ${mono ? "font-mono" : ""}`}>{value}</dd>
     </div>
   );
 }
