@@ -529,7 +529,7 @@ func TestClaimUsesRevisionAttemptInstructions(t *testing.T) {
 			t.Fatalf("transition to %s: %v", to, err)
 		}
 	}
-	_, err := ts.RequestRevision(ctx, tk.ID, task.RevisionParams{
+	_, _, err := ts.RequestRevision(ctx, tk.ID, task.RevisionParams{
 		Instructions:     "revised instructions",
 		BaseCommitSHA:    strings.Repeat("c", 40),
 		RequestedByLogin: "alice",

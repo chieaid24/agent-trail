@@ -206,32 +206,32 @@ func (s *Store) Transition(ctx context.Context, id string, p TransitionParams) (
 
 // awaiting_review -> revision_requested -> queued under one row lock; the limit and replay
 // checks share that lock so two revise commands cannot both pass
-func (s *Store) RequestRevision(ctx context.Context, id string, p RevisionParams) (Task, error) {
+func (s *Store) RequestRevision(ctx context.Context, id string, p RevisionParams) (Task, Attempt, error) {
 	if !IsUUID(id) {
-		return Task{}, ErrNotFound
+		return Task{}, Attempt{}, ErrNotFound
 	}
 	if p.Instructions == "" || !shaRe.MatchString(p.BaseCommitSHA) ||
 		p.RequestedByLogin == "" || p.TriggerCommentID <= 0 || p.MaxAttempts < 1 {
-		return Task{}, errors.New("revision params incomplete")
+		return Task{}, Attempt{}, errors.New("revision params incomplete")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Task{}, fmt.Errorf("begin: %w", err)
+		return Task{}, Attempt{}, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	cur, err := lockTask(ctx, tx, id)
 	if err != nil {
-		return Task{}, err
+		return Task{}, Attempt{}, err
 	}
 	var attempts int
 	err = tx.QueryRowContext(ctx,
 		`SELECT count(*) FROM task_attempts WHERE task_id = $1`, id).Scan(&attempts)
 	if err != nil {
-		return Task{}, fmt.Errorf("count attempts: %w", err)
+		return Task{}, Attempt{}, fmt.Errorf("count attempts: %w", err)
 	}
 	if attempts >= p.MaxAttempts {
-		return Task{}, fmt.Errorf("%w: %d of %d attempts used", ErrRevisionLimit, attempts, p.MaxAttempts)
+		return Task{}, Attempt{}, fmt.Errorf("%w: %d of %d attempts used", ErrRevisionLimit, attempts, p.MaxAttempts)
 	}
 	requested, err := applyTransition(ctx, tx, cur, TransitionParams{
 		To:             StatusRevisionRequested,
@@ -240,10 +240,10 @@ func (s *Store) RequestRevision(ctx context.Context, id string, p RevisionParams
 		IdempotencyKey: p.IdempotencyKey,
 	})
 	if err != nil {
-		return Task{}, err
+		return Task{}, Attempt{}, err
 	}
 	if requested.Status != StatusRevisionRequested {
-		return Task{}, ErrRevisionReplayed
+		return Task{}, Attempt{}, ErrRevisionReplayed
 	}
 	queued, err := applyTransition(ctx, tx, requested, TransitionParams{
 		To:       StatusQueued,
@@ -252,12 +252,18 @@ func (s *Store) RequestRevision(ctx context.Context, id string, p RevisionParams
 		revision: &p,
 	})
 	if err != nil {
-		return Task{}, err
+		return Task{}, Attempt{}, err
+	}
+	next, err := scanAttempt(tx.QueryRowContext(ctx, `
+		SELECT `+attemptColumns+` FROM task_attempts
+		WHERE task_id = $1 AND status = 'active'`, id))
+	if err != nil {
+		return Task{}, Attempt{}, fmt.Errorf("load revision attempt: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return Task{}, fmt.Errorf("commit: %w", err)
+		return Task{}, Attempt{}, fmt.Errorf("commit: %w", err)
 	}
-	return queued, nil
+	return queued, next, nil
 }
 
 // cancel of already-cancelled task is idempotent no-op; other terminal states reject

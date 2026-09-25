@@ -138,7 +138,7 @@ func superseded(t *testing.T, db *sql.DB, taskID string) string {
 			t.Fatalf("transition to %s: %v", to, err)
 		}
 	}
-	_, err := ts.RequestRevision(ctx, taskID, task.RevisionParams{
+	_, _, err := ts.RequestRevision(ctx, taskID, task.RevisionParams{
 		Instructions: "revise", BaseCommitSHA: strings.Repeat("b", 40),
 		RequestedByLogin: "alice", TriggerCommentID: 1, MaxAttempts: 5,
 		IdempotencyKey: "revise:1",

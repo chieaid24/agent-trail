@@ -35,6 +35,10 @@ type TaskService interface {
 	ActiveTaskForIssue(ctx context.Context, repositoryID string, issueNumber int64) (task.Task, bool, error)
 	TaskForBranch(ctx context.Context, repositoryID, workingBranch string) (task.Task, bool, error)
 	Transition(ctx context.Context, id string, p task.TransitionParams) (task.Task, error)
+	RequestRevision(ctx context.Context, id string, p task.RevisionParams) (task.Task, task.Attempt, error)
+	Attempts(ctx context.Context, taskID string) ([]task.Attempt, error)
+	PublishedAt(ctx context.Context, taskID string) (*time.Time, error)
+	RecordTriggerCheckRun(ctx context.Context, taskID string, checkRunID int64) error
 	AppendEvent(ctx context.Context, taskID, eventType, source string, payload map[string]string) error
 }
 
@@ -44,6 +48,10 @@ type API interface {
 	BranchHeadSHA(ctx context.Context, installationID int64, owner, repo, branch string) (string, error)
 	CreateIssueComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int64, body string) error
 	CreateCheckRun(ctx context.Context, installationID int64, owner, repo string, p CheckRunParams) (int64, error)
+	GetPullRequest(ctx context.Context, installationID int64, owner, repo string, number int64) (PullRequestDetail, error)
+	ListPullRequestReviews(ctx context.Context, installationID int64, owner, repo string, number int64) ([]Review, error)
+	ListPullRequestReviewComments(ctx context.Context, installationID int64, owner, repo string, number int64, since time.Time) ([]ReviewComment, error)
+	ListIssueComments(ctx context.Context, installationID int64, owner, repo string, number int64, since time.Time) ([]IssueComment, error)
 }
 
 type Processor struct {
@@ -293,11 +301,14 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 		}
 		return "processed", nil
 	}
-	if len(ev.Issue.PullRequest) > 0 {
-		if err := reply("`/agent-trail run` works on issues, not pull requests."); err != nil {
-			return "", fmt.Errorf("post pull-request reply: %w", err)
-		}
-		return "processed", nil
+	onPullRequest := len(ev.Issue.PullRequest) > 0
+	if cmd.Verb == VerbRun && onPullRequest {
+		return p.replyProcessed(reply, "`/agent-trail run` works on issues, not pull requests. "+
+			"Use `/agent-trail revise` on an Agent Trail pull request.")
+	}
+	if cmd.Verb == VerbRevise && !onPullRequest {
+		return p.replyProcessed(reply, "`/agent-trail revise` works on Agent Trail pull requests, "+
+			"not issues. Use `/agent-trail run` on an issue.")
 	}
 	if !repo.IsEnabled {
 		if err := reply("This repository is not enabled for Agent Trail."); err != nil {
@@ -320,10 +331,13 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 			slog.String("permission", permission),
 			slog.Int64("issue", ev.Issue.Number),
 		)
-		if err := reply("Only users with write access can run Agent Trail tasks."); err != nil {
+		if err := reply("Only users with write access can run Agent Trail commands."); err != nil {
 			return "", fmt.Errorf("post unauthorized reply: %w", err)
 		}
 		return "processed", nil
+	}
+	if cmd.Verb == VerbRevise {
+		return p.handleRevise(ctx, d, ev, repo, reply)
 	}
 
 	if existing, active, err := p.tasks.ActiveTaskForIssue(ctx, repo.ID, ev.Issue.Number); err != nil {
@@ -344,6 +358,7 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 		SourceCommentID:   &ev.Comment.ID,
 		OrganizationID:    &repo.OrganizationID,
 		RepositoryID:      &repo.ID,
+		RequestedByLogin:  ev.Comment.User.Login,
 	})
 	if errors.Is(err, task.ErrActiveTaskExists) {
 		// lost a race with a concurrent command on the same issue
@@ -371,7 +386,17 @@ func (p *Processor) handleIssueComment(ctx context.Context, d Delivery, payload 
 	)
 
 	// side effects after the durable task: failures logged, never unwind the task
-	p.createCheckRun(ctx, d, instID, repo, created)
+	headSHA, err := p.api.BranchHeadSHA(ctx, instID, repo.Owner, repo.Name, repo.DefaultBranch)
+	if err != nil {
+		p.logger.LogAttrs(ctx, slog.LevelWarn, "check run creation failed",
+			slog.String("event", "github_check_run_failed"),
+			slog.String("trace_id", d.TraceID),
+			slog.String("task_id", created.ID),
+			slog.String("error", err.Error()),
+		)
+	} else {
+		p.createTriggerCheckRun(ctx, d, instID, repo, created.ID, headSHA)
+	}
 	ack := fmt.Sprintf(
 		"Agent Trail queued task `%s` for this issue (requested by @%s). "+
 			"The `%s` check tracks progress.",
@@ -510,33 +535,35 @@ func (p *Processor) repositoryForCommand(ctx context.Context, ev issueCommentPay
 	return p.store.RepositoryByGitHubID(ctx, ev.Repository.ID)
 }
 
-func (p *Processor) createCheckRun(ctx context.Context, d Delivery, instID int64, repo StoredRepository, created task.Task) {
-	headSHA, err := p.api.BranchHeadSHA(ctx, instID, repo.Owner, repo.Name,
-		repo.DefaultBranch)
-	if err == nil {
-		var checkRunID int64
-		checkRunID, err = p.api.CreateCheckRun(ctx, instID, repo.Owner,
-			repo.Name, CheckRunParams{
-				Name:       CheckRunName,
-				HeadSHA:    headSHA,
-				ExternalID: created.ID,
-				Status:     "queued",
-			})
-		if err == nil {
-			p.appendTaskEvent(ctx, created.ID, "github.check_run.created",
-				map[string]string{
-					"check_run_id": strconv.FormatInt(checkRunID, 10),
-					"head_sha":     headSHA,
-				})
-			return
-		}
+// queued on the trigger head; the runner completes it with the attempt's conclusion
+func (p *Processor) createTriggerCheckRun(ctx context.Context, d Delivery, instID int64, repo StoredRepository, taskID, headSHA string) {
+	checkRunID, err := p.api.CreateCheckRun(ctx, instID, repo.Owner, repo.Name, CheckRunParams{
+		Name:       CheckRunName,
+		HeadSHA:    headSHA,
+		ExternalID: taskID,
+		Status:     "queued",
+	})
+	if err != nil {
+		p.logger.LogAttrs(ctx, slog.LevelWarn, "check run creation failed",
+			slog.String("event", "github_check_run_failed"),
+			slog.String("trace_id", d.TraceID),
+			slog.String("task_id", taskID),
+			slog.String("error", err.Error()),
+		)
+		return
 	}
-	p.logger.LogAttrs(ctx, slog.LevelWarn, "check run creation failed",
-		slog.String("event", "github_check_run_failed"),
-		slog.String("trace_id", d.TraceID),
-		slog.String("task_id", created.ID),
-		slog.String("error", err.Error()),
-	)
+	if err := p.tasks.RecordTriggerCheckRun(ctx, taskID, checkRunID); err != nil {
+		p.logger.LogAttrs(ctx, slog.LevelWarn, "trigger check run not recorded",
+			slog.String("event", "github_check_run_record_failed"),
+			slog.String("trace_id", d.TraceID),
+			slog.String("task_id", taskID),
+			slog.String("error", err.Error()),
+		)
+	}
+	p.appendTaskEvent(ctx, taskID, "github.check_run.created", map[string]string{
+		"check_run_id": strconv.FormatInt(checkRunID, 10),
+		"head_sha":     headSHA,
+	})
 }
 
 func (p *Processor) appendTaskEvent(ctx context.Context, taskID, eventType string, payload map[string]string) {

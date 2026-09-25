@@ -663,12 +663,15 @@ func TestRequestRevisionInsertsAttemptWithFields(t *testing.T) {
 	ctx := context.Background()
 	tk := reviewedTask(t, s)
 
-	queued, err := s.RequestRevision(ctx, tk.ID, revisionParams(555))
+	queued, created, err := s.RequestRevision(ctx, tk.ID, revisionParams(555))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if queued.Status != StatusQueued || queued.Phase != PhasePending {
 		t.Fatalf("task = %s/%s, want queued/pending", queued.Status, queued.Phase)
+	}
+	if created.Number != 2 || created.Status != "active" || created.TaskID != tk.ID {
+		t.Fatalf("returned attempt = %+v", created)
 	}
 
 	attempts, err := s.Attempts(ctx, tk.ID)
@@ -690,7 +693,7 @@ func TestRequestRevisionInsertsAttemptWithFields(t *testing.T) {
 		t.Fatalf("attempt 2 = %+v", second)
 	}
 	got, err := s.Attempt(ctx, second.ID)
-	if err != nil || got.ID != second.ID || got.Number != 2 {
+	if err != nil || got.ID != second.ID || got.Number != 2 || got.ID != created.ID {
 		t.Fatalf("Attempt = %+v, err = %v", got, err)
 	}
 
@@ -720,10 +723,10 @@ func TestRequestRevisionGuards(t *testing.T) {
 
 	t.Run("replayed trigger comment is a no-op", func(t *testing.T) {
 		tk := reviewedTask(t, s)
-		if _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); err != nil {
+		if _, _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); !errors.Is(err, ErrRevisionReplayed) {
+		if _, _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); !errors.Is(err, ErrRevisionReplayed) {
 			t.Fatalf("replay err = %v", err)
 		}
 		attempts, _ := s.Attempts(ctx, tk.ID)
@@ -736,14 +739,14 @@ func TestRequestRevisionGuards(t *testing.T) {
 		tk := reviewedTask(t, s)
 		p := revisionParams(2)
 		p.MaxAttempts = 1
-		if _, err := s.RequestRevision(ctx, tk.ID, p); !errors.Is(err, ErrRevisionLimit) {
+		if _, _, err := s.RequestRevision(ctx, tk.ID, p); !errors.Is(err, ErrRevisionLimit) {
 			t.Fatalf("limit err = %v", err)
 		}
 		if got := mustGet(t, s, tk.ID).Status; got != StatusAwaitingReview {
 			t.Fatalf("task after refused revision = %s", got)
 		}
 		p.MaxAttempts = 2
-		if _, err := s.RequestRevision(ctx, tk.ID, p); err != nil {
+		if _, _, err := s.RequestRevision(ctx, tk.ID, p); err != nil {
 			t.Fatalf("revision within limit: %v", err)
 		}
 	})
@@ -752,12 +755,12 @@ func TestRequestRevisionGuards(t *testing.T) {
 		running := mustCreate(t, s)
 		mustTransition(t, s, running.ID, StatusProvisioning)
 		var invalid *InvalidTransitionError
-		if _, err := s.RequestRevision(ctx, running.ID, revisionParams(3)); !errors.As(err, &invalid) {
+		if _, _, err := s.RequestRevision(ctx, running.ID, revisionParams(3)); !errors.As(err, &invalid) {
 			t.Fatalf("running err = %v", err)
 		}
 		done := reviewedTask(t, s)
 		mustTransition(t, s, done.ID, StatusCompleted)
-		if _, err := s.RequestRevision(ctx, done.ID, revisionParams(4)); !errors.As(err, &invalid) {
+		if _, _, err := s.RequestRevision(ctx, done.ID, revisionParams(4)); !errors.As(err, &invalid) {
 			t.Fatalf("terminal err = %v", err)
 		}
 	})
@@ -773,7 +776,7 @@ func TestRequestRevisionGuards(t *testing.T) {
 		} {
 			p := revisionParams(5)
 			mutate(&p)
-			if _, err := s.RequestRevision(ctx, tk.ID, p); err == nil {
+			if _, _, err := s.RequestRevision(ctx, tk.ID, p); err == nil {
 				t.Errorf("%s accepted", name)
 			}
 		}
