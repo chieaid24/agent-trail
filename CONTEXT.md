@@ -38,8 +38,13 @@ the code, the ADRs under `docs/adr/`, and the README.
   attempt with its base commit, final commit, validation result, and reported
   cost. The evidence report above it always belongs to the latest attempt.
 - **Attempt selector**: the dashboard control on a task page that switches the
-  timeline, validations, evidence, and trace between attempts; the latest
-  attempt is selected by default.
+  timeline, trace, logs, validations, evidence, and files between attempts and
+  shows the selected attempt's requester, base and final commits, and
+  instructions in the header; the latest attempt is selected by default.
+- **Status reason**: the reason recorded with a task's latest transition, kept
+  on the task row as `status_reason` (for example `pull request #7 merged` or
+  `pull request #7 closed without merge`). The dashboard shows it for
+  completed and cancelled tasks wherever their status appears.
 - **Trigger check run**: the `Agent Trail Task` check run created queued on the
   trigger head (the default branch for a run, the pull request head for a
   revise) when the command is accepted, before the attempt has a final commit.
