@@ -57,6 +57,13 @@ func (e *Executor) publishTarget(ctx context.Context, c *Claim, t task.Task) (*p
 
 // first recorded base/branch win so a recovered attempt reuses them
 func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task, pub *publishTarget) (gitworkspace.Workspace, error) {
+	attempt, err := e.Tasks.Attempt(ctx, c.AttemptID)
+	if err != nil {
+		return gitworkspace.Workspace{}, err
+	}
+	if attempt.Number > 1 {
+		return e.provisionRevision(ctx, c, t, pub, attempt)
+	}
 	rc := pub.repo
 	base := ""
 	if t.BaseCommitSHA != nil {
@@ -91,24 +98,54 @@ func (e *Executor) provisionWorkspace(ctx context.Context, c *Claim, t task.Task
 		BaseSHA:     base,
 		BranchLabel: strings.TrimPrefix(branch, gitworkspace.BranchPrefix),
 	}
-	ws, err := e.createWorktree(ctx, c, params)
-	if err != nil {
-		// dead prior owner may have left worktree/branch behind: clear both, retry once; cleanup failure must not mask err
-		if fenceErr := e.fenceLeaseOwnership(ctx, c); fenceErr != nil {
-			return gitworkspace.Workspace{}, errors.Join(err,
-				fmt.Errorf("fence stale workspace cleanup: %w", fenceErr))
-		}
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), e.leaseOperationTimeout())
-		defer cleanupCancel()
-		if cleanupErr := e.Workspaces.CleanupStale(cleanupCtx, repoRef, c.AttemptID, branch); cleanupErr != nil {
-			return gitworkspace.Workspace{}, errors.Join(err, cleanupErr)
-		}
-		ws, err = e.createWorktree(ctx, c, params)
-		if err != nil {
-			return gitworkspace.Workspace{}, err
-		}
+	return e.createWorktreeRetryingStale(ctx, c, repoRef, branch, params)
+}
+
+// continues the pushed branch from the head recorded at trigger; a moved tip fails the attempt,
+// so the platform never rebases and never force-pushes (ADR 0001)
+func (e *Executor) provisionRevision(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, attempt task.Attempt) (gitworkspace.Workspace, error) {
+	if t.WorkingBranch == nil || attempt.BaseCommitSHA == nil {
+		return gitworkspace.Workspace{}, e.failTask(ctx, c, "publish_state_missing",
+			"revision attempt has no recorded working branch or base commit")
 	}
-	return ws, nil
+	branch, base := *t.WorkingBranch, *attempt.BaseCommitSHA
+	repoRef, err := e.repoRef(ctx, c, pub.repo)
+	if err != nil {
+		return gitworkspace.Workspace{}, err
+	}
+	params := gitworkspace.CreateParams{
+		Repo:             repoRef,
+		AttemptID:        c.AttemptID,
+		BaseSHA:          base,
+		BranchLabel:      strings.TrimPrefix(branch, gitworkspace.BranchPrefix),
+		RequireBranchTip: true,
+	}
+	ws, err := e.createWorktreeRetryingStale(ctx, c, repoRef, branch, params)
+	if errors.Is(err, gitworkspace.ErrBranchTipMoved) {
+		if ctx.Err() != nil {
+			return gitworkspace.Workspace{}, context.Cause(ctx)
+		}
+		return gitworkspace.Workspace{}, e.failTask(ctx, c, "base_mismatch", err.Error())
+	}
+	return ws, err
+}
+
+// dead prior owner may have left worktree/branch behind: clear both, retry once; cleanup failure must not mask err
+func (e *Executor) createWorktreeRetryingStale(ctx context.Context, c *Claim, repoRef gitworkspace.RepoRef, branch string, params gitworkspace.CreateParams) (gitworkspace.Workspace, error) {
+	ws, err := e.createWorktree(ctx, c, params)
+	if err == nil || errors.Is(err, gitworkspace.ErrBranchTipMoved) {
+		return ws, err
+	}
+	if fenceErr := e.fenceLeaseOwnership(ctx, c); fenceErr != nil {
+		return gitworkspace.Workspace{}, errors.Join(err,
+			fmt.Errorf("fence stale workspace cleanup: %w", fenceErr))
+	}
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), e.leaseOperationTimeout())
+	defer cleanupCancel()
+	if cleanupErr := e.Workspaces.CleanupStale(cleanupCtx, repoRef, c.AttemptID, branch); cleanupErr != nil {
+		return gitworkspace.Workspace{}, errors.Join(err, cleanupErr)
+	}
+	return e.createWorktree(ctx, c, params)
 }
 
 // fresh installation token embedded in clone url; never logged, redacted from errors
@@ -164,10 +201,14 @@ func branchLabel(t task.Task) string {
 
 // clean tree at base = no-change; clean tree with moved head = recovered owner's commit
 func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, ws gitworkspace.Workspace, summary string) (task.Status, error) {
-	if t.BaseCommitSHA != nil && ws.BaseSHA != *t.BaseCommitSHA {
+	attempt, err := e.Tasks.Attempt(ctx, c.AttemptID)
+	if err != nil {
+		return "", err
+	}
+	if attempt.BaseCommitSHA != nil && ws.BaseSHA != *attempt.BaseCommitSHA {
 		return "", e.failTask(ctx, c, "base_mismatch", fmt.Sprintf(
 			"workspace base %s does not match recorded base %s",
-			ws.BaseSHA, *t.BaseCommitSHA))
+			ws.BaseSHA, *attempt.BaseCommitSHA))
 	}
 
 	provider := e.Adapter.Name()
@@ -178,11 +219,20 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 	if t.AgentModel != nil {
 		model = *t.AgentModel
 	}
+	message := t.Title
+	if attempt.Number > 1 {
+		message = fmt.Sprintf("%s (attempt %d)", t.Title, attempt.Number)
+	}
+	requestedBy := ""
+	if attempt.RequestedByLogin != nil {
+		requestedBy = *attempt.RequestedByLogin
+	}
 	sha, err := e.Workspaces.Commit(ctx, ws, gitworkspace.CommitParams{
-		Message:  t.Title,
-		TaskID:   t.ID,
-		Provider: provider,
-		Model:    model,
+		Message:     message,
+		TaskID:      t.ID,
+		Provider:    provider,
+		Model:       model,
+		RequestedBy: requestedBy,
 	})
 	if errors.Is(err, gitworkspace.ErrNothingToCommit) {
 		head, headErr := e.Workspaces.Head(ctx, ws)
@@ -190,7 +240,7 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 			return "", headErr
 		}
 		if head == ws.BaseSHA {
-			return "", e.publishNoChange(ctx, c, t, pub, ws.BaseSHA, summary)
+			return "", e.publishNoChange(ctx, c, t, pub, attempt, ws.BaseSHA, summary)
 		}
 		sha = head
 	} else if err != nil {
@@ -216,16 +266,25 @@ func (e *Executor) publishFromWorkspace(ctx context.Context, log *slog.Logger, c
 	}); err != nil {
 		return "", err
 	}
-	return e.publishToGitHub(ctx, log, c, t, pub, ws.Branch, ws.BaseSHA, sha)
+	return e.publishToGitHub(ctx, log, c, t, pub, attempt, ws.Branch, ws.BaseSHA, sha)
 }
 
 // reattach surviving worktree, else publish from pushed branch, else the work is gone
 func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget) (st task.Status, retErr error) {
-	if t.WorkingBranch == nil || t.BaseCommitSHA == nil {
+	attempt, err := e.Tasks.Attempt(ctx, c.AttemptID)
+	if err != nil {
+		return "", err
+	}
+	// a revision's base is the pull request head at trigger, recorded on the attempt
+	baseSHA := attempt.BaseCommitSHA
+	if baseSHA == nil {
+		baseSHA = t.BaseCommitSHA
+	}
+	if t.WorkingBranch == nil || baseSHA == nil {
 		return "", e.failTask(ctx, c, "publish_state_missing",
 			"task reached publishing without a recorded branch and base commit")
 	}
-	branch, base := *t.WorkingBranch, *t.BaseCommitSHA
+	branch, base := *t.WorkingBranch, *baseSHA
 	rc := pub.repo
 
 	repoRef, err := e.repoRef(ctx, c, rc)
@@ -265,17 +324,22 @@ func (e *Executor) publishRecovered(ctx context.Context, log *slog.Logger, c *Cl
 	if err != nil {
 		return "", e.publishFailure(ctx, c, "resolve pushed branch", err)
 	}
+	// branch still at the attempt base: the prior owner never pushed its commit
+	if head == base {
+		return "", e.failTask(ctx, c, "workspace_lost",
+			"the workspace was lost before its work was pushed")
+	}
 	if err := e.Store.RecordFinalCommit(ctx, c.AttemptID, head); err != nil {
 		return "", err
 	}
-	if _, err := e.publishToGitHub(ctx, log, c, t, pub, branch, base, head); err != nil {
+	if _, err := e.publishToGitHub(ctx, log, c, t, pub, attempt, branch, base, head); err != nil {
 		return "", err
 	}
 	return e.transition(ctx, c, task.StatusAwaitingReview, "runner", "")
 }
 
 // every step replay-safe: pr found-or-created by head branch, check run by external id
-func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, branch, baseSHA, finalSHA string) (task.Status, error) {
+func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Claim, t task.Task, pub *publishTarget, attempt task.Attempt, branch, baseSHA, finalSHA string) (task.Status, error) {
 	if err := e.detectConflicts(ctx, log, c, t, pub.repo, baseSHA, finalSHA); err != nil {
 		return "", err
 	}
@@ -333,18 +397,29 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 		return "", err
 	}
 
+	conclusion := checkConclusion(report)
 	if err := e.upsertCheckRun(ctx, c, rc, finalSHA, github.CheckRunParams{
 		Name:       github.CheckRunName,
 		HeadSHA:    finalSHA,
 		ExternalID: c.AttemptID,
 		Status:     "completed",
-		Conclusion: checkConclusion(report),
+		Conclusion: conclusion,
+		Title:      "Agent Trail evidence",
+		Summary:    truncateRunes(markdown, checkOutputLimit),
+	}); err != nil {
+		return "", err
+	}
+	if err := e.completeTriggerCheckRun(ctx, log, c, rc, attempt, github.CheckRunParams{
+		Conclusion: conclusion,
 		Title:      "Agent Trail evidence",
 		Summary:    truncateRunes(markdown, checkOutputLimit),
 	}); err != nil {
 		return "", err
 	}
 
+	if attempt.Number > 1 {
+		return task.StatusPublishing, e.postRevisionSummary(ctx, c, rc, attempt, pr.Number, finalSHA, report)
+	}
 	if t.SourceIssueNumber != nil {
 		comment := fmt.Sprintf(
 			"Agent Trail opened draft pull request #%d for this issue. "+
@@ -364,8 +439,133 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 	return task.StatusPublishing, nil
 }
 
-// no pr; neutral check on base commit; no_change failed state keeps the explanation
-func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, baseSHA, summary string) error {
+// one comment per revision on the pull request itself; never a reply inside a review thread
+func (e *Executor) postRevisionSummary(ctx context.Context, c *Claim, rc github.RepositoryContext, attempt task.Attempt, prNumber int64, finalSHA string, report evidence.Report) error {
+	posted, err := e.commentPosted(ctx, c, "revision_summary")
+	if err != nil {
+		return err
+	}
+	if posted {
+		return nil
+	}
+	comment := revisionSummary(attempt, finalSHA, report)
+	if err := e.GitHub.CreateIssueComment(ctx, rc.InstallationID, rc.Owner, rc.Name, prNumber, comment); err != nil {
+		return e.publishFailure(ctx, c, "post revision summary", err)
+	}
+	return e.append(ctx, c, "github.comment.posted", "runner", map[string]any{
+		"kind": "revision_summary", "pull_request": prNumber,
+	})
+}
+
+// a recovered owner must not repeat a comment the dead owner already posted
+func (e *Executor) commentPosted(ctx context.Context, c *Claim, kind string) (bool, error) {
+	events, err := e.Tasks.Events(ctx, c.TaskID, evidenceEventLimit)
+	if err != nil {
+		return false, fmt.Errorf("check posted comments: %w", err)
+	}
+	for _, ev := range events {
+		if ev.TaskAttemptID != c.AttemptID || ev.EventType != "github.comment.posted" {
+			continue
+		}
+		var p struct {
+			Kind string `json:"kind"`
+		}
+		if json.Unmarshal(ev.Payload, &p) == nil && p.Kind == kind {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func revisionSummary(attempt task.Attempt, finalSHA string, report evidence.Report) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Agent Trail published revision attempt %d.\n\n", attempt.Number)
+	fmt.Fprintf(&b, "- Final commit: `%s`\n", finalSHA)
+	fmt.Fprintf(&b, "- Validation: %s\n", validationOutcome(report))
+	fmt.Fprintf(&b, "- Review feedback given: %d item(s)\n", len(attempt.Feedback))
+	for _, item := range attempt.Feedback {
+		fmt.Fprintf(&b, "  - %s by @%s at %s", feedbackKindLabel(item.Kind), item.Author,
+			item.PostedAt.UTC().Format("2006-01-02T15:04:05Z"))
+		if item.Location != "" {
+			fmt.Fprintf(&b, " on %s", item.Location)
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "\nThe pull request body carries the updated evidence report and attempts "+
+		"history; the `%s` check holds the verified results.", github.CheckRunName)
+	return b.String()
+}
+
+func feedbackKindLabel(kind string) string {
+	switch kind {
+	case "review":
+		return "review"
+	case "review_comment":
+		return "inline review comment"
+	case "revise_command":
+		return "revise command"
+	default:
+		return "comment"
+	}
+}
+
+// counts only platform-executed checks; agent claims never count as verification
+func validationOutcome(r evidence.Report) string {
+	trusted, passed, failed := 0, 0, 0
+	for _, v := range r.Validation {
+		if !v.TrustedExecution {
+			continue
+		}
+		trusted++
+		switch validation.Status(v.Status) {
+		case validation.StatusPassed:
+			passed++
+		case validation.StatusFailed:
+			failed++
+		}
+	}
+	switch {
+	case trusted == 0:
+		return "no trusted checks ran"
+	case failed > 0:
+		return fmt.Sprintf("failed (%d of %d trusted checks failed)", failed, trusted)
+	case passed == trusted:
+		return fmt.Sprintf("passed (%d trusted checks)", trusted)
+	default:
+		return fmt.Sprintf("incomplete (%d of %d trusted checks passed)", passed, trusted)
+	}
+}
+
+// the queued trigger check run gains the attempt's conclusion; api failure logs, never blocks
+func (e *Executor) completeTriggerCheckRun(ctx context.Context, log *slog.Logger, c *Claim, rc github.RepositoryContext, attempt task.Attempt, p github.CheckRunParams) error {
+	if attempt.TriggerCheckRunID == nil || attempt.TriggerCheckRunCompletedAt != nil {
+		return nil
+	}
+	p.Name = github.CheckRunName
+	p.Status = "completed"
+	id := *attempt.TriggerCheckRunID
+	if err := e.GitHub.UpdateCheckRun(ctx, rc.InstallationID, rc.Owner, rc.Name, id, p); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		log.LogAttrs(ctx, slog.LevelWarn, "trigger check run completion failed",
+			slog.String("event", "github_trigger_check_run_failed"),
+			slog.Int64("check_run_id", id),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	if err := e.Tasks.MarkTriggerCheckRunCompleted(ctx, c.AttemptID); err != nil {
+		return err
+	}
+	return e.append(ctx, c, "github.check_run.updated", "runner", map[string]any{
+		"check_run_id": id, "conclusion": p.Conclusion, "kind": "trigger",
+	})
+}
+
+// no new commit; neutral check on the base commit; no_change failed state keeps the explanation.
+// a revision without changes fails the same way and says so on the pull request it was asked on
+func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, pub *publishTarget, attempt task.Attempt, baseSHA, summary string) error {
 	rc := pub.repo
 	explanation := "the agent session ended without modifying the workspace"
 	if summary != "" {
@@ -386,6 +586,37 @@ func (e *Executor) publishNoChange(ctx context.Context, c *Claim, t task.Task, p
 		Summary:    explanation,
 	}); err != nil {
 		return err
+	}
+	if err := e.completeTriggerCheckRun(ctx, e.Logger, c, rc, attempt, github.CheckRunParams{
+		Conclusion: "neutral",
+		Title:      "No changes produced",
+		Summary:    explanation,
+	}); err != nil {
+		return err
+	}
+	if attempt.Number > 1 && t.WorkingBranch != nil {
+		pr, err := e.GitHub.FindPullRequestByHead(ctx, rc.InstallationID, rc.Owner,
+			rc.Name, rc.Owner, *t.WorkingBranch)
+		if err != nil {
+			return e.publishFailure(ctx, c, "find pull request", err)
+		}
+		if pr != nil {
+			if err := e.Store.RecordPullRequest(ctx, c.AttemptID, pr.Number); err != nil {
+				return err
+			}
+			comment := fmt.Sprintf("Agent Trail produced no changes for revision attempt %d, "+
+				"so the branch is unchanged: %s.", attempt.Number, explanation)
+			if err := e.GitHub.CreateIssueComment(ctx, rc.InstallationID, rc.Owner,
+				rc.Name, pr.Number, comment); err != nil {
+				return e.publishFailure(ctx, c, "post no-change comment", err)
+			}
+			if err := e.append(ctx, c, "github.comment.posted", "runner", map[string]any{
+				"kind": "no_change", "pull_request": pr.Number,
+			}); err != nil {
+				return err
+			}
+		}
+		return e.failTask(ctx, c, "no_change", explanation)
 	}
 	if t.SourceIssueNumber != nil {
 		comment := "Agent Trail produced no changes for this issue, so no " +
