@@ -298,7 +298,7 @@ func (s *Store) repositoryMetrics(ctx context.Context, id string) (RepositoryMet
 func (s *Store) repositoryTasks(ctx context.Context, id string, active bool) ([]TaskSummary, error) {
 	query := `
 		SELECT id, title, status, phase, source_issue_number, started_at,
-			completed_at, failure_message, created_at, updated_at
+			completed_at, failure_message, status_reason, created_at, updated_at
 		FROM tasks WHERE repository_id = $1`
 	if active {
 		query += ` AND phase <> 'terminal'`
@@ -408,7 +408,7 @@ func (s *Store) runnerTasks(ctx context.Context, id string, current bool) ([]Tas
 	query := `
 		SELECT DISTINCT t.id, t.title, t.status, t.phase,
 			t.source_issue_number, t.started_at, t.completed_at,
-			t.failure_message, t.created_at, t.updated_at
+			t.failure_message, t.status_reason, t.created_at, t.updated_at
 		FROM tasks t
 		JOIN task_attempts a ON a.task_id = t.id`
 	if current {
@@ -431,7 +431,7 @@ func scanTasks(rows *sql.Rows) ([]TaskSummary, error) {
 		var t TaskSummary
 		err := rows.Scan(&t.ID, &t.Title, &t.Status, &t.Phase,
 			&t.SourceIssueNumber, &t.StartedAt, &t.CompletedAt,
-			&t.FailureMessage, &t.CreatedAt, &t.UpdatedAt)
+			&t.FailureMessage, &t.StatusReason, &t.CreatedAt, &t.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}

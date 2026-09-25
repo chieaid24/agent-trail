@@ -33,9 +33,11 @@ type Task struct {
 	CancelRequestedAt *time.Time `json:"cancel_requested_at"`
 	FailureCode       *string    `json:"failure_code"`
 	FailureMessage    *string    `json:"failure_message"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	Version           int64      `json:"version"`
+	// reason recorded with the latest transition; nil when it carried none
+	StatusReason *string   `json:"status_reason"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Version      int64     `json:"version"`
 }
 
 type Event struct {

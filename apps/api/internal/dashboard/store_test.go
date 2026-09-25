@@ -73,8 +73,12 @@ func TestOrganizationsAndRepositories(t *testing.T) {
 	finished := createRepositoryTask(t, db, organizationID, repositoryID, "Finished task")
 	transition(t, tasks, finished.ID,
 		task.StatusProvisioning, task.StatusPlanning, task.StatusExecuting,
-		task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview,
-		task.StatusCompleted)
+		task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview)
+	if _, err := tasks.Transition(ctx, finished.ID, task.TransitionParams{
+		To: task.StatusCompleted, Source: "system", Reason: "pull request #41 merged",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	store := NewStore(db)
 	organizations, err := store.ListOrganizations(ctx)
@@ -118,6 +122,18 @@ func TestOrganizationsAndRepositories(t *testing.T) {
 	if len(detail.ActiveTasks) != 1 || detail.ActiveTasks[0].ID != active.ID ||
 		len(detail.RecentTasks) != 2 {
 		t.Fatalf("tasks = active %#v recent %#v", detail.ActiveTasks, detail.RecentTasks)
+	}
+	for _, summary := range detail.RecentTasks {
+		switch summary.ID {
+		case finished.ID:
+			if summary.StatusReason == nil || *summary.StatusReason != "pull request #41 merged" {
+				t.Fatalf("finished summary reason = %v", summary.StatusReason)
+			}
+		case active.ID:
+			if summary.StatusReason != nil {
+				t.Fatalf("active summary reason = %q, want none", *summary.StatusReason)
+			}
+		}
 	}
 
 	settings, err := store.GetRepositorySettings(ctx, repositoryID)
