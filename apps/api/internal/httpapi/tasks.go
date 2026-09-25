@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ type TaskService interface {
 	Cancel(ctx context.Context, id, reason string) (task.Task, error)
 	Events(ctx context.Context, id string, limit int) ([]task.Event, error)
 	EventsAfter(ctx context.Context, id string, afterAttempt int, afterSequence int64, limit int) ([]task.Event, error)
+	Attempts(ctx context.Context, id string) ([]task.Attempt, error)
 }
 
 type ValidationService interface {
@@ -31,6 +33,7 @@ type ValidationService interface {
 
 type EvidenceService interface {
 	GetForTask(ctx context.Context, taskID string) (evidence.Stored, error)
+	GetForTaskAttempt(ctx context.Context, taskID string, attemptNumber int) (evidence.Stored, error)
 }
 
 const maxBodyBytes = 1 << 20
@@ -205,6 +208,23 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
 
+func (s *Server) handleTaskAttempts(w http.ResponseWriter, r *http.Request) {
+	if s.tasks == nil {
+		s.writeTasksUnavailable(w)
+		return
+	}
+	id, ok := pathTaskID(w, r)
+	if !ok {
+		return
+	}
+	attempts, err := s.tasks.Attempts(r.Context(), id)
+	if err != nil {
+		s.writeTaskError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"attempts": attempts})
+}
+
 func (s *Server) handleTaskValidations(w http.ResponseWriter, r *http.Request) {
 	if s.validations == nil {
 		s.writeTasksUnavailable(w)
@@ -231,7 +251,17 @@ func (s *Server) handleTaskEvidence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	st, err := s.evidence.GetForTask(r.Context(), id)
+	attempt, ok := queryAttempt(w, r)
+	if !ok {
+		return
+	}
+	var st evidence.Stored
+	var err error
+	if attempt == 0 {
+		st, err = s.evidence.GetForTask(r.Context(), id)
+	} else {
+		st, err = s.evidence.GetForTaskAttempt(r.Context(), id, attempt)
+	}
 	if errors.Is(err, evidence.ErrNoReport) {
 		writeError(w, http.StatusNotFound, "no evidence report for task")
 		return
@@ -266,6 +296,21 @@ func queryLimit(w http.ResponseWriter, r *http.Request, maxLimit int) (int, bool
 	return n, true
 }
 
+// 0 = no attempt filter; the bound keeps the value a valid int4 parameter
+func queryAttempt(w http.ResponseWriter, r *http.Request) (int, bool) {
+	v := r.URL.Query().Get("attempt")
+	if v == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > math.MaxInt32 {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("attempt must be an integer between 1 and %d", math.MaxInt32))
+		return 0, false
+	}
+	return n, true
+}
+
 func (s *Server) decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
@@ -283,6 +328,8 @@ func (s *Server) writeTaskError(w http.ResponseWriter, r *http.Request, err erro
 	switch {
 	case errors.Is(err, task.ErrNotFound):
 		writeError(w, http.StatusNotFound, "task not found")
+	case errors.Is(err, task.ErrAttemptNotFound):
+		writeError(w, http.StatusNotFound, "task attempt not found")
 	case errors.As(err, &invalid), errors.As(err, &conflict):
 		writeError(w, http.StatusConflict, err.Error())
 	default:

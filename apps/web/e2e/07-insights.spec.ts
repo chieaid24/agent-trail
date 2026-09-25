@@ -62,6 +62,34 @@ async function mockTask(
   await page.route(`**/backend/api/v1/tasks/${taskId}**`, (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/insights")) return route.fallback();
+    if (path.endsWith("/attempts"))
+      return route.fulfill({
+        json: {
+          attempts: [
+            {
+              id: "3b241101-e2bb-4255-8caf-4136c566a952",
+              task_id: taskId,
+              attempt_number: 1,
+              status: status === "executing" ? "active" : status,
+              base_commit_sha: null,
+              final_commit_sha: null,
+              pull_request_number: null,
+              instructions: null,
+              requested_by_login: null,
+              trigger_comment_id: null,
+              trigger_check_run_id: null,
+              trigger_check_run_completed_at: null,
+              feedback: [],
+              failure_code: status === "failed" ? "validation_failed" : null,
+              failure_message: null,
+              started_at: "2026-08-21T12:00:00Z",
+              completed_at:
+                status === "executing" ? null : "2026-08-21T12:00:12Z",
+              created_at: "2026-08-21T11:59:58Z",
+            },
+          ],
+        },
+      });
     if (path.endsWith("/validations"))
       return route.fulfill({ json: { validations: [] } });
     if (path.endsWith("/conflicts"))

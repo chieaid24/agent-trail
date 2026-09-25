@@ -2,6 +2,8 @@ package observability
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -127,5 +129,67 @@ func TestTaskSpanIdentityAndAttemptOwnershipConstraints(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("stored spans = %d, want 2 trace-scoped identities", count)
+	}
+}
+
+func TestTraceStoreListsSpansForOneAttempt(t *testing.T) {
+	db := dbtest.Open(t)
+	tasks := task.NewStore(db)
+	created, err := tasks.Create(t.Context(), task.CreateParams{
+		Title: "Attempt trace", Instructions: "Record each attempt's trace.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning,
+		task.StatusExecuting, task.StatusValidating, task.StatusPublishing,
+		task.StatusAwaitingReview} {
+		if _, err := tasks.Transition(t.Context(), created.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, second, err := tasks.RequestRevision(t.Context(), created.ID, task.RevisionParams{
+		Instructions: "revise", BaseCommitSHA: strings.Repeat("c", 40),
+		RequestedByLogin: "alice", TriggerCommentID: 7, MaxAttempts: 5,
+		IdempotencyKey: "revise:7",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts, err := tasks.Attempts(t.Context(), created.ID)
+	if err != nil || len(attempts) != 2 {
+		t.Fatalf("attempts = %d, err = %v", len(attempts), err)
+	}
+
+	store := NewTraceStore(db)
+	processor := newTaskContextProcessor(sdktrace.NewSimpleSpanProcessor(store))
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	for _, a := range []struct {
+		attemptID string
+		name      string
+	}{{attempts[0].ID, "runner.attempt.one"}, {second.ID, "runner.attempt.two"}} {
+		_, span := provider.Tracer(TracerName).Start(t.Context(), a.name,
+			trace.WithAttributes(
+				attribute.String("task.id", created.ID),
+				attribute.String("task.attempt_id", a.attemptID),
+			))
+		span.End()
+	}
+
+	all, err := store.ListTaskSpans(t.Context(), created.ID)
+	if err != nil || len(all.Spans) != 2 {
+		t.Fatalf("all spans = %d, err = %v", len(all.Spans), err)
+	}
+	one, err := store.ListTaskAttemptSpans(t.Context(), created.ID, 1)
+	if err != nil || len(one.Spans) != 1 || one.Spans[0].Name != "runner.attempt.one" {
+		t.Fatalf("attempt 1 spans = %+v, err = %v", one.Spans, err)
+	}
+	two, err := store.ListTaskAttemptSpans(t.Context(), created.ID, 2)
+	if err != nil || len(two.Spans) != 1 || two.Spans[0].Name != "runner.attempt.two" {
+		t.Fatalf("attempt 2 spans = %+v, err = %v", two.Spans, err)
+	}
+	if _, err := store.ListTaskAttemptSpans(t.Context(), created.ID, 3); !errors.Is(err, task.ErrAttemptNotFound) {
+		t.Fatalf("attempt 3: err = %v, want ErrAttemptNotFound", err)
 	}
 }

@@ -26,8 +26,11 @@ const taskColumns = `id, organization_id, repository_id, source_type,
 	phase, priority, base_branch, base_commit_sha, working_branch,
 	agent_provider, agent_model, policy_id, requested_by_user_id,
 	max_runtime_seconds, max_cost_usd, started_at, completed_at,
-	cancel_requested_at, failure_code, failure_message, created_at,
-	updated_at, version`
+	cancel_requested_at, failure_code, failure_message, status_reason,
+	created_at, updated_at, version`
+
+// bound of tasks.status_reason; the event payload keeps the full reason
+const maxStatusReasonLen = 1000
 
 var uuidRe = regexp.MustCompile(
 	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -784,12 +787,14 @@ func applyTransition(ctx context.Context, tx *sql.Tx, cur Task, p TransitionPara
 				THEN COALESCE(cancel_requested_at, now())
 				ELSE cancel_requested_at END,
 			failure_code = COALESCE(NULLIF($7, ''), failure_code),
-			failure_message = COALESCE(NULLIF($8, ''), failure_message)
+			failure_message = COALESCE(NULLIF($8, ''), failure_message),
+			status_reason = NULLIF($9, '')
 		WHERE id = $1
 		RETURNING `+taskColumns,
 		cur.ID, string(p.To), string(p.To.Phase()),
 		p.To == StatusProvisioning, p.To.Terminal(),
-		p.To == StatusCancelled, p.FailureCode, p.FailureMessage)
+		p.To == StatusCancelled, p.FailureCode, p.FailureMessage,
+		truncateRunes(p.Reason, maxStatusReasonLen))
 	next, err := scanTask(row)
 	if err != nil {
 		return Task{}, fmt.Errorf("update task: %w", err)
@@ -862,11 +867,20 @@ func insertEvent(ctx context.Context, tx *sql.Tx, attemptID, eventType, source s
 	return nil
 }
 
+func truncateRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
+}
+
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var (
 		orgID, repoID, baseSHA, workBranch, provider, model sql.NullString
 		policyID, requestedBy, failureCode, failureMsg      sql.NullString
+		statusReason                                        sql.NullString
 		issueNumber, commentID                              sql.NullInt64
 		maxRuntime                                          sql.NullInt64
 		maxCost                                             sql.NullFloat64
@@ -877,8 +891,8 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 		&commentID, &t.Title, &t.Instructions, &status, &phase, &t.Priority,
 		&t.BaseBranch, &baseSHA, &workBranch, &provider, &model, &policyID,
 		&requestedBy, &maxRuntime, &maxCost, &startedAt, &completedAt,
-		&cancelAt, &failureCode, &failureMsg, &t.CreatedAt, &t.UpdatedAt,
-		&t.Version)
+		&cancelAt, &failureCode, &failureMsg, &statusReason, &t.CreatedAt,
+		&t.UpdatedAt, &t.Version)
 	if err != nil {
 		return Task{}, err
 	}
@@ -906,6 +920,7 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	t.CancelRequestedAt = nullTime(cancelAt)
 	t.FailureCode = nullStr(failureCode)
 	t.FailureMessage = nullStr(failureMsg)
+	t.StatusReason = nullStr(statusReason)
 	return t, nil
 }
 

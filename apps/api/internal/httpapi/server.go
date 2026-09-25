@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/tasks/{taskId}", s.handleGetTask)
 	api.HandleFunc("POST /api/v1/tasks/{taskId}/cancel", s.handleCancelTask)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/events", s.handleTaskEvents)
+	api.HandleFunc("GET /api/v1/tasks/{taskId}/attempts", s.handleTaskAttempts)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/stream", s.handleTaskStream)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/validations", s.handleTaskValidations)
 	api.HandleFunc("GET /api/v1/tasks/{taskId}/evidence", s.handleTaskEvidence)

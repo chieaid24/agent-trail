@@ -85,6 +85,32 @@ func (s *Store) GetForTask(ctx context.Context, taskID string) (Stored, error) {
 	return st, nil
 }
 
+// dashboard attempt selector: the report of one attempt by number
+func (s *Store) GetForTaskAttempt(ctx context.Context, taskID string, attemptNumber int) (Stored, error) {
+	if !task.IsUUID(taskID) {
+		return Stored{}, task.ErrNotFound
+	}
+	var attemptID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM task_attempts
+		WHERE task_id = $1 AND attempt_number = $2`, taskID, attemptNumber).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM tasks WHERE id = $1)`, taskID).Scan(&exists); err != nil {
+			return Stored{}, fmt.Errorf("check task: %w", err)
+		}
+		if !exists {
+			return Stored{}, task.ErrNotFound
+		}
+		return Stored{}, task.ErrAttemptNotFound
+	}
+	if err != nil {
+		return Stored{}, fmt.Errorf("resolve attempt: %w", err)
+	}
+	return s.GetForAttempt(ctx, attemptID)
+}
+
 // publish reads its own attempt's report, never the latest of the task
 func (s *Store) GetForAttempt(ctx context.Context, attemptID string) (Stored, error) {
 	if !task.IsUUID(attemptID) {

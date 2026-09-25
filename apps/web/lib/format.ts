@@ -35,3 +35,12 @@ export function shortSha(sha: string): string {
 export function statusLabel(status: string): string {
   return status.replaceAll("_", " ");
 }
+
+// why a task completed or was cancelled; other statuses keep their reason in the timeline
+export function outcomeReason(task: {
+  status: string;
+  status_reason: string | null;
+}): string | null {
+  if (task.status !== "completed" && task.status !== "cancelled") return null;
+  return task.status_reason;
+}

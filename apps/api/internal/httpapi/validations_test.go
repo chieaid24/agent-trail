@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
@@ -23,9 +24,16 @@ func (f *fakeValidations) ListForTask(_ context.Context, taskID string) ([]valid
 type fakeEvidence struct {
 	stored evidence.Stored
 	err    error
+
+	attemptNumber int
 }
 
 func (f *fakeEvidence) GetForTask(_ context.Context, taskID string) (evidence.Stored, error) {
+	return f.stored, f.err
+}
+
+func (f *fakeEvidence) GetForTaskAttempt(_ context.Context, taskID string, attemptNumber int) (evidence.Stored, error) {
+	f.attemptNumber = attemptNumber
 	return f.stored, f.err
 }
 
@@ -114,5 +122,46 @@ func TestTaskEvidenceErrors(t *testing.T) {
 	if rec := do(t, unknown, http.MethodGet,
 		"/api/v1/tasks/"+testUUID+"/evidence", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown task = %d, want 404", rec.Code)
+	}
+}
+
+func TestTaskEvidenceAttemptFilter(t *testing.T) {
+	f := &fakeEvidence{stored: evidence.Stored{ID: testUUID, AttemptNumber: 2,
+		Report: json.RawMessage(`{"schema_version":1}`)}}
+	h := New(testLogger(), nil, nil, nil, f, nil, nil).Handler()
+
+	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/evidence?attempt=2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if f.attemptNumber != 2 {
+		t.Fatalf("attempt filter = %d, want 2", f.attemptNumber)
+	}
+	var body evidence.Stored
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.AttemptNumber != 2 {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+
+	for _, bad := range []string{"0", "-1", "two", "1.5"} {
+		rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/evidence?attempt="+bad, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("attempt=%s = %d, want 400", bad, rec.Code)
+		}
+	}
+
+	missing := New(testLogger(), nil, nil, nil,
+		&fakeEvidence{err: task.ErrAttemptNotFound}, nil, nil).Handler()
+	rec = do(t, missing, http.MethodGet, "/api/v1/tasks/"+testUUID+"/evidence?attempt=9", "")
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "task attempt not found") {
+		t.Fatalf("unknown attempt = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	noReport := New(testLogger(), nil, nil, nil,
+		&fakeEvidence{err: evidence.ErrNoReport}, nil, nil).Handler()
+	rec = do(t, noReport, http.MethodGet, "/api/v1/tasks/"+testUUID+"/evidence?attempt=2", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("no report = %d, want 404", rec.Code)
 	}
 }

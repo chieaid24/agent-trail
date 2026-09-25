@@ -43,7 +43,8 @@ func seedTasks() []seedTask {
 				{To: task.StatusProvisioning}, {To: task.StatusPlanning},
 				{To: task.StatusExecuting}, {To: task.StatusValidating},
 				{To: task.StatusPublishing}, {To: task.StatusAwaitingReview},
-				{To: task.StatusCompleted},
+				{To: task.StatusCompleted, Source: "system",
+					Reason: "pull request #41 merged"},
 			},
 		},
 		{

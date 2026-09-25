@@ -261,3 +261,38 @@ it("keeps long failure and check details in the mobile cards", () => {
   ).toBeTruthy();
   expect(within(cards).getByText("Attempt #1")).toBeTruthy();
 });
+
+it("highlights the selected attempt only when there are several", () => {
+  const two = insights([
+    attempt({ attempt_id: "a1", attempt_number: 1, status: "superseded" }),
+    attempt({ attempt_id: "a2", attempt_number: 2 }),
+  ]);
+  const { rerender } = render(
+    <InsightsPanel
+      state={{ phase: "ready", insights: two }}
+      onRetry={() => {}}
+      selectedAttempt={1}
+    />,
+  );
+  const table = screen.getByRole("table", { name: "Attempt comparison" });
+  const rows = within(table).getAllByRole("row").slice(1);
+  expect(rows[0].getAttribute("aria-current")).toBe("true");
+  expect(rows[1].getAttribute("aria-current")).toBeNull();
+  const cards = within(
+    screen.getByRole("list", { name: "Attempt details" }),
+  ).getAllByRole("listitem");
+  expect(cards[0].className).toContain("border-accent");
+  expect(cards[1].className).not.toContain("border-accent");
+
+  rerender(
+    <InsightsPanel
+      state={{ phase: "ready", insights: insights([attempt({})]) }}
+      onRetry={() => {}}
+      selectedAttempt={1}
+    />,
+  );
+  const only = within(
+    screen.getByRole("table", { name: "Attempt comparison" }),
+  ).getAllByRole("row")[1];
+  expect(only.getAttribute("aria-current")).toBeNull();
+});

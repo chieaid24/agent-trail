@@ -39,6 +39,11 @@ test("a queued task cancels after inline confirmation", async ({ page }) => {
   await expect(page.getByText("status: cancelled")).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByText("e2e cancellation drill")).toBeVisible();
+  await expect(
+    page.locator("article > header").getByText("e2e cancellation drill"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("list").getByText("e2e cancellation drill"),
+  ).toBeVisible();
   await shoot(page, "task-detail-cancelled");
 });

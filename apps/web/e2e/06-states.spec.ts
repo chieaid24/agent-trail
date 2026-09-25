@@ -30,6 +30,7 @@ function wireTask(overrides: Record<string, unknown>): Record<string, unknown> {
     cancel_requested_at: null,
     failure_code: null,
     failure_message: null,
+    status_reason: null,
     created_at: "2026-07-28T12:00:00Z",
     updated_at: "2026-07-28T12:00:00Z",
     version: 1,
@@ -67,8 +68,37 @@ async function mockTraceTask(page: Page): Promise<void> {
     `**/backend/api/v1/tasks/${traceTaskId}/conflicts`,
     (route) => route.fulfill({ json: { conflicts: [] } }),
   );
-  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/evidence`, (route) =>
-    route.fulfill({ status: 404, json: { error: "not found" } }),
+  await page.route(
+    `**/backend/api/v1/tasks/${traceTaskId}/evidence*`,
+    (route) => route.fulfill({ status: 404, json: { error: "not found" } }),
+  );
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/attempts`, (route) =>
+    route.fulfill({
+      json: {
+        attempts: [
+          {
+            id: "3b241101-e2bb-4255-8caf-4136c566a922",
+            task_id: traceTaskId,
+            attempt_number: 1,
+            status: "completed",
+            base_commit_sha: null,
+            final_commit_sha: null,
+            pull_request_number: null,
+            instructions: null,
+            requested_by_login: null,
+            trigger_comment_id: null,
+            trigger_check_run_id: null,
+            trigger_check_run_completed_at: null,
+            feedback: [],
+            failure_code: null,
+            failure_message: null,
+            started_at: "2026-08-21T12:00:00Z",
+            completed_at: "2026-08-21T12:00:12Z",
+            created_at: "2026-08-21T11:59:58Z",
+          },
+        ],
+      },
+    }),
   );
   await page.route(`**/backend/api/v1/tasks/${traceTaskId}/stream*`, (route) =>
     route.fulfill({
@@ -99,7 +129,7 @@ async function mockTraceTask(page: Page): Promise<void> {
 test("trace loading state", async ({ page }) => {
   await mockTraceTask(page);
   await page.route(
-    `**/backend/api/v1/tasks/${traceTaskId}/trace`,
+    `**/backend/api/v1/tasks/${traceTaskId}/trace*`,
     async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       await route.fulfill({ json: { spans: [] } });
@@ -113,7 +143,7 @@ test("trace loading state", async ({ page }) => {
 
 test("trace empty state", async ({ page }) => {
   await mockTraceTask(page);
-  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace*`, (route) =>
     route.fulfill({ json: { spans: [] } }),
   );
   await page.goto(`/tasks/${traceTaskId}`);
@@ -124,7 +154,7 @@ test("trace empty state", async ({ page }) => {
 
 test("trace error state", async ({ page }) => {
   await mockTraceTask(page);
-  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace*`, (route) =>
     route.fulfill({ status: 500, json: { error: "trace read failed" } }),
   );
   await page.goto(`/tasks/${traceTaskId}`);
@@ -137,7 +167,7 @@ test("trace error state", async ({ page }) => {
 
 test("trace waterfall and run cost", async ({ page }) => {
   await mockTraceTask(page);
-  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace`, (route) =>
+  await page.route(`**/backend/api/v1/tasks/${traceTaskId}/trace*`, (route) =>
     route.fulfill({
       json: {
         spans: [

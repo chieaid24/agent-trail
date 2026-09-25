@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { StatusBadge } from "./StatusBadge";
-import { formatDateTime, formatDuration, runtimeMs } from "@/lib/format";
+import {
+  formatDateTime,
+  formatDuration,
+  outcomeReason,
+  runtimeMs,
+} from "@/lib/format";
 import type { Task } from "@/lib/types";
 
 export function TaskRows({ tasks }: { tasks: Task[] }) {
@@ -10,6 +15,7 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
     <ul>
       {tasks.map((t) => {
         const runtime = runtimeMs(t.started_at, t.completed_at);
+        const reason = outcomeReason(t);
         return (
           <li key={t.id} className="border-b border-border">
             <Link
@@ -17,8 +23,18 @@ export function TaskRows({ tasks }: { tasks: Task[] }) {
               className="grid grid-cols-1 items-baseline gap-x-4 gap-y-1 md:grid-cols-[10rem_minmax(0,1fr)_auto] px-2 py-2 hover:bg-surface"
             >
               <StatusBadge status={t.status} />
-              <span className="min-w-0 truncate text-base text-foreground">
-                {t.title}
+              <span className="min-w-0">
+                <span className="block truncate text-base text-foreground">
+                  {t.title}
+                </span>
+                {reason && (
+                  <span
+                    className="block truncate text-sm text-muted"
+                    title={reason}
+                  >
+                    {reason}
+                  </span>
+                )}
               </span>
               <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-muted">
                 {t.source_issue_number !== null && (

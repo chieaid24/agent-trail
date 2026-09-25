@@ -66,6 +66,7 @@ type TaskSummary struct {
 	StartedAt         *time.Time `json:"started_at"`
 	CompletedAt       *time.Time `json:"completed_at"`
 	FailureMessage    *string    `json:"failure_message"`
+	StatusReason      *string    `json:"status_reason"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }

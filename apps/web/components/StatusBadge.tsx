@@ -1,7 +1,7 @@
 import type { TaskStatus } from "@/lib/types";
 import { statusLabel } from "@/lib/format";
 
-type Tone = "muted" | "accent" | "success" | "warning" | "danger";
+type Tone = "muted" | "accent" | "success" | "warning" | "danger" | "info";
 
 const TONES: Record<TaskStatus, Tone> = {
   created: "muted",
@@ -12,7 +12,7 @@ const TONES: Record<TaskStatus, Tone> = {
   validating: "accent",
   publishing: "accent",
   awaiting_review: "warning",
-  revision_requested: "warning",
+  revision_requested: "info",
   completed: "success",
   failed: "danger",
   cancelled: "muted",
@@ -25,6 +25,7 @@ const TONE_CLASSES: Record<Tone, string> = {
   success: "text-success",
   warning: "text-warning",
   danger: "text-danger",
+  info: "text-info",
 };
 
 const DOT_CLASSES: Record<Tone, string> = {
@@ -33,6 +34,7 @@ const DOT_CLASSES: Record<Tone, string> = {
   success: "bg-success",
   warning: "bg-warning",
   danger: "bg-danger",
+  info: "bg-info",
 };
 
 const RUNNING: readonly TaskStatus[] = [

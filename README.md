@@ -89,7 +89,14 @@ for Terraform state.
    draft pull request is open, leave review feedback and comment
    `/agent-trail revise` on it to start a revision. Each repository allows
    `max_attempts` attempts per task (default 5); set it through the
-   repository settings API, and the repository page shows it.
+   repository settings API, and the repository page shows it. The dashboard
+   task page gains an attempt selector once a revision exists: the timeline,
+   trace, logs, validations, evidence, and files follow the selected attempt,
+   the header names who requested each revision and its base and final
+   commits, and `GET /api/v1/tasks/{taskId}/attempts` plus the `attempt=N`
+   query on `/evidence` and `/trace` back it. Completed and cancelled tasks
+   show why they ended (for example `pull request #7 merged`) on every task
+   list.
 
 
 ## Layout
@@ -101,5 +108,5 @@ for Terraform state.
 - `deploy/k8s/` - `runner/` controller and Job manifests, `local/` kind verification manifests
 - `deploy/terraform/` - AWS foundations: `modules/` and one root per environment under `envs/`
 - `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner), `verify-local-telemetry.sh` (Grafana LGTM smoke), `verify-production-telemetry.sh` (CloudWatch agent config check), `verify-web-image.sh` (dashboard image check), `verify-k8s-runner.sh` (kind verifier)
-- `docs/` - benchmark plans and measured results
+- `docs/` - `adr/` decision records, `observability/` contracts, `testing/` verification notes, benchmark plans, and measured results
 

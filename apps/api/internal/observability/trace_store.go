@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 type TaskSpan struct {
@@ -99,16 +102,45 @@ func (s *TraceStore) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlyS
 // db is owned by main
 func (s *TraceStore) Shutdown(context.Context) error { return nil }
 
+const taskSpanColumns = `trace_id, span_id, parent_span_id, task_attempt_id, name, kind,
+	start_time, end_time, attributes_json, status_code, status_message`
+
 func (s *TraceStore) ListTaskSpans(ctx context.Context, taskID string) (TaskTrace, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT trace_id, span_id, parent_span_id, task_attempt_id, name, kind,
-			start_time, end_time, attributes_json, status_code, status_message
+		SELECT `+taskSpanColumns+`
 		FROM task_spans
 		WHERE task_id = $1
 		ORDER BY start_time, trace_id, span_id`, taskID)
 	if err != nil {
 		return TaskTrace{}, fmt.Errorf("list task spans: %w", err)
 	}
+	return scanTaskSpans(rows)
+}
+
+// spans of one attempt by number; the caller has already confirmed the task exists
+func (s *TraceStore) ListTaskAttemptSpans(ctx context.Context, taskID string, attemptNumber int) (TaskTrace, error) {
+	var attemptID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM task_attempts
+		WHERE task_id = $1 AND attempt_number = $2`, taskID, attemptNumber).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskTrace{}, task.ErrAttemptNotFound
+	}
+	if err != nil {
+		return TaskTrace{}, fmt.Errorf("resolve attempt: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+taskSpanColumns+`
+		FROM task_spans
+		WHERE task_id = $1 AND task_attempt_id = $2
+		ORDER BY start_time, trace_id, span_id`, taskID, attemptID)
+	if err != nil {
+		return TaskTrace{}, fmt.Errorf("list task attempt spans: %w", err)
+	}
+	return scanTaskSpans(rows)
+}
+
+func scanTaskSpans(rows *sql.Rows) (TaskTrace, error) {
 	defer rows.Close()
 
 	trace := TaskTrace{Spans: []TaskSpan{}}

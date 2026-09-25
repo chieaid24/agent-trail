@@ -102,9 +102,12 @@ function checks(summary: ValidationSummary | null): {
 export function InsightsPanel({
   state,
   onRetry,
+  selectedAttempt = null,
 }: {
   state: InsightsState;
   onRetry: () => void;
+  // attempt the page is showing; highlighted only when there is more than one
+  selectedAttempt?: number | null;
 }) {
   return (
     <section aria-labelledby="execution-insights-heading">
@@ -144,10 +147,16 @@ export function InsightsPanel({
             <AttemptCards
               attempts={state.insights.attempts}
               taskStatus={state.insights.task_status}
+              selectedAttempt={
+                state.insights.attempts.length > 1 ? selectedAttempt : null
+              }
             />
             <AttemptTable
               attempts={state.insights.attempts}
               taskStatus={state.insights.task_status}
+              selectedAttempt={
+                state.insights.attempts.length > 1 ? selectedAttempt : null
+              }
             />
           </>
         )}
@@ -205,19 +214,23 @@ function OverallSummary({ insights }: { insights: TaskInsights }) {
 function AttemptCards({
   attempts,
   taskStatus,
+  selectedAttempt,
 }: {
   attempts: AttemptInsight[];
   taskStatus: TaskStatus;
+  selectedAttempt: number | null;
 }) {
   return (
     <div className="mt-3 lg:hidden">
       <ul aria-label="Attempt details" className="space-y-3">
         {attempts.map((attempt) => {
           const validation = checks(attempt.validation);
+          const selected = attempt.attempt_number === selectedAttempt;
           return (
             <li
               key={attempt.attempt_id}
-              className="rounded border border-border"
+              aria-current={selected ? "true" : undefined}
+              className={`rounded border ${selected ? "border-accent" : "border-border"}`}
             >
               <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border bg-surface px-3 py-2">
                 <h3 className="text-sm font-semibold">
@@ -291,9 +304,11 @@ function AttemptCards({
 function AttemptTable({
   attempts,
   taskStatus,
+  selectedAttempt,
 }: {
   attempts: AttemptInsight[];
   taskStatus: TaskStatus;
+  selectedAttempt: number | null;
 }) {
   return (
     <div className="mt-3 hidden overflow-x-auto rounded border border-border lg:block">
@@ -336,6 +351,7 @@ function AttemptTable({
               key={attempt.attempt_id}
               attempt={attempt}
               taskStatus={taskStatus}
+              selected={attempt.attempt_number === selectedAttempt}
             />
           ))}
         </tbody>
@@ -351,14 +367,21 @@ function AttemptTable({
 function AttemptRow({
   attempt,
   taskStatus,
+  selected,
 }: {
   attempt: AttemptInsight;
   taskStatus: TaskStatus;
+  selected: boolean;
 }) {
   const validation = checks(attempt.validation);
   return (
-    <tr className="border-b border-border align-top last:border-b-0">
-      <td className="px-2 py-2 font-semibold whitespace-nowrap">
+    <tr
+      aria-current={selected ? "true" : undefined}
+      className={`border-b border-border align-top last:border-b-0 ${selected ? "bg-surface" : ""}`}
+    >
+      <td
+        className={`px-2 py-2 font-semibold whitespace-nowrap ${selected ? "text-accent" : ""}`}
+      >
         #{attempt.attempt_number}
       </td>
       <td className="px-2 py-2 whitespace-nowrap">

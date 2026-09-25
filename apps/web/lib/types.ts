@@ -52,6 +52,8 @@ export interface Task {
   cancel_requested_at: string | null;
   failure_code: string | null;
   failure_message: string | null;
+  // reason recorded with the latest transition, e.g. "pull request #7 merged"
+  status_reason: string | null;
   created_at: string;
   updated_at: string;
   version: number;
@@ -94,6 +96,39 @@ export interface TaskTrace {
 
 export type AttemptStatus =
   "active" | "superseded" | "completed" | "failed" | "cancelled" | "timed_out";
+
+export type FeedbackKind =
+  "review" | "review_comment" | "comment" | "revise_command";
+
+// one reviewer item a revision was given; bodies live in the attempt instructions
+export interface FeedbackItem {
+  kind: FeedbackKind;
+  author: string;
+  posted_at: string;
+  location?: string;
+}
+
+// task_attempts read model; null fields were never recorded for the attempt
+export interface TaskAttempt {
+  id: string;
+  task_id: string;
+  attempt_number: number;
+  status: AttemptStatus;
+  base_commit_sha: string | null;
+  final_commit_sha: string | null;
+  pull_request_number: number | null;
+  instructions: string | null;
+  requested_by_login: string | null;
+  trigger_comment_id: number | null;
+  trigger_check_run_id: number | null;
+  trigger_check_run_completed_at: string | null;
+  feedback: FeedbackItem[];
+  failure_code: string | null;
+  failure_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
 
 export interface ValidationSummary {
   total: number;
@@ -260,6 +295,7 @@ export interface DashboardTask {
   started_at: string | null;
   completed_at: string | null;
   failure_message: string | null;
+  status_reason: string | null;
   created_at: string;
   updated_at: string;
 }

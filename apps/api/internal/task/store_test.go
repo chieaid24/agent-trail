@@ -883,3 +883,75 @@ func TestAttemptsNotFound(t *testing.T) {
 		t.Fatalf("Attempt bad id err = %v", err)
 	}
 }
+
+func TestTransitionRecordsStatusReason(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	tk := reviewedTask(t, s)
+	if got, _ := s.Get(ctx, tk.ID); got.StatusReason != nil {
+		t.Fatalf("reasonless transitions recorded %q", *got.StatusReason)
+	}
+
+	merged, err := s.Transition(ctx, tk.ID, TransitionParams{
+		To: StatusCompleted, Source: "system", Reason: "pull request #7 merged",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.StatusReason == nil || *merged.StatusReason != "pull request #7 merged" {
+		t.Fatalf("completed reason = %v", merged.StatusReason)
+	}
+	got, err := s.Get(ctx, tk.ID)
+	if err != nil || got.StatusReason == nil || *got.StatusReason != "pull request #7 merged" {
+		t.Fatalf("stored reason = %v, err = %v", got.StatusReason, err)
+	}
+	listed, err := s.List(ctx, ListParams{Status: StatusCompleted})
+	if err != nil || len(listed) != 1 || listed[0].StatusReason == nil ||
+		*listed[0].StatusReason != "pull request #7 merged" {
+		t.Fatalf("listed = %+v, err = %v", listed, err)
+	}
+}
+
+func TestTransitionReasonFollowsLatestTransition(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	tk := reviewedTask(t, s)
+
+	queued, _, err := s.RequestRevision(ctx, tk.ID, revisionParams(9))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.StatusReason == nil || *queued.StatusReason != "revision requested by @alice" {
+		t.Fatalf("queued reason = %v", queued.StatusReason)
+	}
+	running := mustTransition(t, s, tk.ID, StatusProvisioning)
+	if running.StatusReason != nil {
+		t.Fatalf("reason survived a reasonless transition: %q", *running.StatusReason)
+	}
+
+	cancelled, err := s.Cancel(ctx, tk.ID, strings.Repeat("x", 1200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.StatusReason == nil || len(*cancelled.StatusReason) != maxStatusReasonLen {
+		t.Fatalf("cancel reason length = %d, want %d", len(ptrString(cancelled.StatusReason)), maxStatusReasonLen)
+	}
+	var payload map[string]string
+	events, err := s.Events(ctx, tk.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(events[len(events)-1].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload["reason"]) != 1200 {
+		t.Fatalf("event payload reason was truncated to %d", len(payload["reason"]))
+	}
+}
+
+func ptrString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

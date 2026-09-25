@@ -57,6 +57,14 @@ cost reporting do not imply zero cost. Tasks without attempts return an empty
 `attempts` array, zero attempt/event counts, and null runtime, validation, and
 cost.
 
+The dashboard task page highlights the row (or the card below the `lg`
+breakpoint) of the attempt its attempt selector has selected whenever a task
+has more than one attempt; the figures themselves are unchanged by the
+selection. The selector reads `GET /api/v1/tasks/{taskId}/attempts`, which
+returns `{"attempts": [...]}` ascending by `attempt_number`, and passes
+`attempt=N` to `/evidence` and `/trace`; a non-positive, non-integer, or
+out-of-range value returns 400 and an attempt the task never had returns 404.
+
 Persisted spans are eventually consistent: the worker batches completed spans
 into PostgreSQL. A response can contain validation or event evidence before
 its matching span arrives, and null timings can become available on a later
