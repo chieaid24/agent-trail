@@ -178,11 +178,17 @@ const emptyInsights: TaskInsights = {
   attempts: [],
 };
 
-function stubFetch(options: { task: Task; attempts: TaskAttempt[] }) {
+function stubFetch(options: {
+  task: Task;
+  attempts: TaskAttempt[];
+  // reads matching hold never resolve, pinning the page in its in-flight state
+  hold?: (url: URL) => boolean;
+}) {
   const calls: string[] = [];
   const fetchMock = vi.fn().mockImplementation((input: string) => {
     calls.push(input);
     const url = new URL(input, "http://dashboard");
+    if (options.hold?.(url)) return new Promise(() => {});
     const attemptFilter = url.searchParams.get("attempt");
     if (url.pathname.endsWith("/me")) {
       return Promise.resolve(json({ error: "unauthenticated" }, 401));
@@ -336,6 +342,36 @@ test("a multi-attempt task follows the selected attempt without a reload", async
   expect(screen.getAllByText("smoke")).toHaveLength(1);
   fireEvent.click(screen.getByRole("tab", { name: /Trace/ }));
   expect(await screen.findByText("runner.attempt.1")).toBeDefined();
+});
+
+test("switching attempts clears the previous attempt's evidence and trace", async () => {
+  stubFetch({
+    task: task({}),
+    attempts: [attempt(1), attempt(2)],
+    hold: (url) => url.searchParams.get("attempt") === "1",
+  });
+  await renderPage();
+  await streamEvents(
+    [event(1, "task.created"), event(2, "task.queued")],
+    "awaiting_review",
+  );
+  await screen.findByRole("group", { name: "Attempt selector" });
+  fireEvent.click(screen.getByRole("tab", { name: /Trace/ }));
+  expect(await screen.findByText("runner.attempt.2")).toBeDefined();
+  fireEvent.click(screen.getByRole("tab", { name: /Evidence/ }));
+  expect(await screen.findByText(/No evidence report yet/)).toBeDefined();
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Attempt 1" }));
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
+  expect(screen.queryByText(/No evidence report yet/)).toBeNull();
+  expect(screen.getByLabelText("Loading evidence")).toBeDefined();
+  fireEvent.click(screen.getByRole("tab", { name: /Trace/ }));
+  expect(screen.queryByText("runner.attempt.2")).toBeNull();
+  expect(screen.getByLabelText("Loading trace")).toBeDefined();
 });
 
 test("a single-attempt task shows no selector and no attempt facts", async () => {

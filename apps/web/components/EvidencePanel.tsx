@@ -4,9 +4,23 @@ import type { StoredEvidence } from "@/lib/types";
 
 export function EvidencePanel({
   evidence,
+  loading = false,
 }: {
   evidence: StoredEvidence | null;
+  loading?: boolean;
 }) {
+  if (loading) {
+    return (
+      <div
+        aria-label="Loading evidence"
+        className="animate-pulse space-y-3 py-3"
+      >
+        {["w-3/4", "w-1/2", "w-2/3"].map((width) => (
+          <div key={width} className={`h-8 rounded bg-surface ${width}`} />
+        ))}
+      </div>
+    );
+  }
   if (evidence === null) {
     return (
       <p className="py-8 text-sm text-muted">

@@ -63,6 +63,9 @@ type AttemptsState =
   | { phase: "ready"; items: TaskAttempt[] }
   | { phase: "error" };
 
+type EvidenceState =
+  { phase: "loading" } | { phase: "ready"; report: StoredEvidence | null };
+
 const ATTEMPTS_LOADING: AttemptsState = { phase: "loading" };
 
 function useNow(intervalMs: number, enabled: boolean): number {
@@ -83,7 +86,9 @@ export default function TaskPage({
   const { taskId } = use(params);
   const [state, setState] = useState<TaskState>({ phase: "loading" });
   const [validations, setValidations] = useState<ValidationResult[]>([]);
-  const [evidence, setEvidence] = useState<StoredEvidence | null>(null);
+  const [evidence, setEvidence] = useState<EvidenceState>({
+    phase: "loading",
+  });
   const [conflicts, setConflicts] = useState<ConflictState>({
     phase: "loading",
   });
@@ -143,7 +148,6 @@ export default function TaskPage({
     chosen?.taskId === taskId && numbers.includes(chosen.attempt)
       ? chosen.attempt
       : null;
-  // the latest attempt is selected until the user picks another one
   const selectedAttempt = chosenAttempt ?? latestAttempt;
   const selectedRef = useRef<number | null>(null);
   useEffect(() => {
@@ -172,11 +176,17 @@ export default function TaskPage({
   // evidence and trace are attempt-scoped reads; a response for a stale selection is dropped
   const loadEvidence = useCallback(async () => {
     const attempt = selectedRef.current ?? undefined;
+    const current = () => (selectedRef.current ?? undefined) === attempt;
     try {
       const result = await getEvidence(taskId, attempt);
-      if ((selectedRef.current ?? undefined) === attempt) setEvidence(result);
+      if (current()) setEvidence({ phase: "ready", report: result });
     } catch {
-      // non-fatal
+      // non-fatal: a failed first read shows the absent state, a refresh keeps the report
+      setEvidence((prev) =>
+        prev.phase === "loading" && current()
+          ? { phase: "ready", report: null }
+          : prev,
+      );
     }
   }, [taskId]);
 
@@ -196,7 +206,9 @@ export default function TaskPage({
         setTrace({ phase: "ready", spans: result.spans });
       }
     } catch {
-      setTrace({ phase: "error" });
+      if ((selectedRef.current ?? undefined) === attempt) {
+        setTrace({ phase: "error" });
+      }
     }
   }, [taskId]);
 
@@ -210,11 +222,14 @@ export default function TaskPage({
     return () => clearTimeout(initial);
   }, [loadTask, loadValidations, loadConflicts, loadAttempts]);
 
-  // wait for the attempts list so the first read already targets the latest attempt
+  // wait for the attempts list so the first read already targets the latest attempt;
+  // a switch clears both tabs so the previous attempt's report and spans never linger
   const attemptsSettled = attemptsState.phase !== "loading";
   useEffect(() => {
     if (!attemptsSettled) return;
     const refresh = setTimeout(() => {
+      setEvidence({ phase: "loading" });
+      setTrace({ phase: "loading" });
       void loadEvidence();
       void loadTrace();
     }, 0);
@@ -356,7 +371,14 @@ export default function TaskPage({
                 {tab === "validations" && (
                   <ValidationList results={attemptValidations} />
                 )}
-                {tab === "evidence" && <EvidencePanel evidence={evidence} />}
+                {tab === "evidence" && (
+                  <EvidencePanel
+                    evidence={
+                      evidence.phase === "ready" ? evidence.report : null
+                    }
+                    loading={evidence.phase === "loading"}
+                  />
+                )}
                 {tab === "files" && <FileList files={files} />}
               </div>
             </div>
@@ -497,7 +519,7 @@ function TaskDetail({
                   ? shortSha(attempt.final_commit_sha)
                   : "not published"
               }
-              mono={attempt?.final_commit_sha !== null}
+              mono={Boolean(attempt?.final_commit_sha)}
             />
           )}
           {task.working_branch && (
