@@ -9,6 +9,7 @@ import type {
   RunnerDetail,
   StoredEvidence,
   Task,
+  TaskAttempt,
   TaskConflict,
   TaskInsights,
   TaskTrace,
@@ -158,8 +159,25 @@ export function getTask(taskId: string): Promise<Task> {
   return request<Task>(`/tasks/${encodeURIComponent(taskId)}`);
 }
 
-export function getTaskTrace(taskId: string): Promise<TaskTrace> {
-  return request<TaskTrace>(`/tasks/${encodeURIComponent(taskId)}/trace`);
+// omitted attempt = every attempt's spans
+export function getTaskTrace(
+  taskId: string,
+  attempt?: number,
+): Promise<TaskTrace> {
+  return request<TaskTrace>(
+    `/tasks/${encodeURIComponent(taskId)}/trace${attemptQuery(attempt)}`,
+  );
+}
+
+export async function listAttempts(taskId: string): Promise<TaskAttempt[]> {
+  const body = await request<{ attempts: TaskAttempt[] }>(
+    `/tasks/${encodeURIComponent(taskId)}/attempts`,
+  );
+  return body.attempts;
+}
+
+function attemptQuery(attempt?: number): string {
+  return attempt === undefined ? "" : `?attempt=${encodeURIComponent(attempt)}`;
 }
 
 export function getTaskInsights(taskId: string): Promise<TaskInsights> {
@@ -197,13 +215,14 @@ export async function listConflicts(taskId: string): Promise<TaskConflict[]> {
   return body.conflicts;
 }
 
-// 404 = no report yet, not an error
+// 404 = no report yet, not an error; omitted attempt = the latest attempt's report
 export async function getEvidence(
   taskId: string,
+  attempt?: number,
 ): Promise<StoredEvidence | null> {
   try {
     return await request<StoredEvidence>(
-      `/tasks/${encodeURIComponent(taskId)}/evidence`,
+      `/tasks/${encodeURIComponent(taskId)}/evidence${attemptQuery(attempt)}`,
     );
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return null;

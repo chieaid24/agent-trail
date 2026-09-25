@@ -5,6 +5,8 @@ import {
   eventCursor,
   getEvidence,
   getTaskInsights,
+  getTaskTrace,
+  listAttempts,
   getRepository,
   getRunner,
   listOrganizations,
@@ -171,6 +173,49 @@ describe("stream helpers", () => {
     expect(streamUrl("t1")).toBe("/backend/api/v1/tasks/t1/stream");
     expect(streamUrl("t1", "2:17")).toBe(
       "/backend/api/v1/tasks/t1/stream?last_event_id=2%3A17",
+    );
+  });
+
+  it("lists attempts and scopes evidence and trace to one attempt", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith("/attempts")) {
+        return Promise.resolve(
+          jsonResponse(200, { attempts: [{ attempt_number: 1 }] }),
+        );
+      }
+      if (url.includes("/trace")) {
+        return Promise.resolve(jsonResponse(200, { spans: [] }));
+      }
+      return Promise.resolve(jsonResponse(200, { attempt_number: 2 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await listAttempts("t1")).toEqual([{ attempt_number: 1 }]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/v1/tasks/t1/attempts",
+      undefined,
+    );
+
+    await getEvidence("t1", 2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/v1/tasks/t1/evidence?attempt=2",
+      undefined,
+    );
+    await getEvidence("t1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/v1/tasks/t1/evidence",
+      undefined,
+    );
+
+    await getTaskTrace("t1", 3);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/v1/tasks/t1/trace?attempt=3",
+      undefined,
+    );
+    await getTaskTrace("t1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/v1/tasks/t1/trace",
+      undefined,
     );
   });
 });

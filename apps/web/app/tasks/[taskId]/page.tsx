@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { AttemptSelector } from "@/components/AttemptSelector";
 import { CancelButton } from "@/components/CancelButton";
 import { ConflictWarning } from "@/components/ConflictWarning";
 import { EvidencePanel } from "@/components/EvidencePanel";
@@ -17,9 +18,11 @@ import {
   getEvidence,
   getTask,
   getTaskTrace,
+  listAttempts,
   listConflicts,
   listValidations,
 } from "@/lib/api";
+import { attemptNumbers } from "@/lib/attempts";
 import { aggregateCost, type CostSummary } from "@/lib/cost";
 import {
   formatDateTime,
@@ -34,6 +37,7 @@ import { useTaskStream, type StreamState } from "@/lib/useTaskStream";
 import type {
   StoredEvidence,
   Task,
+  TaskAttempt,
   TaskConflict,
   ValidationResult,
 } from "@/lib/types";
@@ -53,6 +57,13 @@ type ConflictState =
   | { phase: "loading" }
   | { phase: "ready"; items: TaskConflict[] }
   | { phase: "error" };
+
+type AttemptsState =
+  | { phase: "loading" }
+  | { phase: "ready"; items: TaskAttempt[] }
+  | { phase: "error" };
+
+const ATTEMPTS_LOADING: AttemptsState = { phase: "loading" };
 
 function useNow(intervalMs: number, enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -78,6 +89,15 @@ export default function TaskPage({
   });
   const [trace, setTrace] = useState<TraceState>({ phase: "loading" });
   const [tab, setTab] = useState<TabKey>("timeline");
+  // both keyed by task so navigating between tasks never shows the previous task's attempts
+  const [attempts, setAttempts] = useState<{
+    taskId: string;
+    state: AttemptsState;
+  } | null>(null);
+  const [chosen, setChosen] = useState<{
+    taskId: string;
+    attempt: number;
+  } | null>(null);
   const stream = useTaskStream(taskId);
   const running = state.phase === "ready" && !isTerminal(state.task.status);
   const { state: insights, retry: retryInsights } = useTaskInsights(
@@ -108,9 +128,52 @@ export default function TaskPage({
     }
   }, [taskId]);
 
-  const loadEvidence = useCallback(async () => {
+  const attemptsState =
+    attempts?.taskId === taskId ? attempts.state : ATTEMPTS_LOADING;
+  const attemptItems = useMemo(
+    () => (attemptsState.phase === "ready" ? attemptsState.items : []),
+    [attemptsState],
+  );
+  const numbers = useMemo(
+    () => attemptNumbers(attemptItems, stream.events),
+    [attemptItems, stream.events],
+  );
+  const latestAttempt = numbers.length > 0 ? numbers[numbers.length - 1] : null;
+  const chosenAttempt =
+    chosen?.taskId === taskId && numbers.includes(chosen.attempt)
+      ? chosen.attempt
+      : null;
+  // the latest attempt is selected until the user picks another one
+  const selectedAttempt = chosenAttempt ?? latestAttempt;
+  const selectedRef = useRef<number | null>(null);
+  useEffect(() => {
+    selectedRef.current = selectedAttempt;
+  }, [selectedAttempt]);
+  const selectAttempt = useCallback(
+    (attempt: number) =>
+      setChosen(attempt === latestAttempt ? null : { taskId, attempt }),
+    [taskId, latestAttempt],
+  );
+
+  const loadAttempts = useCallback(async () => {
     try {
-      setEvidence(await getEvidence(taskId));
+      const items = await listAttempts(taskId);
+      setAttempts({ taskId, state: { phase: "ready", items } });
+    } catch {
+      setAttempts((prev) =>
+        prev?.taskId === taskId && prev.state.phase === "ready"
+          ? prev
+          : { taskId, state: { phase: "error" } },
+      );
+    }
+  }, [taskId]);
+
+  // evidence and trace are attempt-scoped reads; a response for a stale selection is dropped
+  const loadEvidence = useCallback(async () => {
+    const attempt = selectedRef.current ?? undefined;
+    try {
+      const result = await getEvidence(taskId, attempt);
+      if ((selectedRef.current ?? undefined) === attempt) setEvidence(result);
     } catch {
       // non-fatal
     }
@@ -125,9 +188,12 @@ export default function TaskPage({
   }, [taskId]);
 
   const loadTrace = useCallback(async () => {
+    const attempt = selectedRef.current ?? undefined;
     try {
-      const result = await getTaskTrace(taskId);
-      setTrace({ phase: "ready", spans: result.spans });
+      const result = await getTaskTrace(taskId, attempt);
+      if ((selectedRef.current ?? undefined) === attempt) {
+        setTrace({ phase: "ready", spans: result.spans });
+      }
     } catch {
       setTrace({ phase: "error" });
     }
@@ -137,12 +203,22 @@ export default function TaskPage({
     const initial = setTimeout(() => {
       void loadTask();
       void loadValidations();
-      void loadEvidence();
       void loadConflicts();
-      void loadTrace();
+      void loadAttempts();
     }, 0);
     return () => clearTimeout(initial);
-  }, [loadTask, loadValidations, loadEvidence, loadConflicts, loadTrace]);
+  }, [loadTask, loadValidations, loadConflicts, loadAttempts]);
+
+  // wait for the attempts list so the first read already targets the latest attempt
+  const attemptsSettled = attemptsState.phase !== "loading";
+  useEffect(() => {
+    if (!attemptsSettled) return;
+    const refresh = setTimeout(() => {
+      void loadEvidence();
+      void loadTrace();
+    }, 0);
+    return () => clearTimeout(refresh);
+  }, [attemptsSettled, selectedAttempt, loadEvidence, loadTrace]);
 
   const taskEventCount = stream.events.filter((e) =>
     e.event_type.startsWith("task."),
@@ -160,11 +236,11 @@ export default function TaskPage({
   useEffect(() => {
     if (taskEventCount === 0) return;
     const refresh = setTimeout(
-      () => void Promise.all([loadTask(), loadConflicts()]),
+      () => void Promise.all([loadTask(), loadConflicts(), loadAttempts()]),
       0,
     );
     return () => clearTimeout(refresh);
-  }, [taskEventCount, loadTask, loadConflicts]);
+  }, [taskEventCount, loadTask, loadConflicts, loadAttempts]);
   useEffect(() => {
     if (validationEventCount === 0) return;
     const refresh = setTimeout(() => void loadValidations(), 0);
@@ -200,13 +276,32 @@ export default function TaskPage({
     const t = setInterval(() => {
       void loadTask();
       void loadConflicts();
+      void loadAttempts();
       void loadTrace();
     }, TASK_POLL_MS);
     return () => clearInterval(t);
-  }, [running, loadTask, loadConflicts, loadTrace]);
+  }, [running, loadTask, loadConflicts, loadAttempts, loadTrace]);
 
-  const files = useMemo(() => changedFiles(stream.events), [stream.events]);
-  const plan = useMemo(() => latestPlan(stream.events), [stream.events]);
+  // the tabs follow the selected attempt; cost stays task-wide with its per-attempt breakdown
+  const attemptEvents = useMemo(
+    () =>
+      selectedAttempt === null
+        ? stream.events
+        : stream.events.filter((e) => e.attempt_number === selectedAttempt),
+    [stream.events, selectedAttempt],
+  );
+  const attemptValidations = useMemo(
+    () =>
+      selectedAttempt === null
+        ? validations
+        : validations.filter((v) => v.attempt_number === selectedAttempt),
+    [validations, selectedAttempt],
+  );
+  const selected = attemptItems.find(
+    (a) => a.attempt_number === selectedAttempt,
+  );
+  const files = useMemo(() => changedFiles(attemptEvents), [attemptEvents]);
+  const plan = useMemo(() => latestPlan(attemptEvents), [attemptEvents]);
   const cost = useMemo(() => aggregateCost(stream.events), [stream.events]);
 
   return (
@@ -228,29 +323,37 @@ export default function TaskPage({
             plan={plan}
             conflicts={conflicts}
             cost={cost}
+            attemptNumbers={numbers}
+            selectedAttempt={selectedAttempt}
+            attempt={selected}
+            onSelectAttempt={selectAttempt}
             onRetryConflicts={loadConflicts}
             onTaskChanged={(t) => setState({ phase: "ready", task: t })}
           >
-            <InsightsPanel state={insights} onRetry={retryInsights} />
+            <InsightsPanel
+              state={insights}
+              onRetry={retryInsights}
+              selectedAttempt={selectedAttempt}
+            />
             <div className="mt-6">
               <TabBar
                 tab={tab}
                 onSelect={setTab}
                 counts={{
-                  timeline: stream.events.length,
+                  timeline: attemptEvents.length,
                   trace: trace.phase === "ready" ? trace.spans.length : null,
                   logs: null,
-                  validations: validations.length,
+                  validations: attemptValidations.length,
                   evidence: null,
                   files: files.length,
                 }}
               />
               <div role="tabpanel" className="mt-4">
-                {tab === "timeline" && <Timeline events={stream.events} />}
+                {tab === "timeline" && <Timeline events={attemptEvents} />}
                 {tab === "trace" && <TraceWaterfall state={trace} />}
-                {tab === "logs" && <LogViewer events={stream.events} />}
+                {tab === "logs" && <LogViewer events={attemptEvents} />}
                 {tab === "validations" && (
-                  <ValidationList results={validations} />
+                  <ValidationList results={attemptValidations} />
                 )}
                 {tab === "evidence" && <EvidencePanel evidence={evidence} />}
                 {tab === "files" && <FileList files={files} />}
@@ -269,6 +372,10 @@ function TaskDetail({
   plan,
   conflicts,
   cost,
+  attemptNumbers,
+  selectedAttempt,
+  attempt,
+  onSelectAttempt,
   onRetryConflicts,
   onTaskChanged,
   children,
@@ -278,6 +385,10 @@ function TaskDetail({
   plan: string | null;
   conflicts: ConflictState;
   cost: CostSummary;
+  attemptNumbers: number[];
+  selectedAttempt: number | null;
+  attempt: TaskAttempt | undefined;
+  onSelectAttempt: (attempt: number) => void;
   onRetryConflicts: () => void;
   onTaskChanged: (t: Task) => void;
   children: React.ReactNode;
@@ -286,6 +397,9 @@ function TaskDetail({
   const now = useNow(1000, !terminal);
   const runtime = runtimeMs(task.started_at, task.completed_at);
   const reason = outcomeReason(task);
+  // attempt 1 inherits the task's base and instructions; a revision records its own
+  const multiAttempt = attemptNumbers.length > 1;
+  const baseCommit = attempt?.base_commit_sha ?? task.base_commit_sha;
   void now; // tick forces re-render for live runtime
 
   return (
@@ -321,6 +435,12 @@ function TaskDetail({
             {task.failure_message ?? "No failure detail was recorded."}
           </p>
         ) : null}
+        <AttemptSelector
+          numbers={attemptNumbers}
+          selected={selectedAttempt}
+          attempt={attempt}
+          onSelect={onSelectAttempt}
+        />
         <div className="mt-4 h-40 xl:h-32">
           {conflicts.phase === "loading" && (
             <p className="h-full rounded border border-border px-3 py-3 text-sm text-muted">
@@ -365,11 +485,18 @@ function TaskDetail({
             <Meta label="issue" value={`#${task.source_issue_number}`} />
           )}
           <Meta label="base" value={task.base_branch} mono />
-          {task.base_commit_sha && (
+          {baseCommit && (
+            <Meta label="base commit" value={shortSha(baseCommit)} mono />
+          )}
+          {multiAttempt && (
             <Meta
-              label="base commit"
-              value={shortSha(task.base_commit_sha)}
-              mono
+              label="final commit"
+              value={
+                attempt?.final_commit_sha
+                  ? shortSha(attempt.final_commit_sha)
+                  : "not published"
+              }
+              mono={attempt?.final_commit_sha !== null}
             />
           )}
           {task.working_branch && (
@@ -408,7 +535,7 @@ function TaskDetail({
           </p>
         )}
 
-        <Instructions text={task.instructions} />
+        <Instructions text={attempt?.instructions ?? task.instructions} />
         {plan && (
           <details className="mt-3 max-w-[72ch]">
             <summary className="cursor-pointer text-sm font-semibold text-muted hover:text-foreground">
