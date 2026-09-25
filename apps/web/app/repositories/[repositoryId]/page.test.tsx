@@ -15,8 +15,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("renders repository settings, metrics, and task sections", async () => {
-  const repository = {
+function repositoryFixture(): RepositoryDetail {
+  return {
     id: "39be2f56-3419-4a0a-a7ad-1a72698c0cc5",
     organization_id: "5b0a6f6e-3c73-4b57-9d5c-0f0f38c4a001",
     owner: "chieaid24",
@@ -46,6 +46,10 @@ test("renders repository settings, metrics, and task sections", async () => {
     active_tasks: [],
     recent_tasks: [],
   } as RepositoryDetail;
+}
+
+test("renders repository settings, metrics, and task sections", async () => {
+  const repository = repositoryFixture();
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(repository))),
@@ -66,4 +70,32 @@ test("renders repository settings, metrics, and task sections", async () => {
   expect(screen.getByText("5 attempts")).toBeDefined();
   expect(screen.getByText("50%")).toBeDefined();
   expect(screen.getByText("No active tasks.")).toBeDefined();
+});
+
+test("renders a singular revision limit", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse({
+          ...repositoryFixture(),
+          settings: {
+            default_policy: "restricted",
+            validation_file: ".agent-trail/validation.yaml",
+            max_attempts: 1,
+          },
+        }),
+      ),
+    ),
+  );
+
+  await act(async () => {
+    render(
+      <RepositoryPage
+        params={Promise.resolve({ repositoryId: repositoryFixture().id })}
+      />,
+    );
+  });
+
+  expect(await screen.findByText("1 attempt")).toBeDefined();
 });
