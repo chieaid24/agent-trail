@@ -158,6 +158,7 @@ export default function TaskPage({
   const loadAttempts = useCallback(async () => {
     try {
       const items = await listAttempts(taskId);
+      if (!Array.isArray(items)) throw new Error("malformed attempts list");
       setAttempts({ taskId, state: { phase: "ready", items } });
     } catch {
       setAttempts((prev) =>
