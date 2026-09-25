@@ -726,7 +726,10 @@ func TestRequestRevisionGuards(t *testing.T) {
 		if _, _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := s.RequestRevision(ctx, tk.ID, revisionParams(1)); !errors.Is(err, ErrRevisionReplayed) {
+		// replay wins even when the limit would now refuse a fresh command
+		replay := revisionParams(1)
+		replay.MaxAttempts = 2
+		if _, _, err := s.RequestRevision(ctx, tk.ID, replay); !errors.Is(err, ErrRevisionReplayed) {
 			t.Fatalf("replay err = %v", err)
 		}
 		attempts, _ := s.Attempts(ctx, tk.ID)
@@ -773,6 +776,7 @@ func TestRequestRevisionGuards(t *testing.T) {
 			"no requester":    func(p *RevisionParams) { p.RequestedByLogin = "" },
 			"no comment":      func(p *RevisionParams) { p.TriggerCommentID = 0 },
 			"no limit":        func(p *RevisionParams) { p.MaxAttempts = 0 },
+			"no key":          func(p *RevisionParams) { p.IdempotencyKey = "" },
 		} {
 			p := revisionParams(5)
 			mutate(&p)
@@ -863,34 +867,6 @@ func TestTriggerCheckRunBookkeeping(t *testing.T) {
 	}
 	if err := s.RecordTriggerCheckRun(ctx, terminal.ID, 1); !errors.Is(err, ErrAttemptNotFound) {
 		t.Fatalf("record on terminal task err = %v", err)
-	}
-}
-
-func TestPublishedAtReadsPullRequestEvents(t *testing.T) {
-	s := NewStore(testDB(t))
-	ctx := context.Background()
-	tk := mustCreate(t, s)
-
-	at, err := s.PublishedAt(ctx, tk.ID)
-	if err != nil || at != nil {
-		t.Fatalf("PublishedAt before publish = %v, %v", at, err)
-	}
-	if err := s.AppendEvent(ctx, tk.ID, "pull_request.created", "runner", map[string]string{"number": "1"}); err != nil {
-		t.Fatal(err)
-	}
-	first, err := s.PublishedAt(ctx, tk.ID)
-	if err != nil || first == nil {
-		t.Fatalf("PublishedAt after create = %v, %v", first, err)
-	}
-	if err := s.AppendEvent(ctx, tk.ID, "pull_request.updated", "runner", map[string]string{"number": "1"}); err != nil {
-		t.Fatal(err)
-	}
-	second, err := s.PublishedAt(ctx, tk.ID)
-	if err != nil || second == nil || second.Before(*first) {
-		t.Fatalf("PublishedAt after update = %v (first %v), %v", second, first, err)
-	}
-	if _, err := s.PublishedAt(ctx, "not-a-uuid"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("bad id err = %v", err)
 	}
 }
 

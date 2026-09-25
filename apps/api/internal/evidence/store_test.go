@@ -201,8 +201,7 @@ func TestAttemptHistoryPerAttempt(t *testing.T) {
 		t.Fatalf("attempt 2 history = %+v", second)
 	}
 
-	bare, bareID := createAttempt(t, db)
-	_ = bareID
+	bare, _ := createAttempt(t, db)
 	history, err = s.AttemptHistory(ctx, bare)
 	if err != nil || len(history) != 1 || history[0].Validation != "" || history[0].CostUSD != nil {
 		t.Fatalf("bare history = %+v, err = %v", history, err)

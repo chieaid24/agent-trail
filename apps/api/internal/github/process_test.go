@@ -921,19 +921,30 @@ func reviseComment(commentID int64) commentOpts {
 	}
 }
 
-func TestReviseCreatesSecondAttemptFromPullRequestHead(t *testing.T) {
+// walks the active attempt along the happy path back to awaiting_review
+func (f *fixture) finishAttempt(t *testing.T, id string) {
+	t.Helper()
+	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning,
+		task.StatusExecuting, task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview} {
+		if _, err := f.tasks.Transition(context.Background(), id, task.TransitionParams{To: to}); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+}
+
+func TestReviseCreatesNextAttemptFromPullRequestHead(t *testing.T) {
 	f := newFixture(t)
-	ctx := context.Background()
 	tk := f.taskAt(t, task.StatusAwaitingReview)
 	f.setPullRequest(reviewBranch, 501)
-	if err := f.tasks.AppendEvent(ctx, tk.ID, "pull_request.created", "runner", map[string]string{"number": "15"}); err != nil {
-		t.Fatal(err)
+
+	// a first revision fixes the cutoff: feedback before its trigger was already given to it
+	f.recordAndProcess(t, "d-revise-1", "issue_comment", issueCommentJSON(t, reviseComment(9002)))
+	if got := f.taskStatus(t, tk.ID); got != task.StatusQueued {
+		t.Fatalf("first revision left the task %s: %q", got, f.api.lastComment())
 	}
-	published, err := f.tasks.PublishedAt(ctx, tk.ID)
-	if err != nil || published == nil {
-		t.Fatalf("published at = %v, %v", published, err)
-	}
-	before, after := published.Add(-time.Hour), published.Add(time.Minute)
+	f.finishAttempt(t, tk.ID)
+	cutoff := f.attempts(t, tk.ID)[1].CreatedAt
+	before, after := cutoff.Add(-time.Hour), cutoff.Add(time.Minute)
 	seven := 7
 	f.api.mu.Lock()
 	f.api.reviews = []Review{
@@ -947,39 +958,40 @@ func TestReviseCreatesSecondAttemptFromPullRequestHead(t *testing.T) {
 	}
 	f.api.issueComments = []IssueComment{
 		{ID: 6, Body: "also update the docs", User: Author{Login: "alice", Type: "User"}, CreatedAt: after},
-		{ID: 9002, Body: "/agent-trail revise", User: Author{Login: "alice", Type: "User"}, CreatedAt: after.Add(4 * time.Minute)},
+		{ID: 7, Body: "/agent-trail run", User: Author{Login: "dave", Type: "User"}, CreatedAt: after.Add(90 * time.Second)},
+		{ID: 9003, Body: "/agent-trail revise", User: Author{Login: "alice", Type: "User"}, CreatedAt: after.Add(4 * time.Minute)},
 	}
 	f.api.mu.Unlock()
 
-	f.recordAndProcess(t, "d-revise", "issue_comment", issueCommentJSON(t, reviseComment(9002)))
+	f.recordAndProcess(t, "d-revise-2", "issue_comment", issueCommentJSON(t, reviseComment(9003)))
 
-	if got := f.deliveryStatus(t, "d-revise"); got != "processed" {
+	if got := f.deliveryStatus(t, "d-revise-2"); got != "processed" {
 		t.Fatalf("delivery status = %q", got)
 	}
 	if got := f.taskStatus(t, tk.ID); got != task.StatusQueued {
 		t.Fatalf("task = %s, want queued", got)
 	}
 	attempts := f.attempts(t, tk.ID)
-	if len(attempts) != 2 || attempts[0].Status != "superseded" || attempts[1].Status != "active" {
+	if len(attempts) != 3 || attempts[1].Status != "superseded" || attempts[2].Status != "active" {
 		t.Fatalf("attempts = %+v", attempts)
 	}
-	second := attempts[1]
-	if second.BaseCommitSHA == nil || *second.BaseCommitSHA != reviewHeadSHA ||
-		second.RequestedByLogin == nil || *second.RequestedByLogin != "alice" ||
-		second.TriggerCommentID == nil || *second.TriggerCommentID != 9002 ||
-		second.TriggerCheckRunID == nil || *second.TriggerCheckRunID != 778 {
-		t.Fatalf("attempt 2 = %+v", second)
+	third := attempts[2]
+	if third.BaseCommitSHA == nil || *third.BaseCommitSHA != reviewHeadSHA ||
+		third.RequestedByLogin == nil || *third.RequestedByLogin != "alice" ||
+		third.TriggerCommentID == nil || *third.TriggerCommentID != 9003 ||
+		third.TriggerCheckRunID == nil || *third.TriggerCheckRunID != 779 {
+		t.Fatalf("attempt 3 = %+v", third)
 	}
 	kinds := []string{}
-	for _, item := range second.Feedback {
-		kinds = append(kinds, item.Kind+":"+item.Author+":"+item.Location)
+	for _, item := range third.Feedback {
+		kinds = append(kinds, string(item.Kind)+":"+item.Author+":"+item.Location)
 	}
 	want := []string{"comment:alice:", "review_comment:alice:internal/a.go:7",
 		"review:bob:changes_requested", "revise_command:alice:"}
 	if strings.Join(kinds, ",") != strings.Join(want, ",") {
 		t.Fatalf("feedback = %v, want %v", kinds, want)
 	}
-	instructions := *second.Instructions
+	instructions := *third.Instructions
 	for _, want := range []string{
 		"Fix the flaky login test", "It fails on CI about once a day.",
 		"already contains the previous attempts' work",
@@ -992,7 +1004,7 @@ func TestReviseCreatesSecondAttemptFromPullRequestHead(t *testing.T) {
 			t.Fatalf("instructions missing %q:\n%s", want, instructions)
 		}
 	}
-	for _, absent := range []string{"old round", "bot noise"} {
+	for _, absent := range []string{"old round", "bot noise", "@dave"} {
 		if strings.Contains(instructions, absent) {
 			t.Fatalf("instructions carry excluded feedback %q:\n%s", absent, instructions)
 		}
@@ -1007,7 +1019,7 @@ func TestReviseCreatesSecondAttemptFromPullRequestHead(t *testing.T) {
 	if params.HeadSHA != reviewHeadSHA || params.Status != "queued" || params.ExternalID != tk.ID {
 		t.Fatalf("trigger check run = %+v", params)
 	}
-	if !f.lastCommentContains(t, "revision attempt 2") || !f.lastCommentContains(t, "3 review feedback item(s)") {
+	if !f.lastCommentContains(t, "revision attempt 3") || !f.lastCommentContains(t, "4 review feedback item(s)") {
 		t.Fatalf("ack = %q", f.api.lastComment())
 	}
 	events := f.transitionEvents(t, tk.ID)
@@ -1181,7 +1193,7 @@ func TestReviseInstructionsTruncateOnRuneBoundary(t *testing.T) {
 	}
 }
 
-func TestReviseWithoutPriorPublishUsesNoCutoff(t *testing.T) {
+func TestFirstRevisionTakesEveryHumanComment(t *testing.T) {
 	f := newFixture(t)
 	tk := f.taskAt(t, task.StatusAwaitingReview)
 	f.setPullRequest(reviewBranch, 501)

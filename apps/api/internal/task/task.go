@@ -67,12 +67,35 @@ type CreateParams struct {
 	RequestedByLogin string
 }
 
+type FeedbackKind string
+
+const (
+	FeedbackReview        FeedbackKind = "review"
+	FeedbackReviewComment FeedbackKind = "review_comment"
+	FeedbackComment       FeedbackKind = "comment"
+	FeedbackReviseCommand FeedbackKind = "revise_command"
+)
+
+// human-readable form for instructions and the revision summary
+func (k FeedbackKind) Label() string {
+	switch k {
+	case FeedbackReview:
+		return "review"
+	case FeedbackReviewComment:
+		return "inline review comment"
+	case FeedbackReviseCommand:
+		return "revise command"
+	default:
+		return "comment"
+	}
+}
+
 // one reviewer item a revision was given; bodies live in the attempt instructions, not here
 type FeedbackItem struct {
-	Kind     string    `json:"kind"` // review, review_comment, comment, revise_command
-	Author   string    `json:"author"`
-	PostedAt time.Time `json:"posted_at"`
-	Location string    `json:"location,omitempty"` // "path:line" for inline review comments
+	Kind     FeedbackKind `json:"kind"`
+	Author   string       `json:"author"`
+	PostedAt time.Time    `json:"posted_at"`
+	Location string       `json:"location,omitempty"` // "path:line" for inline review comments
 }
 
 type RevisionParams struct {

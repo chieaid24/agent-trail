@@ -29,7 +29,7 @@ func Defaults() Settings {
 	}
 }
 
-// absent or zero fields take defaults; a stored value outside bounds is a corrupt row, never clamped
+// absent fields take defaults; a stored max_attempts outside bounds (zero included) is a corrupt row, never clamped
 func Parse(raw []byte) (Settings, error) {
 	settings := Defaults()
 	if len(raw) == 0 {

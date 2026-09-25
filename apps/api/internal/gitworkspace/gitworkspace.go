@@ -140,3 +140,6 @@ func validComponent(s string) bool {
 }
 
 func validSHA(s string) bool { return shaRe.MatchString(s) }
+
+// ValidSHA reports whether s is a full lowercase commit id, the only shape the platform records.
+func ValidSHA(s string) bool { return validSHA(s) }

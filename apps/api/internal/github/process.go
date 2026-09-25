@@ -37,7 +37,6 @@ type TaskService interface {
 	Transition(ctx context.Context, id string, p task.TransitionParams) (task.Task, error)
 	RequestRevision(ctx context.Context, id string, p task.RevisionParams) (task.Task, task.Attempt, error)
 	Attempts(ctx context.Context, taskID string) ([]task.Attempt, error)
-	PublishedAt(ctx context.Context, taskID string) (*time.Time, error)
 	RecordTriggerCheckRun(ctx context.Context, taskID string, checkRunID int64) error
 	AppendEvent(ctx context.Context, taskID, eventType, source string, payload map[string]string) error
 }
@@ -240,9 +239,10 @@ func (p *Processor) handleInstallationRepositories(ctx context.Context, payload 
 type issueCommentPayload struct {
 	Action  string `json:"action"`
 	Comment struct {
-		ID   int64  `json:"id"`
-		Body string `json:"body"`
-		User struct {
+		ID        int64     `json:"id"`
+		Body      string    `json:"body"`
+		CreatedAt time.Time `json:"created_at"`
+		User      struct {
 			ID    int64  `json:"id"`
 			Login string `json:"login"`
 			Type  string `json:"type"`
@@ -584,10 +584,9 @@ func activeTaskReply(taskID string) string {
 }
 
 func composeInstructions(ev issueCommentPayload) string {
-	const limit = 100000
 	full := fmt.Sprintf("%s\n\n%s\n\n---\nTriggering comment by @%s:\n\n%s",
 		ev.Issue.Title, ev.Issue.Body, ev.Comment.User.Login, ev.Comment.Body)
-	return truncateUTF8(full, limit)
+	return truncateUTF8(full, instructionLimit)
 }
 
 // byte bound without splitting a rune; db check counts chars and bytes >= chars

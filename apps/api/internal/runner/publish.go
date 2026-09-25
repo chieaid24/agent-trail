@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
@@ -484,8 +485,8 @@ func revisionSummary(attempt task.Attempt, finalSHA string, report evidence.Repo
 	fmt.Fprintf(&b, "- Validation: %s\n", validationOutcome(report))
 	fmt.Fprintf(&b, "- Review feedback given: %d item(s)\n", len(attempt.Feedback))
 	for _, item := range attempt.Feedback {
-		fmt.Fprintf(&b, "  - %s by @%s at %s", feedbackKindLabel(item.Kind), item.Author,
-			item.PostedAt.UTC().Format("2006-01-02T15:04:05Z"))
+		fmt.Fprintf(&b, "  - %s by @%s at %s", item.Kind.Label(), item.Author,
+			item.PostedAt.UTC().Format(time.RFC3339))
 		if item.Location != "" {
 			fmt.Fprintf(&b, " on %s", item.Location)
 		}
@@ -494,19 +495,6 @@ func revisionSummary(attempt task.Attempt, finalSHA string, report evidence.Repo
 	fmt.Fprintf(&b, "\nThe pull request body carries the updated evidence report and attempts "+
 		"history; the `%s` check holds the verified results.", github.CheckRunName)
 	return b.String()
-}
-
-func feedbackKindLabel(kind string) string {
-	switch kind {
-	case "review":
-		return "review"
-	case "review_comment":
-		return "inline review comment"
-	case "revise_command":
-		return "revise command"
-	default:
-		return "comment"
-	}
 }
 
 // counts only platform-executed checks; agent claims never count as verification
@@ -718,7 +706,7 @@ func (e *Executor) storedReport(ctx context.Context, attemptID string) (evidence
 	return report, stored.SummaryMarkdown, nil
 }
 
-// any failed check -> failure; not-all-ran or none ran -> neutral, never success
+// any failed trusted check -> failure; every trusted check passed -> success; otherwise neutral
 func checkConclusion(r evidence.Report) string {
 	sawTrusted := false
 	conclusion := "success"

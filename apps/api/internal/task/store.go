@@ -211,7 +211,8 @@ func (s *Store) RequestRevision(ctx context.Context, id string, p RevisionParams
 		return Task{}, Attempt{}, ErrNotFound
 	}
 	if p.Instructions == "" || !shaRe.MatchString(p.BaseCommitSHA) ||
-		p.RequestedByLogin == "" || p.TriggerCommentID <= 0 || p.MaxAttempts < 1 {
+		p.RequestedByLogin == "" || p.TriggerCommentID <= 0 || p.MaxAttempts < 1 ||
+		p.IdempotencyKey == "" {
 		return Task{}, Attempt{}, errors.New("revision params incomplete")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -223,6 +224,20 @@ func (s *Store) RequestRevision(ctx context.Context, id string, p RevisionParams
 	cur, err := lockTask(ctx, tx, id)
 	if err != nil {
 		return Task{}, Attempt{}, err
+	}
+	// replay outranks every other guard: a repeated command must never draw a limit reply
+	var seen bool
+	err = tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM activity_events e
+			JOIN task_attempts a ON a.id = e.task_attempt_id
+			WHERE a.task_id = $1 AND e.idempotency_key = $2)`,
+		id, p.IdempotencyKey).Scan(&seen)
+	if err != nil {
+		return Task{}, Attempt{}, fmt.Errorf("revision replay check: %w", err)
+	}
+	if seen {
+		return Task{}, Attempt{}, ErrRevisionReplayed
 	}
 	var attempts int
 	err = tx.QueryRowContext(ctx,
@@ -621,25 +636,6 @@ func (s *Store) MarkTriggerCheckRunCompleted(ctx context.Context, attemptID stri
 		return fmt.Errorf("mark trigger check run completed: %w", err)
 	}
 	return nil
-}
-
-// when the pull request last reflected an attempt's work; nil before the first publish
-func (s *Store) PublishedAt(ctx context.Context, taskID string) (*time.Time, error) {
-	if !IsUUID(taskID) {
-		return nil, ErrNotFound
-	}
-	var at sql.NullTime
-	err := s.db.QueryRowContext(ctx, `
-		SELECT max(e."timestamp")
-		FROM activity_events e
-		JOIN task_attempts a ON a.id = e.task_attempt_id
-		WHERE a.task_id = $1
-			AND e.event_type IN ('pull_request.created', 'pull_request.updated')`,
-		taskID).Scan(&at)
-	if err != nil {
-		return nil, fmt.Errorf("published at: %w", err)
-	}
-	return nullTime(at), nil
 }
 
 func scanAttempt(row interface{ Scan(...any) error }) (Attempt, error) {

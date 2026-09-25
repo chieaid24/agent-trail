@@ -66,7 +66,7 @@ func PRBody(r Report, finalCommit string, history []AttemptHistory) string {
 		for _, h := range history {
 			fmt.Fprintf(&b, "| %d | %s | %s | %s | %s |\n", h.Number,
 				shaCell(h.BaseCommit), shaCell(h.FinalCommit),
-				textCell(h.Validation), costCell(h.CostUSD))
+				textCell(string(h.Validation)), costCell(h.CostUSD))
 		}
 	}
 	return b.String()

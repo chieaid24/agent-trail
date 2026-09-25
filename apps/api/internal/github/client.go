@@ -481,11 +481,13 @@ func sinceQuery(since time.Time) url.Values {
 	return url.Values{"since": {since.UTC().Format(time.RFC3339)}}
 }
 
-// bounded: github returns at most 100 per page; a short page ends the walk
+// bounded: at most 100 per page and maxPages requests; a short page ends the walk early
+const maxPages = 10
+
 func paginate[T any](ctx context.Context, c *Client, token, path string, query url.Values) ([]T, error) {
 	const perPage = 100
 	var all []T
-	for page := 1; ; page++ {
+	for page := 1; page <= maxPages; page++ {
 		q := url.Values{}
 		for k, v := range query {
 			q[k] = v
@@ -498,9 +500,10 @@ func paginate[T any](ctx context.Context, c *Client, token, path string, query u
 		}
 		all = append(all, items...)
 		if len(items) < perPage {
-			return all, nil
+			break
 		}
 	}
+	return all, nil
 }
 
 // retries refresh the body rather than opening a second pr

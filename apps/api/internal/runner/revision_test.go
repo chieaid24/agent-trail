@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
+	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
@@ -164,6 +165,17 @@ func TestRevisionContinuesBranchAndPublishesSummary(t *testing.T) {
 	// one revision summary on the pull request, no second issue comment
 	if len(f.fake.comments) != 2 {
 		t.Fatalf("comments = %v, want issue comment + revision summary", f.fake.comments)
+	}
+	// a recovered owner replaying publish must not post the summary again
+	rc, err := f.exec.Repos.RepositoryContextByID(ctx, *f.task.RepositoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.exec.postRevisionSummary(ctx, c, rc, attempt, 1, finalSHA.String, evidence.Report{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.fake.comments) != 2 {
+		t.Fatalf("replayed publish posted another summary: %v", f.fake.comments)
 	}
 	summary := f.fake.comments[1]
 	for _, want := range []string{
@@ -341,5 +353,52 @@ func TestRevisionWithoutChangesFailsOnThePullRequest(t *testing.T) {
 	_, prNumber := f.attemptRow(t, c.AttemptID)
 	if !prNumber.Valid || prNumber.Int64 != 1 {
 		t.Fatalf("no-change revision did not record its pull request: %+v", prNumber)
+	}
+}
+
+func TestRecoveredRevisionWithoutPushedWorkFailsWorkspaceLost(t *testing.T) {
+	f := newPublishFixture(t)
+	ctx := context.Background()
+	branch, tip := publishFirstAttempt(t, f)
+	revision := requestRevision(t, f, tip, 4343)
+
+	// the first owner reached publishing, then died before pushing; its worktree is gone
+	first := f.claim(t)
+	if first.AttemptID != revision.ID {
+		t.Fatalf("claimed %s, want revision attempt %s", first.AttemptID, revision.ID)
+	}
+	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning,
+		task.StatusExecuting, task.StatusValidating, task.StatusPublishing} {
+		if _, err := f.tasks.Transition(ctx, f.task.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+	if err := f.store.ReleaseLease(ctx, first.AttemptID, f.runner.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.mu.Lock()
+	f.fake.branchHeads[branch] = tip
+	f.fake.mu.Unlock()
+
+	second := f.claim(t)
+	if second.AttemptID != revision.ID || second.TaskStatus != task.StatusPublishing {
+		t.Fatalf("reclaim = %+v", second)
+	}
+	err := f.exec.Execute(ctx, f.runner.ID, second)
+	if !errors.Is(err, ErrAttemptFailed) {
+		t.Fatalf("Execute err = %v, want ErrAttemptFailed", err)
+	}
+	got, err := f.tasks.Get(ctx, f.task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != task.StatusFailed || got.FailureCode == nil || *got.FailureCode != "workspace_lost" {
+		t.Fatalf("task = %s failure = %v, want failed/workspace_lost", got.Status, got.FailureCode)
+	}
+	if f.fake.prsUpdated != 0 {
+		t.Fatalf("lost revision republished the previous tip: updates=%d", f.fake.prsUpdated)
+	}
+	if got := f.fake.updatesFor(4343); len(got) != 1 || got[0] != "failure" {
+		t.Fatalf("trigger check run updates = %v, want [failure]", got)
 	}
 }

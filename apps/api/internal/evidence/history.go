@@ -7,6 +7,7 @@ import (
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/insights"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
+	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
 )
 
 // one pull request body row per attempt; empty strings and nil cost mean never recorded
@@ -15,8 +16,8 @@ type AttemptHistory struct {
 	Status      string
 	BaseCommit  string
 	FinalCommit string
-	// overall trusted outcome: passed, failed, error; empty when no trusted check ran
-	Validation string
+	// overall trusted outcome; empty when no trusted check ran
+	Validation validation.Status
 	CostUSD    *float64
 }
 

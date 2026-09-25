@@ -202,7 +202,7 @@ func (s *Store) GetRepositorySettings(ctx context.Context, id string) (Repositor
 	if err != nil {
 		return RepositorySettings{}, fmt.Errorf("get repository settings: %w", err)
 	}
-	settings, err := parseRepositorySettings(raw)
+	settings, err := reposettings.Parse(raw)
 	if err != nil {
 		return RepositorySettings{}, fmt.Errorf("parse repository settings: %w", err)
 	}
@@ -219,12 +219,8 @@ func scanRepository(row interface{ Scan(...any) error }) (Repository, error) {
 	if err != nil {
 		return Repository{}, err
 	}
-	r.Settings, err = parseRepositorySettings(raw)
+	r.Settings, err = reposettings.Parse(raw)
 	return r, err
-}
-
-func parseRepositorySettings(raw []byte) (RepositorySettings, error) {
-	return reposettings.Parse(raw)
 }
 
 // row lock so two concurrent patches never lose a field; validated before the write
@@ -244,7 +240,7 @@ func (s *Store) UpdateRepositorySettings(ctx context.Context, id string, patch R
 	if err != nil {
 		return RepositorySettings{}, fmt.Errorf("update repository settings: %w", err)
 	}
-	settings, err := parseRepositorySettings(raw)
+	settings, err := reposettings.Parse(raw)
 	if err != nil {
 		return RepositorySettings{}, fmt.Errorf("parse repository settings: %w", err)
 	}

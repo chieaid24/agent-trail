@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,10 +14,8 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
-// same bound as run instructions; the composed text is truncated on a rune boundary
+// bound for run and revision instructions alike; the composed text is truncated on a rune boundary
 const instructionLimit = 100000
-
-var commitSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 const notAgentTrailPullRequest = "This pull request is not managed by Agent Trail, so there is nothing to revise."
 
@@ -34,6 +31,9 @@ func (p *Processor) handleRevise(ctx context.Context, d Delivery, ev issueCommen
 	instID := ev.Installation.ID
 	number := ev.Issue.Number
 	login := ev.Comment.User.Login
+	if login == "" {
+		return "", errors.New("issue_comment payload without commenter login")
+	}
 
 	pr, err := p.api.GetPullRequest(ctx, instID, repo.Owner, repo.Name, number)
 	if err != nil {
@@ -70,25 +70,23 @@ func (p *Processor) handleRevise(ctx context.Context, d Delivery, ev issueCommen
 			"Task `%s` is still running (%s). Wait for it to publish before "+
 				"requesting a revision.", t.ID, t.Status))
 	}
-	if !commitSHA.MatchString(pr.Head.SHA) {
+	if !gitworkspace.ValidSHA(pr.Head.SHA) {
 		return "", fmt.Errorf("pull request #%d head sha %q is not a commit", number, pr.Head.SHA)
 	}
 
-	cutoff, err := p.tasks.PublishedAt(ctx, t.ID)
-	if err != nil {
-		return "", err
+	// feedback up to the latest revision's trigger was already given to it; the first revision takes everything
+	var cutoff *time.Time
+	if last := attempts[len(attempts)-1]; last.Number > 1 {
+		at := last.CreatedAt
+		cutoff = &at
 	}
 	entries, err := p.gatherFeedback(ctx, instID, repo, number, cutoff, ev)
 	if err != nil {
 		return "", err
 	}
 	items := make([]task.FeedbackItem, 0, len(entries))
-	reviewerItems := 0
 	for _, e := range entries {
 		items = append(items, e.item)
-		if e.item.Kind != "revise_command" {
-			reviewerItems++
-		}
 	}
 	limit := repo.Settings.MaxAttempts
 	revised, attempt, err := p.tasks.RequestRevision(ctx, t.ID, task.RevisionParams{
@@ -127,7 +125,7 @@ func (p *Processor) handleRevise(ctx context.Context, d Delivery, ev issueCommen
 		slog.String("repository", repo.FullName),
 		slog.Int64("pull_request", number),
 		slog.String("commenter", login),
-		slog.Int("feedback_items", reviewerItems),
+		slog.Int("feedback_items", len(items)),
 	)
 
 	// side effects after the durable attempt: failures logged, never unwind the attempt
@@ -135,7 +133,7 @@ func (p *Processor) handleRevise(ctx context.Context, d Delivery, ev issueCommen
 	ack := fmt.Sprintf(
 		"Agent Trail queued revision attempt %d for this pull request "+
 			"(requested by @%s with %d review feedback item(s)). The `%s` check tracks progress.",
-		attempt.Number, login, reviewerItems, CheckRunName)
+		attempt.Number, login, len(items), CheckRunName)
 	if err := reply(ack); err != nil {
 		p.logger.LogAttrs(ctx, slog.LevelWarn, "ack comment failed",
 			slog.String("event", "github_ack_comment_failed"),
@@ -158,7 +156,8 @@ func (p *Processor) replyProcessed(reply func(string) error, body string) (strin
 	return "processed", nil
 }
 
-// human items after the cutoff, oldest first; the revise comment itself is the last entry
+// human items after the cutoff, oldest first; the revise comment itself is the last entry.
+// other addressed commands (refused or replayed) are noise, not feedback
 func (p *Processor) gatherFeedback(ctx context.Context, instID int64, repo StoredRepository, number int64, cutoff *time.Time, ev issueCommentPayload) ([]feedbackEntry, error) {
 	// github stamps to the second, so the cutoff is the publish second, inclusive
 	var since time.Time
@@ -177,8 +176,8 @@ func (p *Processor) gatherFeedback(ctx context.Context, instID int64, repo Store
 			continue
 		}
 		entries = append(entries, feedbackEntry{
-			item: task.FeedbackItem{Kind: "review", Author: r.User.Login, PostedAt: r.SubmittedAt,
-				Location: strings.ToLower(r.State)},
+			item: task.FeedbackItem{Kind: task.FeedbackReview, Author: r.User.Login,
+				PostedAt: r.SubmittedAt, Location: strings.ToLower(r.State)},
 			body: r.Body,
 		})
 	}
@@ -191,7 +190,7 @@ func (p *Processor) gatherFeedback(ctx context.Context, instID int64, repo Store
 			continue
 		}
 		entries = append(entries, feedbackEntry{
-			item: task.FeedbackItem{Kind: "review_comment", Author: c.User.Login,
+			item: task.FeedbackItem{Kind: task.FeedbackReviewComment, Author: c.User.Login,
 				PostedAt: c.CreatedAt, Location: reviewCommentLocation(c)},
 			body: c.Body,
 			hunk: c.DiffHunk,
@@ -202,20 +201,25 @@ func (p *Processor) gatherFeedback(ctx context.Context, instID int64, repo Store
 		return nil, fmt.Errorf("list issue comments: %w", err)
 	}
 	for _, c := range issueComments {
-		if c.User.Bot() || c.ID == ev.Comment.ID || strings.TrimSpace(c.Body) == "" || !after(c.CreatedAt) {
+		if c.User.Bot() || c.ID == ev.Comment.ID || strings.TrimSpace(c.Body) == "" ||
+			!after(c.CreatedAt) || ParseCommand(c.Body).Addressed {
 			continue
 		}
 		entries = append(entries, feedbackEntry{
-			item: task.FeedbackItem{Kind: "comment", Author: c.User.Login, PostedAt: c.CreatedAt},
+			item: task.FeedbackItem{Kind: task.FeedbackComment, Author: c.User.Login, PostedAt: c.CreatedAt},
 			body: c.Body,
 		})
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].item.PostedAt.Before(entries[j].item.PostedAt)
 	})
+	postedAt := ev.Comment.CreatedAt
+	if postedAt.IsZero() {
+		postedAt = time.Now().UTC()
+	}
 	entries = append(entries, feedbackEntry{
-		item: task.FeedbackItem{Kind: "revise_command", Author: ev.Comment.User.Login,
-			PostedAt: time.Now().UTC()},
+		item: task.FeedbackItem{Kind: task.FeedbackReviseCommand, Author: ev.Comment.User.Login,
+			PostedAt: postedAt},
 		body: ev.Comment.Body,
 	})
 	return entries, nil
@@ -242,11 +246,11 @@ func composeRevisionInstructions(t task.Task, entries []feedbackEntry) string {
 		b.WriteString("\nReview feedback, oldest first:\n")
 	}
 	for i, e := range entries {
-		if e.item.Kind == "revise_command" {
+		if e.item.Kind == task.FeedbackReviseCommand {
 			fmt.Fprintf(&b, "\n---\nRevise command by @%s:\n\n%s\n", e.item.Author, e.body)
 			continue
 		}
-		fmt.Fprintf(&b, "\n%d. [%s by @%s at %s", i+1, feedbackKindLabel(e.item.Kind),
+		fmt.Fprintf(&b, "\n%d. [%s by @%s at %s", i+1, e.item.Kind.Label(),
 			e.item.Author, e.item.PostedAt.UTC().Format(time.RFC3339))
 		if e.item.Location != "" {
 			fmt.Fprintf(&b, " on %s", e.item.Location)
@@ -258,15 +262,4 @@ func composeRevisionInstructions(t task.Task, entries []feedbackEntry) string {
 		b.WriteString(e.body + "\n")
 	}
 	return truncateUTF8(b.String(), instructionLimit)
-}
-
-func feedbackKindLabel(kind string) string {
-	switch kind {
-	case "review":
-		return "review"
-	case "review_comment":
-		return "inline review comment"
-	default:
-		return "comment"
-	}
 }
