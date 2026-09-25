@@ -280,11 +280,15 @@ func (e *Executor) publishToGitHub(ctx context.Context, log *slog.Logger, c *Cla
 		return "", err
 	}
 	rc := pub.repo
-	report, markdown, err := e.storedReport(ctx, c.TaskID)
+	report, markdown, err := e.storedReport(ctx, c.AttemptID)
 	if err != nil {
 		return "", err
 	}
-	body := evidence.PRBody(report, finalSHA)
+	history, err := e.Evidence.AttemptHistory(ctx, c.TaskID)
+	if err != nil {
+		return "", fmt.Errorf("load attempt history: %w", err)
+	}
+	body := evidence.PRBody(report, finalSHA, history)
 
 	prCtx, prSpan := startSpan(ctx, "github.pr_create", c)
 	pr, err := e.GitHub.FindPullRequestByHead(prCtx, rc.InstallationID, rc.Owner,
@@ -471,8 +475,8 @@ func (e *Executor) upsertCheckRun(ctx context.Context, c *Claim, rc github.Repos
 	})
 }
 
-func (e *Executor) storedReport(ctx context.Context, taskID string) (evidence.Report, string, error) {
-	stored, err := e.Evidence.GetForTask(ctx, taskID)
+func (e *Executor) storedReport(ctx context.Context, attemptID string) (evidence.Report, string, error) {
+	stored, err := e.Evidence.GetForAttempt(ctx, attemptID)
 	if err != nil {
 		return evidence.Report{}, "", fmt.Errorf("load evidence: %w", err)
 	}

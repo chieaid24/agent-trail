@@ -84,3 +84,28 @@ func (s *Store) GetForTask(ctx context.Context, taskID string) (Stored, error) {
 	st.Report = json.RawMessage(report)
 	return st, nil
 }
+
+// publish reads its own attempt's report, never the latest of the task
+func (s *Store) GetForAttempt(ctx context.Context, attemptID string) (Stored, error) {
+	if !task.IsUUID(attemptID) {
+		return Stored{}, task.ErrAttemptNotFound
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT e.id, e.task_attempt_id, a.attempt_number, e.schema_version,
+			e.summary_markdown, e.report_json, e.created_at
+		FROM evidence_reports e
+		JOIN task_attempts a ON a.id = e.task_attempt_id
+		WHERE e.task_attempt_id = $1`, attemptID)
+	var st Stored
+	var report []byte
+	err := row.Scan(&st.ID, &st.TaskAttemptID, &st.AttemptNumber,
+		&st.SchemaVersion, &st.SummaryMarkdown, &report, &st.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Stored{}, ErrNoReport
+	}
+	if err != nil {
+		return Stored{}, fmt.Errorf("get attempt evidence report: %w", err)
+	}
+	st.Report = json.RawMessage(report)
+	return st, nil
+}

@@ -53,7 +53,9 @@ type CheckResult struct {
 }
 
 type Params struct {
-	Task            task.Task
+	Task task.Task
+	// the attempt's own base; a revision starts from the pull request head, not the task base
+	BaseCommit      string
 	AgentProvider   string
 	DurationSeconds *int64
 	Plan            []string
@@ -91,6 +93,9 @@ func Generate(p Params) Report {
 	}
 	if p.Task.BaseCommitSHA != nil {
 		r.Execution.BaseCommit = *p.Task.BaseCommitSHA
+	}
+	if p.BaseCommit != "" {
+		r.Execution.BaseCommit = p.BaseCommit
 	}
 
 	for _, t := range p.Trusted {

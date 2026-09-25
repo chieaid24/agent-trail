@@ -137,3 +137,18 @@ func TestGenerateAppendsCallerCaveats(t *testing.T) {
 		t.Fatalf("unverified = %v, want caller caveat", r.Unverified)
 	}
 }
+
+func TestGenerateAttemptBaseOverridesTaskBase(t *testing.T) {
+	taskBase := "1111111111111111111111111111111111111111"
+	r := Generate(Params{Task: task.Task{ID: "t", Title: "x", BaseCommitSHA: &taskBase}})
+	if r.Execution.BaseCommit != taskBase {
+		t.Fatalf("base = %q, want task base", r.Execution.BaseCommit)
+	}
+	r = Generate(Params{
+		Task:       task.Task{ID: "t", Title: "x", BaseCommitSHA: &taskBase},
+		BaseCommit: "2222222222222222222222222222222222222222",
+	})
+	if r.Execution.BaseCommit != "2222222222222222222222222222222222222222" {
+		t.Fatalf("base = %q, want attempt base", r.Execution.BaseCommit)
+	}
+}

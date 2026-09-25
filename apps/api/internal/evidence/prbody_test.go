@@ -26,7 +26,7 @@ func TestPRBodyRendersTemplate(t *testing.T) {
 		},
 		Risks: []string{"sessions may reset"},
 	}
-	body := PRBody(r, "2222222222222222222222222222222222222222")
+	body := PRBody(r, "2222222222222222222222222222222222222222", nil)
 
 	for _, want := range []string{
 		"## Agent Trail task",
@@ -52,8 +52,34 @@ func TestPRBodyRendersTemplate(t *testing.T) {
 }
 
 func TestPRBodyWithoutIssueOmitsCloses(t *testing.T) {
-	body := PRBody(Report{Task: TaskInfo{ID: "task-2", Title: "x"}}, "")
+	body := PRBody(Report{Task: TaskInfo{ID: "task-2", Title: "x"}}, "", nil)
 	if strings.Contains(body, "Closes #") {
 		t.Fatalf("body has Closes line without a source issue:\n%s", body)
+	}
+	if strings.Contains(body, "## Attempts") {
+		t.Fatalf("body has an attempts section without history:\n%s", body)
+	}
+}
+
+func TestPRBodyListsAttemptsHistoryBelowEvidence(t *testing.T) {
+	cost := 0.0043
+	history := []AttemptHistory{
+		{Number: 1, Status: "superseded", BaseCommit: "1111111111111111111111111111111111111111",
+			FinalCommit: "2222222222222222222222222222222222222222", Validation: "passed", CostUSD: &cost},
+		{Number: 2, Status: "active", BaseCommit: "2222222222222222222222222222222222222222"},
+	}
+	body := PRBody(Report{Task: TaskInfo{ID: "task-3", Title: "x"}}, "", history)
+	for _, want := range []string{
+		"## Attempts",
+		"| Attempt | Base commit | Final commit | Validation | Reported cost |",
+		"| 1 | `1111111111111111111111111111111111111111` | `2222222222222222222222222222222222222222` | passed | $0.0043 |",
+		"| 2 | `2222222222222222222222222222222222222222` | - | - | - |",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Index(body, "## Attempts") < strings.Index(body, "## Execution metadata") {
+		t.Fatalf("attempts history must follow the evidence report:\n%s", body)
 	}
 }
