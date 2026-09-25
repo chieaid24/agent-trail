@@ -1,7 +1,7 @@
 # Agent Trail glossary
 
 Canonical terms for the product domain. Definitions only; behavior lives in
-the code, the ADRs under `docs/adr/`, and the README.
+the code and the README.
 
 - **Task**: the unit of work created from one `/agent-trail run` comment on a
   GitHub issue. One task owns one working branch and at most one pull request.
