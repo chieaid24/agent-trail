@@ -3,7 +3,6 @@
 import { formatDateTime } from "@/lib/format";
 import type { TaskAttempt } from "@/lib/types";
 
-// hidden for single-attempt tasks: the selector only exists once a revision adds attempt 2
 export function AttemptSelector({
   numbers,
   selected,
