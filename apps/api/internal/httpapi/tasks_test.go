@@ -14,10 +14,11 @@ import (
 const testUUID = "3b241101-e2bb-4255-8caf-4136c566a962"
 
 type fakeTasks struct {
-	task   task.Task
-	tasks  []task.Task
-	events []task.Event
-	err    error
+	task     task.Task
+	tasks    []task.Task
+	events   []task.Event
+	attempts []task.Attempt
+	err      error
 
 	createParams task.CreateParams
 	listParams   task.ListParams
@@ -67,6 +68,10 @@ func (f *fakeTasks) EventsAfter(_ context.Context, id string, afterAttempt int, 
 	return after, nil
 }
 
+func (f *fakeTasks) Attempts(_ context.Context, id string) ([]task.Attempt, error) {
+	return f.attempts, f.err
+}
+
 func do(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var req *http.Request
@@ -88,6 +93,7 @@ func TestTaskRoutesUnavailableWithoutDatabase(t *testing.T) {
 		{http.MethodGet, "/api/v1/tasks/" + testUUID},
 		{http.MethodPost, "/api/v1/tasks/" + testUUID + "/cancel"},
 		{http.MethodGet, "/api/v1/tasks/" + testUUID + "/events"},
+		{http.MethodGet, "/api/v1/tasks/" + testUUID + "/attempts"},
 	} {
 		rec := do(t, h, tc[0], tc[1], "")
 		if rec.Code != http.StatusServiceUnavailable {
@@ -294,5 +300,45 @@ func TestCancelTaskNotifiesObserverOnlyWhenCancelled(t *testing.T) {
 	plain := New(testLogger(), nil, cancelled, nil, nil, nil, nil).Handler()
 	if rec := do(t, plain, http.MethodPost, path, ""); rec.Code != http.StatusOK {
 		t.Fatalf("status without observer = %d", rec.Code)
+	}
+}
+
+func TestTaskAttempts(t *testing.T) {
+	login := "alice"
+	f := &fakeTasks{attempts: []task.Attempt{
+		{ID: testUUID, TaskID: testUUID, Number: 1, Status: "superseded"},
+		{ID: "3b241101-e2bb-4255-8caf-4136c566a963", TaskID: testUUID, Number: 2,
+			Status: "active", RequestedByLogin: &login},
+	}}
+	h := New(testLogger(), nil, f, nil, nil, nil, nil).Handler()
+
+	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/attempts", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Attempts []task.Attempt `json:"attempts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Attempts) != 2 || body.Attempts[1].Number != 2 ||
+		body.Attempts[1].RequestedByLogin == nil || *body.Attempts[1].RequestedByLogin != "alice" {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"attempt_number":2`) {
+		t.Fatalf("attempt number field missing: %s", rec.Body.String())
+	}
+}
+
+func TestTaskAttemptsErrors(t *testing.T) {
+	h := New(testLogger(), nil, &fakeTasks{err: task.ErrNotFound}, nil, nil, nil, nil).Handler()
+	if rec := do(t, h, http.MethodGet,
+		"/api/v1/tasks/"+testUUID+"/attempts", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown task = %d, want 404", rec.Code)
+	}
+	if rec := do(t, h, http.MethodGet,
+		"/api/v1/tasks/not-a-uuid/attempts", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad uuid = %d, want 400", rec.Code)
 	}
 }

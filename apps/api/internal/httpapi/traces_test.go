@@ -15,9 +15,18 @@ import (
 type fakeTraces struct {
 	trace observability.TaskTrace
 	err   error
+
+	attemptNumber *int
 }
 
 func (f fakeTraces) ListTaskSpans(context.Context, string) (observability.TaskTrace, error) {
+	return f.trace, f.err
+}
+
+func (f fakeTraces) ListTaskAttemptSpans(_ context.Context, _ string, attemptNumber int) (observability.TaskTrace, error) {
+	if f.attemptNumber != nil {
+		*f.attemptNumber = attemptNumber
+	}
 	return f.trace, f.err
 }
 
@@ -62,5 +71,33 @@ func TestTaskTraceMapsStoreError(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/trace", "")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTaskTraceAttemptFilter(t *testing.T) {
+	tasks := &fakeTasks{task: task.Task{ID: testUUID}}
+	var filtered int
+	traces := fakeTraces{attemptNumber: &filtered, trace: observability.TaskTrace{
+		Spans: []observability.TaskSpan{{Name: "runner.attempt"}},
+	}}
+	h := New(testLogger(), nil, tasks, nil, nil, nil, nil, WithTraces(traces)).Handler()
+
+	rec := do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/trace?attempt=2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if filtered != 2 {
+		t.Fatalf("attempt filter = %d, want 2", filtered)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/trace?attempt=0", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("attempt=0 = %d, want 400", rec.Code)
+	}
+
+	missing := New(testLogger(), nil, tasks, nil, nil, nil, nil,
+		WithTraces(fakeTraces{err: task.ErrAttemptNotFound})).Handler()
+	rec = do(t, missing, http.MethodGet, "/api/v1/tasks/"+testUUID+"/trace?attempt=9", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown attempt = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
