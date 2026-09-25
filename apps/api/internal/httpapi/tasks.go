@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -295,15 +296,16 @@ func queryLimit(w http.ResponseWriter, r *http.Request, maxLimit int) (int, bool
 	return n, true
 }
 
-// 0 = no attempt filter
+// 0 = no attempt filter; the bound keeps the value a valid int4 parameter
 func queryAttempt(w http.ResponseWriter, r *http.Request) (int, bool) {
 	v := r.URL.Query().Get("attempt")
 	if v == "" {
 		return 0, true
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 {
-		writeError(w, http.StatusBadRequest, "attempt must be a positive integer")
+	if err != nil || n < 1 || n > math.MaxInt32 {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("attempt must be an integer between 1 and %d", math.MaxInt32))
 		return 0, false
 	}
 	return n, true

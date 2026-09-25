@@ -93,6 +93,10 @@ func TestTaskTraceAttemptFilter(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("attempt=0 = %d, want 400", rec.Code)
 	}
+	rec = do(t, h, http.MethodGet, "/api/v1/tasks/"+testUUID+"/trace?attempt=3000000000", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("attempt above int32 = %d, want 400", rec.Code)
+	}
 
 	missing := New(testLogger(), nil, tasks, nil, nil, nil, nil,
 		WithTraces(fakeTraces{err: task.ErrAttemptNotFound})).Handler()
