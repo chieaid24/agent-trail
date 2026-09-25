@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import type {
   ActivityEvent,
   AttemptInsight,
@@ -78,7 +78,7 @@ function wireTask(state: RevisionState): Task {
 }
 
 function attempts(state: RevisionState): TaskAttempt[] {
-  const published = state === "awaiting-review" || state === "completed";
+  const published = state !== "running";
   return [
     {
       id: attemptIds[0],
@@ -188,22 +188,6 @@ function events(state: RevisionState): ActivityEvent[] {
       reason: "revision requested by @alice in pull request #7",
     }),
   ];
-  if (state === "revision-requested") {
-    // a second revise command on a task already at attempt 2
-    return [
-      ...first,
-      ...revised,
-      event(2, "task.provisioning", "2026-09-24T12:21:00Z"),
-      event(2, "task.planning", "2026-09-24T12:21:10Z"),
-      event(2, "task.executing", "2026-09-24T12:21:20Z"),
-      event(2, "task.validating", "2026-09-24T12:28:00Z"),
-      event(2, "task.publishing", "2026-09-24T12:29:00Z"),
-      event(2, "task.awaiting_review", "2026-09-24T12:30:00Z"),
-      event(2, "task.revision_requested", "2026-09-24T12:45:00Z", {
-        reason: "revision requested by @alice in pull request #7",
-      }),
-    ];
-  }
   const running: ActivityEvent[] = [
     event(2, "task.provisioning", "2026-09-24T12:21:00Z"),
     event(2, "task.planning", "2026-09-24T12:21:10Z"),
@@ -238,6 +222,18 @@ function events(state: RevisionState): ActivityEvent[] {
   ];
   if (state === "awaiting-review") {
     return [...first, ...revised, ...running, ...published];
+  }
+  if (state === "revision-requested") {
+    // a second revise command on a task already at attempt 2
+    return [
+      ...first,
+      ...revised,
+      ...running,
+      ...published,
+      event(2, "task.revision_requested", "2026-09-24T12:45:00Z", {
+        reason: "revision requested by @alice in pull request #7",
+      }),
+    ];
   }
   return [
     ...first,
@@ -313,8 +309,7 @@ function evidence(attempt: 1 | 2): StoredEvidence {
 }
 
 function insight(attempt: 1 | 2, state: RevisionState): AttemptInsight {
-  const finished =
-    attempt === 1 || state === "awaiting-review" || state === "completed";
+  const finished = attempt === 1 || state !== "running";
   return {
     attempt_id: attemptIds[attempt - 1],
     attempt_number: attempt,
@@ -377,7 +372,7 @@ async function mockRevisionTask(
   state: RevisionState,
 ): Promise<void> {
   const list = attempts(state);
-  const published = state === "awaiting-review" || state === "completed";
+  const published = state !== "running";
   await page.route(`**/backend/api/v1/tasks/${taskId}**`, (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -460,6 +455,10 @@ async function screenshots(page: Page, name: string): Promise<void> {
 
 const header = (page: Page) => page.locator("article > header");
 
+async function leftEdge(locator: Locator): Promise<number | undefined> {
+  return (await locator.boundingBox())?.x;
+}
+
 test("revision requested on a multi-attempt task", async ({ page }) => {
   await mockRevisionTask(page, "revision-requested");
   await page.goto(`/tasks/${taskId}`);
@@ -478,6 +477,13 @@ test("revision requested on a multi-attempt task", async ({ page }) => {
   await expect(page.getByLabel("Attempt 2 request")).toContainText(
     "Revision requested by alice",
   );
+  // ui-audit probes: the new header rows share the title's left edge and the 16px rhythm
+  const heading = page.getByRole("heading", { level: 1 });
+  expect(await leftEdge(selector)).toBe(await leftEdge(heading));
+  expect(await leftEdge(page.getByLabel("Attempt 2 request"))).toBe(
+    await leftEdge(heading),
+  );
+  await expect(selector.locator("..")).toHaveCSS("margin-top", "16px");
   await expect(
     page.getByText("status: revision requested").first(),
   ).toBeVisible();
