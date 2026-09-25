@@ -209,9 +209,10 @@ func (s *Store) claim(ctx context.Context, runnerID string, leaseDuration time.D
 
 	var c Claim
 	var status string
+	// a revision attempt carries composed instructions; attempt 1 inherits the task's
 	query := `
-		SELECT a.id, a.attempt_number, t.id, t.status, t.title, t.instructions,
-			t.created_at
+		SELECT a.id, a.attempt_number, t.id, t.status, t.title,
+			COALESCE(a.instructions, t.instructions), t.created_at
 		FROM task_attempts a
 		JOIN tasks t ON t.id = a.task_id
 		WHERE a.status = 'active'

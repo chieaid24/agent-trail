@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/dashboard"
@@ -48,7 +49,18 @@ func (f fakeDashboard) GetRepository(_ context.Context, id string) (dashboard.Re
 }
 
 func (f fakeDashboard) GetRepositorySettings(context.Context, string) (dashboard.RepositorySettings, error) {
-	return dashboard.RepositorySettings{DefaultPolicy: "platform default"}, f.err
+	return dashboard.RepositorySettings{DefaultPolicy: "platform default", MaxAttempts: 5}, f.err
+}
+
+func (f fakeDashboard) UpdateRepositorySettings(_ context.Context, _ string, patch dashboard.RepositorySettingsPatch) (dashboard.RepositorySettings, error) {
+	if f.err != nil {
+		return dashboard.RepositorySettings{}, f.err
+	}
+	settings := dashboard.RepositorySettings{DefaultPolicy: "platform default", MaxAttempts: 5}
+	if patch.MaxAttempts != nil {
+		settings.MaxAttempts = *patch.MaxAttempts
+	}
+	return settings, nil
 }
 
 func (f fakeDashboard) SetRepositoryEnabled(_ context.Context, id string, enabled bool) (dashboard.Repository, error) {
@@ -163,5 +175,48 @@ func TestDashboardRouteErrors(t *testing.T) {
 	rec = do(t, broken, http.MethodGet, "/api/v1/organizations", "")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("broken status = %d", rec.Code)
+	}
+}
+
+func TestUpdateRepositorySettings(t *testing.T) {
+	path := "/api/v1/repositories/" + repositoryUUID + "/settings"
+	h := dashboardHandler(fakeDashboard{})
+
+	rec := do(t, h, http.MethodPut, path, `{"max_attempts": 7}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeBody(t, rec.Body.Bytes())["max_attempts"]; got != float64(7) {
+		t.Fatalf("max_attempts = %#v, want 7", got)
+	}
+
+	for name, body := range map[string]string{
+		"missing field": `{}`,
+		"below bound":   `{"max_attempts": 0}`,
+		"above bound":   `{"max_attempts": 21}`,
+		"wrong type":    `{"max_attempts": "5"}`,
+		"unknown field": `{"max_attempts": 5, "default_policy": "x"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := do(t, h, http.MethodPut, path, body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	missing := dashboardHandler(fakeDashboard{err: dashboard.ErrRepositoryNotFound})
+	if rec := do(t, missing, http.MethodPut, path, `{"max_attempts": 7}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing status = %d", rec.Code)
+	}
+	invalid := dashboardHandler(fakeDashboard{err: dashboard.ErrInvalidSettings})
+	if rec := do(t, invalid, http.MethodPut, path, `{"max_attempts": 7}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status = %d", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPut, "/api/v1/repositories/not-a-uuid/settings", `{"max_attempts": 7}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad uuid status = %d", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPut, path, strings.Repeat("1", 10)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("non-object body status = %d", rec.Code)
 	}
 }

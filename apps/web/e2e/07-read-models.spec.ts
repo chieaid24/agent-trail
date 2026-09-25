@@ -28,6 +28,8 @@ test("repository and runner pages show real read models", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText("Repository metrics")).toBeVisible();
   await expect(page.getByText(".agent-trail/validation.yaml")).toBeVisible();
+  await expect(page.getByText("revision limit")).toBeVisible();
+  await expect(page.getByText("5 attempts")).toBeVisible();
   await shootBothViewports(page, "repository-detail");
 
   await page.goto(`/runners/${runner.id}`);
@@ -141,6 +143,7 @@ function repositoryDetail() {
     settings: {
       default_policy: "restricted-network-and-filesystem",
       validation_file: ".agent-trail/validation.yaml",
+      max_attempts: 5,
     },
     active_task_count: 0,
     recent_task_count: 1,

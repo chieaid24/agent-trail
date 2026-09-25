@@ -5,8 +5,8 @@ import (
 	"math"
 )
 
-// Cumulative costs replace totals; increments add in event order.
-func aggregateCost(payloads []json.RawMessage) *CostSummary {
+// Cumulative costs replace totals; increments add in event order; nil when nothing was reported.
+func AggregateCost(payloads []json.RawMessage) *CostSummary {
 	var summary CostSummary
 	for _, raw := range payloads {
 		var payload map[string]any

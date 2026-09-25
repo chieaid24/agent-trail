@@ -64,6 +64,22 @@ func (m *memoryAPI) CreateCheckRun(context.Context, int64, string, string, githu
 	return 777, nil
 }
 
+func (m *memoryAPI) GetPullRequest(context.Context, int64, string, string, int64) (github.PullRequestDetail, error) {
+	return github.PullRequestDetail{}, nil
+}
+
+func (m *memoryAPI) ListPullRequestReviews(context.Context, int64, string, string, int64) ([]github.Review, error) {
+	return nil, nil
+}
+
+func (m *memoryAPI) ListPullRequestReviewComments(context.Context, int64, string, string, int64, time.Time) ([]github.ReviewComment, error) {
+	return nil, nil
+}
+
+func (m *memoryAPI) ListIssueComments(context.Context, int64, string, string, int64, time.Time) ([]github.IssueComment, error) {
+	return nil, nil
+}
+
 func sign(secret, body []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write(body)

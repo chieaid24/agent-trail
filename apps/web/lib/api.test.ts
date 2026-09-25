@@ -12,6 +12,7 @@ import {
   listRunners,
   listTasks,
   streamUrl,
+  updateRepositorySettings,
 } from "./api";
 import type { ActivityEvent } from "./types";
 
@@ -38,6 +39,28 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/v1/tasks?status=queued&limit=10",
       undefined,
+    );
+  });
+
+  it("writes repository settings with a JSON PUT", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        default_policy: "platform default",
+        validation_file: ".agent-trail/validation.yaml",
+        max_attempts: 7,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const settings = await updateRepositorySettings("r1", { max_attempts: 7 });
+    expect(settings.max_attempts).toBe(7);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/v1/repositories/r1/settings",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_attempts: 7 }),
+      },
     );
   });
 

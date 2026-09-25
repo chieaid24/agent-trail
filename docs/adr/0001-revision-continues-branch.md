@@ -28,5 +28,5 @@ final commit, and evidence, validation results, and check runs stay per attempt.
 - Merge conflicts with the default branch remain a human decision; conflict
   detection reports them but a revision does not resolve them.
 - A task that went badly wrong cannot be restarted from scratch under the same
-  task; the human closes the pull request (which cancels the task) and runs the
-  issue again.
+  task; the human closes the pull request (which cancels a task awaiting review)
+  and runs the issue again.

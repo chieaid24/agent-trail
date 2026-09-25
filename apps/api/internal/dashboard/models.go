@@ -1,6 +1,11 @@
 package dashboard
 
-import "time"
+import (
+	"errors"
+	"time"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/reposettings"
+)
 
 // http layer maps these to 404
 var (
@@ -12,6 +17,9 @@ var (
 type resourceNotFound string
 
 func (e resourceNotFound) Error() string { return string(e) }
+
+// http layer maps this to 400
+var ErrInvalidSettings = errors.New("invalid repository settings")
 
 type Organization struct {
 	ID                     string    `json:"id"`
@@ -25,9 +33,11 @@ type Organization struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
-type RepositorySettings struct {
-	DefaultPolicy  string `json:"default_policy"`
-	ValidationFile string `json:"validation_file"`
+type RepositorySettings = reposettings.Settings
+
+// nil fields keep their stored value
+type RepositorySettingsPatch struct {
+	MaxAttempts *int
 }
 
 type Repository struct {

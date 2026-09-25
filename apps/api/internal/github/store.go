@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/chieaid24/agent-trail/apps/api/internal/reposettings"
 )
 
 type Store struct {
@@ -29,6 +31,7 @@ type StoredRepository struct {
 	DefaultBranch      string
 	CloneURL           string
 	IsEnabled          bool
+	Settings           reposettings.Settings
 }
 
 type RepositoryContext struct {
@@ -255,18 +258,22 @@ func (s *Store) SyncRepositories(ctx context.Context, githubInstallationID int64
 
 func (s *Store) RepositoryByGitHubID(ctx context.Context, githubRepositoryID int64) (StoredRepository, error) {
 	var r StoredRepository
+	var settings []byte
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, organization_id, github_repository_id, owner, name,
-			full_name, default_branch, clone_url, is_enabled
+			full_name, default_branch, clone_url, is_enabled, settings_json
 		FROM repositories WHERE github_repository_id = $1`,
 		githubRepositoryID).Scan(&r.ID, &r.OrganizationID,
 		&r.GitHubRepositoryID, &r.Owner, &r.Name, &r.FullName,
-		&r.DefaultBranch, &r.CloneURL, &r.IsEnabled)
+		&r.DefaultBranch, &r.CloneURL, &r.IsEnabled, &settings)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StoredRepository{}, ErrRepositoryNotFound
 	}
 	if err != nil {
 		return StoredRepository{}, fmt.Errorf("repository by github id: %w", err)
+	}
+	if r.Settings, err = reposettings.Parse(settings); err != nil {
+		return StoredRepository{}, fmt.Errorf("repository %s settings: %w", r.FullName, err)
 	}
 	return r, nil
 }
@@ -276,22 +283,27 @@ var ErrNoInstallation = errors.New("repository has no installation")
 // suspended/missing installation -> ErrNoInstallation: publishing must not mint tokens for it
 func (s *Store) RepositoryContextByID(ctx context.Context, repositoryID string) (RepositoryContext, error) {
 	var r RepositoryContext
+	var settings []byte
 	err := s.db.QueryRowContext(ctx, `
 		SELECT r.id, r.organization_id, r.github_repository_id, r.owner,
 			r.name, r.full_name, r.default_branch, r.clone_url, r.is_enabled,
-			i.github_installation_id
+			r.settings_json, i.github_installation_id
 		FROM repositories r
 		LEFT JOIN github_installations i
 			ON i.organization_id = r.organization_id
 			AND i.suspended_at IS NULL
 		WHERE r.id = $1`, repositoryID).Scan(&r.ID, &r.OrganizationID,
 		&r.GitHubRepositoryID, &r.Owner, &r.Name, &r.FullName,
-		&r.DefaultBranch, &r.CloneURL, &r.IsEnabled, &nullableInt64{&r.InstallationID})
+		&r.DefaultBranch, &r.CloneURL, &r.IsEnabled, &settings,
+		&nullableInt64{&r.InstallationID})
 	if errors.Is(err, sql.ErrNoRows) {
 		return RepositoryContext{}, ErrRepositoryNotFound
 	}
 	if err != nil {
 		return RepositoryContext{}, fmt.Errorf("repository context: %w", err)
+	}
+	if r.Settings, err = reposettings.Parse(settings); err != nil {
+		return RepositoryContext{}, fmt.Errorf("repository %s settings: %w", r.FullName, err)
 	}
 	if r.InstallationID == 0 {
 		return RepositoryContext{}, ErrNoInstallation

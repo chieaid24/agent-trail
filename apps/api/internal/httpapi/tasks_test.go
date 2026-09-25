@@ -253,3 +253,46 @@ func TestUnexpectedErrorMapsTo500(t *testing.T) {
 		t.Errorf("body leaks details: %s", rec.Body.String())
 	}
 }
+
+type fakeCancelObserver struct {
+	seen []task.Task
+}
+
+func (o *fakeCancelObserver) TaskCancelled(_ context.Context, t task.Task) {
+	o.seen = append(o.seen, t)
+}
+
+func TestCancelTaskNotifiesObserverOnlyWhenCancelled(t *testing.T) {
+	path := "/api/v1/tasks/" + testUUID + "/cancel"
+
+	cancelled := &fakeTasks{task: task.Task{ID: testUUID, Status: task.StatusCancelled}}
+	observer := &fakeCancelObserver{}
+	h := New(testLogger(), nil, cancelled, nil, nil, nil, nil, WithCancelObserver(observer)).Handler()
+	if rec := do(t, h, http.MethodPost, path, ""); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(observer.seen) != 1 || observer.seen[0].ID != testUUID {
+		t.Fatalf("observer saw %+v, want the cancelled task once", observer.seen)
+	}
+
+	// a cancel that errored or left the task running is not a cancellation
+	for name, f := range map[string]*fakeTasks{
+		"error":        {err: task.ErrNotFound},
+		"still queued": {task: task.Task{ID: testUUID, Status: task.StatusQueued}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			observer := &fakeCancelObserver{}
+			h := New(testLogger(), nil, f, nil, nil, nil, nil, WithCancelObserver(observer)).Handler()
+			do(t, h, http.MethodPost, path, "")
+			if len(observer.seen) != 0 {
+				t.Fatalf("observer notified: %+v", observer.seen)
+			}
+		})
+	}
+
+	// no observer configured stays a plain cancel
+	plain := New(testLogger(), nil, cancelled, nil, nil, nil, nil).Handler()
+	if rec := do(t, plain, http.MethodPost, path, ""); rec.Code != http.StatusOK {
+		t.Fatalf("status without observer = %d", rec.Code)
+	}
+}

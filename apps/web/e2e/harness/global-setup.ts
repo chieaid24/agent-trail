@@ -15,7 +15,7 @@ import {
   webDir,
   writeState,
 } from "./env";
-import { spawnDaemon, waitFor } from "./procs";
+import { spawnDaemon, stopProcess, waitFor } from "./procs";
 
 export const EXECUTED_TASK_TITLE = "Add pagination to the audit log";
 
@@ -75,15 +75,8 @@ export default async function globalSetup(): Promise<void> {
     DATABASE_URL: databaseUrl,
     OTEL_EXPORTER_OTLP_ENDPOINT: "off",
   });
-
-  await waitFor("api readiness", 30_000, async () => {
-    const res = await fetch(`${apiBaseUrl}/readyz`).catch(() => null);
-    return res?.ok ?? false;
-  });
-
-  const sessionCookie = await loginThroughFakeGitHub();
-  writeStorageState(sessionCookie);
-  writeState({
+  // pids land in the state file first: a failure below must still reach the daemons
+  const state = {
     apiPid: api.pid ?? 0,
     workerPid: worker.pid ?? 0,
     fakeGithubPid: fakeGithub.pid ?? 0,
@@ -91,31 +84,54 @@ export default async function globalSetup(): Promise<void> {
     apiAddr,
     apiEnv,
     databaseUrl,
-    sessionCookie,
-  });
+    sessionCookie: "",
+  };
+  writeState(state);
 
-  // wait until the worker settles every seeded task, including the recovered mid-flight one
-  const settled = new Set([
-    "completed",
-    "failed",
-    "cancelled",
-    "timed_out",
-    "awaiting_review",
-  ]);
-  await waitFor("worker drives seeded tasks to rest", 60_000, async () => {
-    const res = await fetch(`${apiBaseUrl}/api/v1/tasks`, {
-      headers: { cookie: `${sessionCookieName}=${sessionCookie}` },
-    }).catch(() => null);
-    if (!res?.ok) return false;
-    const body = (await res.json()) as {
-      tasks: { title: string; status: string }[];
-    };
-    return (
-      body.tasks.some(
-        (t) => t.title === EXECUTED_TASK_TITLE && t.status === "completed",
-      ) && body.tasks.every((t) => settled.has(t.status))
-    );
-  });
+  try {
+    await waitFor("fake github readiness", 30_000, async () => {
+      const res = await fetch(`${fakeGithubUrl}/user`).catch(() => null);
+      return res?.ok ?? false;
+    });
+    await waitFor("api readiness", 30_000, async () => {
+      const res = await fetch(`${apiBaseUrl}/readyz`).catch(() => null);
+      return res?.ok ?? false;
+    });
+
+    const sessionCookie = await loginThroughFakeGitHub();
+    writeStorageState(sessionCookie);
+    writeState({ ...state, sessionCookie });
+
+    // wait until the worker settles every seeded task, including the recovered mid-flight one
+    const settled = new Set([
+      "completed",
+      "failed",
+      "cancelled",
+      "timed_out",
+      "awaiting_review",
+    ]);
+    await waitFor("worker drives seeded tasks to rest", 60_000, async () => {
+      const res = await fetch(`${apiBaseUrl}/api/v1/tasks`, {
+        headers: { cookie: `${sessionCookieName}=${sessionCookie}` },
+      }).catch(() => null);
+      if (!res?.ok) return false;
+      const body = (await res.json()) as {
+        tasks: { title: string; status: string }[];
+      };
+      return (
+        body.tasks.some(
+          (t) => t.title === EXECUTED_TASK_TITLE && t.status === "completed",
+        ) && body.tasks.every((t) => settled.has(t.status))
+      );
+    });
+  } catch (err) {
+    // playwright skips global teardown when setup throws, so release the lane here
+    for (const pid of [state.apiPid, state.workerPid, state.fakeGithubPid]) {
+      if (pid) await stopProcess(pid);
+    }
+    compose("down", "-v", "--remove-orphans");
+    throw err;
+  }
 }
 
 // plain fetches straight at the api; web server is not up yet

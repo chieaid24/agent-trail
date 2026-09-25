@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
+	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
 
 type DBPinger interface {
@@ -35,6 +36,17 @@ type Server struct {
 
 	streamPollInterval time.Duration
 	streamHeartbeat    time.Duration
+
+	cancelObserver CancelObserver
+}
+
+// notified after a cancel request lands; used to settle side effects the runner will never see
+type CancelObserver interface {
+	TaskCancelled(ctx context.Context, t task.Task)
+}
+
+func WithCancelObserver(observer CancelObserver) Option {
+	return func(s *Server) { s.cancelObserver = observer }
 }
 
 var _ DBPinger = (*sql.DB)(nil)
@@ -88,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/repositories", s.handleListRepositories)
 	api.HandleFunc("GET /api/v1/repositories/{repositoryId}", s.handleGetRepository)
 	api.HandleFunc("GET /api/v1/repositories/{repositoryId}/settings", s.handleRepositorySettings)
+	api.HandleFunc("PUT /api/v1/repositories/{repositoryId}/settings", s.handleUpdateRepositorySettings)
 	api.HandleFunc("POST /api/v1/repositories/{repositoryId}/enable", s.handleRepositoryEnable)
 	api.HandleFunc("POST /api/v1/repositories/{repositoryId}/disable", s.handleRepositoryDisable)
 	api.HandleFunc("GET /api/v1/runners", s.handleListRunners)

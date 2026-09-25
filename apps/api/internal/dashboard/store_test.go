@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/dbtest"
+	"github.com/chieaid24/agent-trail/apps/api/internal/reposettings"
 	"github.com/chieaid24/agent-trail/apps/api/internal/runner"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 )
@@ -138,8 +139,7 @@ func TestRepositoryDefaultsAndMissingResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.DefaultPolicy != defaultPolicy ||
-		settings.ValidationFile != defaultValidationFile {
+	if settings != reposettings.Defaults() {
 		t.Fatalf("settings = %#v", settings)
 	}
 
@@ -203,5 +203,44 @@ func TestRunnerDetail(t *testing.T) {
 	}
 	if _, err := store.GetRunner(ctx, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrRunnerNotFound) {
 		t.Fatalf("runner error = %v", err)
+	}
+}
+
+func TestUpdateRepositorySettingsRoundTrip(t *testing.T) {
+	db := dbtest.Open(t)
+	ctx := context.Background()
+	_, repositoryID := seedRepository(t, db)
+	store := NewStore(db)
+
+	before, err := store.GetRepositorySettings(ctx, repositoryID)
+	if err != nil || before.MaxAttempts != reposettings.DefaultMaxAttempts {
+		t.Fatalf("settings before = %#v, err = %v", before, err)
+	}
+
+	seven := 7
+	updated, err := store.UpdateRepositorySettings(ctx, repositoryID, RepositorySettingsPatch{MaxAttempts: &seven})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// untouched fields survive the patch
+	if updated.MaxAttempts != 7 || updated.DefaultPolicy != "restricted" ||
+		updated.ValidationFile != ".ci/checks.yaml" {
+		t.Fatalf("updated = %#v", updated)
+	}
+	after, err := store.GetRepositorySettings(ctx, repositoryID)
+	if err != nil || after != updated {
+		t.Fatalf("settings after = %#v, err = %v", after, err)
+	}
+	detail, err := store.GetRepository(ctx, repositoryID)
+	if err != nil || detail.Settings.MaxAttempts != 7 {
+		t.Fatalf("detail settings = %#v, err = %v", detail.Settings, err)
+	}
+
+	zero := 0
+	if _, err := store.UpdateRepositorySettings(ctx, repositoryID, RepositorySettingsPatch{MaxAttempts: &zero}); !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("out-of-bounds error = %v", err)
+	}
+	if _, err := store.UpdateRepositorySettings(ctx, "00000000-0000-0000-0000-000000000000", RepositorySettingsPatch{MaxAttempts: &seven}); !errors.Is(err, ErrRepositoryNotFound) {
+		t.Fatalf("missing repository error = %v", err)
 	}
 }

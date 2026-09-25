@@ -87,7 +87,7 @@ function RepositoryView({ repository }: { repository: RepositoryDetail }) {
           </div>
         </div>
 
-        <dl className="mt-6 grid grid-cols-2 gap-4 text-sm xl:grid-cols-4">
+        <dl className="mt-6 grid grid-cols-2 gap-4 text-sm md:grid-cols-3 xl:grid-cols-6">
           <Meta label="default branch" value={repository.default_branch} mono />
           <Meta
             label="default policy"
@@ -97,6 +97,11 @@ function RepositoryView({ repository }: { repository: RepositoryDetail }) {
             label="validation"
             value={repository.settings.validation_file}
             mono
+            wide
+          />
+          <Meta
+            label="revision limit"
+            value={formatAttempts(repository.settings.max_attempts)}
           />
           <Meta label="synced" value={formatDateTime(repository.updated_at)} />
         </dl>
@@ -143,6 +148,10 @@ function RepositoryView({ repository }: { repository: RepositoryDetail }) {
   );
 }
 
+function formatAttempts(n: number): string {
+  return n === 1 ? "1 attempt" : `${n} attempts`;
+}
+
 function FactBadge({
   label,
   tone = "muted",
@@ -165,17 +174,18 @@ function Meta({
   label,
   value,
   mono,
+  wide,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  // paths need two of the six wide-screen columns to stay on one line
+  wide?: boolean;
 }) {
   return (
-    <div className="min-w-0">
+    <div className={wide ? "min-w-0 xl:col-span-2" : "min-w-0"}>
       <dt className="text-muted">{label}</dt>
-      <dd className={`mt-1 ${mono ? "font-mono break-all" : "break-words"}`}>
-        {value}
-      </dd>
+      <dd className={`mt-1 break-words ${mono ? "font-mono" : ""}`}>{value}</dd>
     </div>
   );
 }

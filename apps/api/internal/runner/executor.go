@@ -15,6 +15,7 @@ import (
 	"github.com/chieaid24/agent-trail/apps/api/internal/agent"
 	"github.com/chieaid24/agent-trail/apps/api/internal/conflict"
 	"github.com/chieaid24/agent-trail/apps/api/internal/evidence"
+	"github.com/chieaid24/agent-trail/apps/api/internal/github"
 	"github.com/chieaid24/agent-trail/apps/api/internal/gitworkspace"
 	"github.com/chieaid24/agent-trail/apps/api/internal/task"
 	"github.com/chieaid24/agent-trail/apps/api/internal/validation"
@@ -202,6 +203,7 @@ func (e *Executor) Execute(ctx context.Context, runnerID string, c *Claim) error
 	if timedOut {
 		err = errors.Join(e.timeoutTask(execCtx, c, runtime), err)
 	}
+	err = e.settleTriggerCheckRun(execCtx, log, c, err)
 	err = e.cleanupTerminalRecovery(execCtx, log, c, err)
 	if !errors.Is(err, ErrLeaseLost) {
 		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -309,6 +311,64 @@ func (e *Executor) cleanupTerminalRecovery(ctx context.Context, log *slog.Logger
 		return errors.Join(retErr, fmt.Errorf("record workspace cleanup: %w", err))
 	}
 	return retErr
+}
+
+// a task that ended failed, cancelled, or timed out completes its queued trigger check run with
+// that conclusion; publish completes it on the happy path, so a completed run is left alone
+func (e *Executor) settleTriggerCheckRun(ctx context.Context, log *slog.Logger, c *Claim, retErr error) error {
+	if e.GitHub == nil || e.Repos == nil || errors.Is(retErr, ErrLeaseLost) || leaseOwnershipLost(ctx) {
+		return retErr
+	}
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.leaseOperationTimeout())
+	defer cancel()
+	attempt, err := e.Tasks.Attempt(settleCtx, c.AttemptID)
+	if err != nil {
+		return errors.Join(retErr, fmt.Errorf("read attempt for trigger check run: %w", err))
+	}
+	if attempt.TriggerCheckRunID == nil || attempt.TriggerCheckRunCompletedAt != nil {
+		return retErr
+	}
+	t, err := e.Tasks.Get(settleCtx, c.TaskID)
+	if err != nil {
+		return errors.Join(retErr, fmt.Errorf("read task for trigger check run: %w", err))
+	}
+	conclusion, title := terminalCheckConclusion(t.Status)
+	if conclusion == "" || t.RepositoryID == nil {
+		return retErr
+	}
+	rc, err := e.Repos.RepositoryContextByID(settleCtx, *t.RepositoryID)
+	if err != nil {
+		log.LogAttrs(ctx, slog.LevelWarn, "trigger check run completion skipped",
+			slog.String("event", "github_trigger_check_run_failed"),
+			slog.String("error", err.Error()),
+		)
+		return retErr
+	}
+	if err := e.fenceLeaseOwnership(ctx, c); err != nil {
+		return errors.Join(retErr, fmt.Errorf("fence trigger check run completion: %w", err))
+	}
+	summary := title
+	if t.FailureMessage != nil {
+		summary = truncateRunes(*t.FailureMessage, checkOutputLimit)
+	}
+	if err := e.completeTriggerCheckRun(settleCtx, log, c, rc, attempt, github.CheckRunParams{
+		Conclusion: conclusion, Title: title, Summary: summary,
+	}); err != nil {
+		return errors.Join(retErr, err)
+	}
+	return retErr
+}
+
+func terminalCheckConclusion(status task.Status) (conclusion, title string) {
+	switch status {
+	case task.StatusFailed:
+		return "failure", "Agent Trail task failed"
+	case task.StatusCancelled:
+		return "cancelled", "Agent Trail task cancelled"
+	case task.StatusTimedOut:
+		return "timed_out", "Agent Trail task timed out"
+	}
+	return "", ""
 }
 
 func (e *Executor) runtimeDeadline(ctx context.Context, c *Claim) (time.Duration, time.Time, error) {
@@ -507,6 +567,10 @@ func (e *Executor) runAgentStages(ctx context.Context, log *slog.Logger, c *Clai
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", context.Cause(ctx)
+			}
+			// provisioning settles its own failure codes (base_mismatch, publish_state_missing)
+			if errors.Is(err, ErrAttemptFailed) {
+				return "", err
 			}
 			return "", e.failTask(ctx, c, "workspace_failed", err.Error())
 		}
@@ -907,8 +971,17 @@ func (e *Executor) generateEvidence(ctx context.Context, c *Claim, validationNot
 	if t.AgentProvider != nil {
 		provider = *t.AgentProvider
 	}
+	attempt, err := e.Tasks.Attempt(ctx, c.AttemptID)
+	if err != nil {
+		return fmt.Errorf("evidence: %w", err)
+	}
+	baseCommit := ""
+	if attempt.BaseCommitSHA != nil {
+		baseCommit = *attempt.BaseCommitSHA
+	}
 	report := evidence.Generate(evidence.Params{
 		Task:            t,
+		BaseCommit:      baseCommit,
 		AgentProvider:   provider,
 		DurationSeconds: duration,
 		Plan:            plan,

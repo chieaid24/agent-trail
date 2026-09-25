@@ -273,7 +273,7 @@ func applyCost(ctx context.Context, tx *sql.Tx, taskID string, attempts []Attemp
 	}
 	for attemptID, payloads := range byAttempt {
 		if i, ok := index[attemptID]; ok {
-			attempts[i].Cost = aggregateCost(payloads)
+			attempts[i].Cost = AggregateCost(payloads)
 		}
 	}
 	return nil

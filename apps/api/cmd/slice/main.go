@@ -168,16 +168,95 @@ func run(databaseURL string) error {
 	if err != nil {
 		return err
 	}
-	step("Result")
+	step("Result of attempt 1")
 	fmt.Println("   task status:", final.Status)
-	if final.WorkingBranch != nil {
-		fmt.Println("   branch pushed:", *final.WorkingBranch)
+	if final.WorkingBranch == nil {
+		return errors.New("task has no working branch")
 	}
-	prBody := gh.PRBody()
-	if prBody == "" {
+	fmt.Println("   branch pushed:", *final.WorkingBranch)
+	if gh.PRBody() == "" {
 		return errors.New("no draft pull request was created")
 	}
-	fmt.Printf("   draft PR #1 opened, %d issue comment(s) posted\n", gh.CommentCount())
+	fmt.Printf("   draft PR #1 opened, %d comment(s) posted\n", gh.CommentCount())
+	if final.Status != task.StatusAwaitingReview {
+		return fmt.Errorf("task ended at %s, want awaiting_review", final.Status)
+	}
+	// check run 1 is the trigger run the run command created; publish must have completed it
+	if got := gh.CheckRunConclusion(1); got != "success" {
+		return fmt.Errorf("trigger check run conclusion = %q, want success", got)
+	}
+
+	step("Reviewer leaves an inline comment and comments /agent-trail revise on the draft PR")
+	gh.AddReviewComment(agent.FixtureFile, 1, "Please also note which files changed.")
+	if err := deliverReviseCommand(webhook); err != nil {
+		return err
+	}
+	processor.Wait()
+	revised, err := tasks.Get(ctx, created.ID)
+	if err != nil {
+		return err
+	}
+	attempts, err := tasks.Attempts(ctx, created.ID)
+	if err != nil {
+		return err
+	}
+	if revised.Status != task.StatusQueued || len(attempts) != 2 || attempts[1].BaseCommitSHA == nil {
+		return fmt.Errorf("revise command left the task %s with %d attempt(s): %s",
+			revised.Status, len(attempts), lastLine(gh.Comments()))
+	}
+	fmt.Println("   attempt 2 queued from pull request head", *attempts[1].BaseCommitSHA)
+	// the inline review comment plus the revise command itself
+	if len(attempts[1].Feedback) != 2 {
+		return fmt.Errorf("attempt 2 carries %d feedback item(s), want 2", len(attempts[1].Feedback))
+	}
+	fmt.Printf("   %d feedback item(s) composed into the attempt instructions\n", len(attempts[1].Feedback))
+
+	step("Running the revision: same branch, new attempt, re-validated")
+	claim2, err := claimTask(ctx, store, reg.ID, created.ID)
+	if err != nil {
+		return err
+	}
+	if claim2.AttemptNumber != 2 {
+		return fmt.Errorf("claimed attempt %d, want 2", claim2.AttemptNumber)
+	}
+	if err := worker.Execute(ctx, reg.ID, claim2); err != nil {
+		return err
+	}
+	afterRevision, err := tasks.Get(ctx, created.ID)
+	if err != nil {
+		return err
+	}
+	if afterRevision.Status != task.StatusAwaitingReview {
+		return fmt.Errorf("revision ended at %s, want awaiting_review", afterRevision.Status)
+	}
+	prBody := gh.PRBody()
+	for _, want := range []string{"## Attempts", "| 1 | `", "| 2 | `"} {
+		if !strings.Contains(prBody, want) {
+			return fmt.Errorf("pull request body lacks %q after the revision", want)
+		}
+	}
+	summary := lastLine(gh.Comments())
+	if !strings.Contains(summary, "published revision attempt 2") {
+		return fmt.Errorf("last comment is not the revision summary: %q", summary)
+	}
+	if got := gh.CheckRunConclusion(3); got != "success" {
+		return fmt.Errorf("revision trigger check run conclusion = %q, want success", got)
+	}
+	fmt.Printf("   revision published: %d check run(s), %d comment(s)\n", gh.CheckRunCount(), gh.CommentCount())
+
+	step("Merging the pull request completes the task")
+	if err := deliverPullRequestMerged(webhook, *final.WorkingBranch); err != nil {
+		return err
+	}
+	processor.Wait()
+	merged, err := tasks.Get(ctx, created.ID)
+	if err != nil {
+		return err
+	}
+	if merged.Status != task.StatusCompleted {
+		return fmt.Errorf("task ended at %s after merge, want completed", merged.Status)
+	}
+	fmt.Println("   task status:", merged.Status)
 
 	step("Timeline")
 	events, err := tasks.Events(ctx, created.ID, 0)
@@ -185,17 +264,24 @@ func run(databaseURL string) error {
 		return err
 	}
 	for _, ev := range events {
-		fmt.Printf("   %-28s %s\n", ev.EventType, ev.Source)
+		fmt.Printf("   attempt %d  %-28s %s\n", ev.AttemptNumber, ev.EventType, ev.Source)
 	}
 
-	step("Draft pull request body (evidence-backed)")
+	step("Pull request body (evidence-backed, with attempts history)")
 	fmt.Println(indent(prBody, "   | "))
 
-	if final.Status != task.StatusAwaitingReview {
-		return fmt.Errorf("task ended at %s, want awaiting_review", final.Status)
-	}
-	fmt.Println("\nSlice complete: the task now awaits human review on the draft PR.")
+	step("Revision summary comment")
+	fmt.Println(indent(summary, "   | "))
+
+	fmt.Println("\nSlice complete: run, revise, and merge all landed on one branch and one pull request.")
 	return nil
+}
+
+func lastLine(comments []string) string {
+	if len(comments) == 0 {
+		return ""
+	}
+	return comments[len(comments)-1]
 }
 
 // claims until it owns the slice task; a local worker may claim other tasks meanwhile
@@ -255,6 +341,29 @@ func deliverRunCommand(webhook http.Handler) error {
 	if err != nil {
 		return err
 	}
+	return deliver(webhook, req)
+}
+
+func deliverReviseCommand(webhook http.Handler) error {
+	req, err := githubfixture.ReviseCommandRequest([]byte(webhookSecret),
+		fixtureInstallationID, fixtureRepositoryID, 1,
+		"/agent-trail revise\nAlso mention the validation file in the notes.")
+	if err != nil {
+		return err
+	}
+	return deliver(webhook, req)
+}
+
+func deliverPullRequestMerged(webhook http.Handler, headRef string) error {
+	req, err := githubfixture.PullRequestClosedRequest([]byte(webhookSecret),
+		fixtureInstallationID, fixtureRepositoryID, 1, headRef, true)
+	if err != nil {
+		return err
+	}
+	return deliver(webhook, req)
+}
+
+func deliver(webhook http.Handler, req *http.Request) error {
 	rec := httptest.NewRecorder()
 	webhook.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {

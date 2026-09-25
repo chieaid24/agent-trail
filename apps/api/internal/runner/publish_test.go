@@ -77,6 +77,7 @@ type fakePublish struct {
 	prsUpdated  int
 	checks      []github.CheckRunParams
 	updates     []github.CheckRunParams
+	updatedIDs  []int64
 	comments    []string
 	createErr   error
 	commentSeen chan struct{}
@@ -171,11 +172,25 @@ func (f *fakePublish) CreateCheckRun(_ context.Context, _ int64, _, _ string, p 
 	return int64(len(f.checks)), nil
 }
 
-func (f *fakePublish) UpdateCheckRun(_ context.Context, _ int64, _, _ string, _ int64, p github.CheckRunParams) error {
+func (f *fakePublish) UpdateCheckRun(_ context.Context, _ int64, _, _ string, id int64, p github.CheckRunParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updates = append(f.updates, p)
+	f.updatedIDs = append(f.updatedIDs, id)
 	return nil
+}
+
+// conclusions of every update applied to one check run id, in order
+func (f *fakePublish) updatesFor(id int64) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var conclusions []string
+	for i, got := range f.updatedIDs {
+		if got == id {
+			conclusions = append(conclusions, f.updates[i].Conclusion)
+		}
+	}
+	return conclusions
 }
 
 func (f *fakePublish) ListCheckRuns(_ context.Context, _ int64, _, _, ref, name string) ([]github.CheckRun, error) {

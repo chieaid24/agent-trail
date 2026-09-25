@@ -121,6 +121,8 @@ func run() error {
 		processor = github.NewProcessor(ghStore, taskStore, client, logger, metrics)
 		webhook = github.NewWebhook([]byte(cfg.GitHubWebhookSecret), ghStore,
 			processor, logger, metrics)
+		apiOptions = append(apiOptions, httpapi.WithCancelObserver(
+			github.NewTriggerCheckRuns(ghStore, taskStore, client, logger)))
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

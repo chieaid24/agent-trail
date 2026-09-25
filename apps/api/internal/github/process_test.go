@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/chieaid24/agent-trail/apps/api/internal/dbtest"
 	"github.com/chieaid24/agent-trail/apps/api/internal/observability"
@@ -17,12 +19,18 @@ import (
 )
 
 type fakeAPI struct {
-	mu         sync.Mutex
-	repos      []Repository
-	permission string
-	headSHA    string
-	comments   []string
-	checkRuns  int
+	mu             sync.Mutex
+	repos          []Repository
+	permission     string
+	headSHA        string
+	comments       []string
+	checkRuns      int
+	checkRunParams []CheckRunParams
+	pullRequest    PullRequestDetail
+	pullRequestErr error
+	reviews        []Review
+	reviewComments []ReviewComment
+	issueComments  []IssueComment
 }
 
 func (f *fakeAPI) ListInstallationRepositories(context.Context, int64) ([]Repository, error) {
@@ -50,11 +58,42 @@ func (f *fakeAPI) CreateIssueComment(_ context.Context, _ int64, _, _ string, _ 
 	return nil
 }
 
-func (f *fakeAPI) CreateCheckRun(context.Context, int64, string, string, CheckRunParams) (int64, error) {
+func (f *fakeAPI) CreateCheckRun(_ context.Context, _ int64, _, _ string, p CheckRunParams) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.checkRuns++
-	return 777, nil
+	f.checkRunParams = append(f.checkRunParams, p)
+	return int64(776 + f.checkRuns), nil
+}
+
+func (f *fakeAPI) GetPullRequest(_ context.Context, _ int64, _, _ string, number int64) (PullRequestDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pullRequestErr != nil {
+		return PullRequestDetail{}, f.pullRequestErr
+	}
+	pr := f.pullRequest
+	pr.Number = number
+	return pr, nil
+}
+
+func (f *fakeAPI) ListPullRequestReviews(context.Context, int64, string, string, int64) ([]Review, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Review(nil), f.reviews...), nil
+}
+
+// since is advisory on github; the processor must apply the cutoff itself
+func (f *fakeAPI) ListPullRequestReviewComments(context.Context, int64, string, string, int64, time.Time) ([]ReviewComment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ReviewComment(nil), f.reviewComments...), nil
+}
+
+func (f *fakeAPI) ListIssueComments(context.Context, int64, string, string, int64, time.Time) ([]IssueComment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]IssueComment(nil), f.issueComments...), nil
 }
 
 func (f *fakeAPI) commentCount() int {
@@ -332,6 +371,18 @@ func TestRunCommandCreatesExactlyOneTask(t *testing.T) {
 	}
 	if !haveCheckRun || !haveAck {
 		t.Fatalf("side-effect events missing: check_run=%v ack=%v", haveCheckRun, haveAck)
+	}
+	attempts, err := f.tasks.Attempts(context.Background(), created.ID)
+	if err != nil || len(attempts) != 1 {
+		t.Fatalf("attempts = %+v, err = %v", attempts, err)
+	}
+	if attempts[0].TriggerCheckRunID == nil || *attempts[0].TriggerCheckRunID != 777 ||
+		attempts[0].RequestedByLogin == nil || *attempts[0].RequestedByLogin != "alice" ||
+		attempts[0].TriggerCommentID == nil || *attempts[0].TriggerCommentID != 9001 {
+		t.Fatalf("attempt 1 = %+v", attempts[0])
+	}
+	if got := f.api.checkRunParams[0]; got.HeadSHA != f.api.headSHA || got.Status != "queued" {
+		t.Fatalf("trigger check run = %+v", got)
 	}
 }
 
@@ -839,5 +890,322 @@ func TestPullRequestClosedWithoutNumberFails(t *testing.T) {
 		[]byte(`{"action":"closed","pull_request":{"merged":true},"repository":{"id":501}}`))
 	if got := f.deliveryStatus(t, "d-pr-bad"); got != "failed" {
 		t.Fatalf("delivery status = %q, want failed", got)
+	}
+}
+
+const reviewHeadSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+// agent trail pull request #15 on reviewBranch, head pushed to this repository
+func (f *fixture) setPullRequest(headRef string, headRepoID int64) {
+	f.api.mu.Lock()
+	defer f.api.mu.Unlock()
+	f.api.pullRequest = PullRequestDetail{
+		State: "open", HTMLURL: "https://example.test/pr/15",
+		Head: PullRequestHead{Ref: headRef, SHA: reviewHeadSHA, RepoID: headRepoID},
+	}
+}
+
+func (f *fixture) attempts(t *testing.T, id string) []task.Attempt {
+	t.Helper()
+	attempts, err := f.tasks.Attempts(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return attempts
+}
+
+func reviseComment(commentID int64) commentOpts {
+	return commentOpts{
+		body:      "/agent-trail revise\nplease also rename the helper",
+		commentID: commentID, pullRequest: true,
+	}
+}
+
+// walks the active attempt along the happy path back to awaiting_review
+func (f *fixture) finishAttempt(t *testing.T, id string) {
+	t.Helper()
+	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning,
+		task.StatusExecuting, task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview} {
+		if _, err := f.tasks.Transition(context.Background(), id, task.TransitionParams{To: to}); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+}
+
+func TestReviseCreatesNextAttemptFromPullRequestHead(t *testing.T) {
+	f := newFixture(t)
+	tk := f.taskAt(t, task.StatusAwaitingReview)
+	f.setPullRequest(reviewBranch, 501)
+
+	// a first revision fixes the cutoff: feedback before its trigger was already given to it
+	f.recordAndProcess(t, "d-revise-1", "issue_comment", issueCommentJSON(t, reviseComment(9002)))
+	if got := f.taskStatus(t, tk.ID); got != task.StatusQueued {
+		t.Fatalf("first revision left the task %s: %q", got, f.api.lastComment())
+	}
+	f.finishAttempt(t, tk.ID)
+	cutoff := f.attempts(t, tk.ID)[1].CreatedAt
+	before, after := cutoff.Add(-time.Hour), cutoff.Add(time.Minute)
+	seven := 7
+	f.api.mu.Lock()
+	f.api.reviews = []Review{
+		{ID: 1, Body: "old round", State: "COMMENTED", User: Author{Login: "bob", Type: "User"}, SubmittedAt: before},
+		{ID: 2, Body: "Please split the helper.", State: "CHANGES_REQUESTED", User: Author{Login: "bob", Type: "User"}, SubmittedAt: after.Add(2 * time.Minute)},
+		{ID: 3, Body: "", State: "APPROVED", User: Author{Login: "carol", Type: "User"}, SubmittedAt: after.Add(3 * time.Minute)},
+	}
+	f.api.reviewComments = []ReviewComment{
+		{ID: 4, Body: "rename this", Path: "internal/a.go", Line: &seven, DiffHunk: "@@ -1 +1 @@\n-x\n+y", User: Author{Login: "alice", Type: "User"}, CreatedAt: after.Add(time.Minute)},
+		{ID: 5, Body: "bot noise", Path: "internal/b.go", Line: &seven, User: Author{Login: "linter[bot]", Type: "Bot"}, CreatedAt: after.Add(time.Minute)},
+	}
+	f.api.issueComments = []IssueComment{
+		{ID: 6, Body: "also update the docs", User: Author{Login: "alice", Type: "User"}, CreatedAt: after},
+		{ID: 7, Body: "/agent-trail run", User: Author{Login: "dave", Type: "User"}, CreatedAt: after.Add(90 * time.Second)},
+		{ID: 9003, Body: "/agent-trail revise", User: Author{Login: "alice", Type: "User"}, CreatedAt: after.Add(4 * time.Minute)},
+	}
+	f.api.mu.Unlock()
+
+	f.recordAndProcess(t, "d-revise-2", "issue_comment", issueCommentJSON(t, reviseComment(9003)))
+
+	if got := f.deliveryStatus(t, "d-revise-2"); got != "processed" {
+		t.Fatalf("delivery status = %q", got)
+	}
+	if got := f.taskStatus(t, tk.ID); got != task.StatusQueued {
+		t.Fatalf("task = %s, want queued", got)
+	}
+	attempts := f.attempts(t, tk.ID)
+	if len(attempts) != 3 || attempts[1].Status != "superseded" || attempts[2].Status != "active" {
+		t.Fatalf("attempts = %+v", attempts)
+	}
+	third := attempts[2]
+	if third.BaseCommitSHA == nil || *third.BaseCommitSHA != reviewHeadSHA ||
+		third.RequestedByLogin == nil || *third.RequestedByLogin != "alice" ||
+		third.TriggerCommentID == nil || *third.TriggerCommentID != 9003 ||
+		third.TriggerCheckRunID == nil || *third.TriggerCheckRunID != 779 {
+		t.Fatalf("attempt 3 = %+v", third)
+	}
+	kinds := []string{}
+	for _, item := range third.Feedback {
+		kinds = append(kinds, string(item.Kind)+":"+item.Author+":"+item.Location)
+	}
+	want := []string{"comment:alice:", "review_comment:alice:internal/a.go:7",
+		"review:bob:changes_requested", "revise_command:alice:"}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("feedback = %v, want %v", kinds, want)
+	}
+	instructions := *third.Instructions
+	for _, want := range []string{
+		"Fix the flaky login test", "It fails on CI about once a day.",
+		"already contains the previous attempts' work",
+		"[comment by @alice at", "also update the docs",
+		"[inline review comment by @alice at", "on internal/a.go:7]", "```diff\n@@ -1 +1 @@", "rename this",
+		"[review by @bob at", "Please split the helper.",
+		"Revise command by @alice:", "please also rename the helper",
+	} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("instructions missing %q:\n%s", want, instructions)
+		}
+	}
+	for _, absent := range []string{"old round", "bot noise", "@dave"} {
+		if strings.Contains(instructions, absent) {
+			t.Fatalf("instructions carry excluded feedback %q:\n%s", absent, instructions)
+		}
+	}
+	if strings.Index(instructions, "also update the docs") > strings.Index(instructions, "rename this") ||
+		strings.Index(instructions, "rename this") > strings.Index(instructions, "Please split the helper.") {
+		t.Fatalf("feedback not chronological:\n%s", instructions)
+	}
+
+	// trigger check run on the pull request head, ack on the pull request
+	params := f.api.checkRunParams[len(f.api.checkRunParams)-1]
+	if params.HeadSHA != reviewHeadSHA || params.Status != "queued" || params.ExternalID != tk.ID {
+		t.Fatalf("trigger check run = %+v", params)
+	}
+	if !f.lastCommentContains(t, "revision attempt 3") || !f.lastCommentContains(t, "4 review feedback item(s)") {
+		t.Fatalf("ack = %q", f.api.lastComment())
+	}
+	events := f.transitionEvents(t, tk.ID)
+	last := events[len(events)-2:]
+	if last[0].To != "revision_requested" || last[1].To != "queued" ||
+		!strings.Contains(last[1].Reason, "revision requested by @alice in pull request #15") {
+		t.Fatalf("transitions = %+v", last)
+	}
+}
+
+func TestReviseGuardsReplyOnceAndCreateNothing(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  task.Status
+		prepare func(f *fixture)
+		comment commentOpts
+		reply   string
+		ignored bool
+	}{
+		{"revise on an issue", task.StatusAwaitingReview, nil,
+			commentOpts{body: "/agent-trail revise", commentID: 1}, "works on Agent Trail pull requests, not issues", false},
+		{"run on a pull request", task.StatusAwaitingReview, nil,
+			commentOpts{body: "/agent-trail run", commentID: 2, pullRequest: true}, "works on issues, not pull requests", false},
+		{"disabled repository", task.StatusAwaitingReview, func(f *fixture) {
+			if _, err := f.db.Exec(`UPDATE repositories SET is_enabled = false`); err != nil {
+				t.Fatal(err)
+			}
+		}, reviseComment(3), "not enabled", false},
+		{"commenter without write access", task.StatusAwaitingReview, func(f *fixture) {
+			f.api.mu.Lock()
+			f.api.permission = "read"
+			f.api.mu.Unlock()
+		}, reviseComment(4), "write access", false},
+		{"running attempt", task.StatusExecuting, nil, reviseComment(5), "still running", false},
+		{"queued attempt", task.StatusQueued, nil, reviseComment(6), "still running", false},
+		{"terminal task", task.StatusCompleted, nil, reviseComment(7), "cannot be revised", false},
+		{"revision limit reached", task.StatusAwaitingReview, func(f *fixture) {
+			if _, err := f.db.Exec(`UPDATE repositories SET settings_json = '{"max_attempts": 1}'`); err != nil {
+				t.Fatal(err)
+			}
+		}, reviseComment(8), "revision limit of 1 attempts", false},
+		{"pull request on another branch", task.StatusAwaitingReview, func(f *fixture) {
+			f.setPullRequest("feature/login", 501)
+		}, reviseComment(9), "not managed by Agent Trail", false},
+		{"pull request from a fork", task.StatusAwaitingReview, func(f *fixture) {
+			f.setPullRequest(reviewBranch, 777)
+		}, reviseComment(10), "not managed by Agent Trail", false},
+		{"unknown agent trail branch", task.StatusAwaitingReview, func(f *fixture) {
+			f.setPullRequest("agent-trail/other-task", 501)
+		}, reviseComment(11), "not managed by Agent Trail", false},
+		{"bot author", task.StatusAwaitingReview, nil,
+			commentOpts{body: "/agent-trail revise", commentID: 12, pullRequest: true, userType: "Bot"}, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			var tk task.Task
+			if tc.status == task.StatusCompleted {
+				tk = f.taskAt(t, task.StatusAwaitingReview)
+				if _, err := f.tasks.Transition(context.Background(), tk.ID, task.TransitionParams{To: task.StatusCompleted}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				tk = f.taskAt(t, tc.status)
+			}
+			f.setPullRequest(reviewBranch, 501)
+			if tc.prepare != nil {
+				tc.prepare(f)
+			}
+			before := f.api.commentCount()
+			f.recordAndProcess(t, "d-guard", "issue_comment", issueCommentJSON(t, tc.comment))
+
+			wantStatus := "processed"
+			if tc.ignored {
+				wantStatus = "ignored"
+			}
+			if got := f.deliveryStatus(t, "d-guard"); got != wantStatus {
+				t.Fatalf("delivery status = %q, want %s", got, wantStatus)
+			}
+			replies := f.api.commentCount() - before
+			if tc.ignored && replies != 0 {
+				t.Fatalf("bot command drew %d replies", replies)
+			}
+			if !tc.ignored && (replies != 1 || !f.lastCommentContains(t, tc.reply)) {
+				t.Fatalf("replies = %d, last = %q, want one containing %q", replies, f.api.lastComment(), tc.reply)
+			}
+			if got := len(f.attempts(t, tk.ID)); got != 1 {
+				t.Fatalf("attempts = %d, want 1", got)
+			}
+			cur, err := f.tasks.Get(context.Background(), tk.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.status == task.StatusCompleted && cur.Status != task.StatusCompleted ||
+				tc.status != task.StatusCompleted && cur.Status != tc.status {
+				t.Fatalf("task = %s, want untouched %s", cur.Status, tc.status)
+			}
+		})
+	}
+}
+
+func TestReviseRedeliveryIsNoOp(t *testing.T) {
+	f := newFixture(t)
+	tk := f.taskAt(t, task.StatusAwaitingReview)
+	f.setPullRequest(reviewBranch, 501)
+	payload := issueCommentJSON(t, reviseComment(42))
+
+	f.recordAndProcess(t, "d-revise-1", "issue_comment", payload)
+	f.recordAndProcess(t, "d-revise-2", "issue_comment", payload)
+
+	if got := f.deliveryStatus(t, "d-revise-2"); got != "ignored" {
+		t.Fatalf("redelivery status = %q, want ignored", got)
+	}
+	if got := len(f.attempts(t, tk.ID)); got != 2 {
+		t.Fatalf("attempts = %d, want exactly 2", got)
+	}
+	if got := f.api.checkRuns; got != 2 {
+		t.Fatalf("check runs = %d, want run + one revise", got)
+	}
+	// the revision finished and the task is reviewable again: the old comment must not start another
+	for _, to := range []task.Status{task.StatusProvisioning, task.StatusPlanning,
+		task.StatusExecuting, task.StatusValidating, task.StatusPublishing, task.StatusAwaitingReview} {
+		if _, err := f.tasks.Transition(context.Background(), tk.ID, task.TransitionParams{To: to}); err != nil {
+			t.Fatalf("transition to %s: %v", to, err)
+		}
+	}
+	f.recordAndProcess(t, "d-revise-3", "issue_comment", payload)
+	if got := f.deliveryStatus(t, "d-revise-3"); got != "ignored" {
+		t.Fatalf("late redelivery status = %q, want ignored", got)
+	}
+	if got := len(f.attempts(t, tk.ID)); got != 2 {
+		t.Fatalf("attempts after late redelivery = %d, want 2", got)
+	}
+	acks := 0
+	for _, c := range f.api.comments {
+		if strings.Contains(c, "revision attempt") {
+			acks++
+		}
+	}
+	if acks != 1 {
+		t.Fatalf("revision acks = %d, want 1", acks)
+	}
+}
+
+func TestReviseInstructionsTruncateOnRuneBoundary(t *testing.T) {
+	f := newFixture(t)
+	tk := f.taskAt(t, task.StatusAwaitingReview)
+	f.setPullRequest(reviewBranch, 501)
+	f.api.mu.Lock()
+	f.api.issueComments = []IssueComment{{
+		ID: 1, Body: strings.Repeat("\u00e9", instructionLimit),
+		User: Author{Login: "alice", Type: "User"}, CreatedAt: time.Now().Add(time.Minute),
+	}}
+	f.api.mu.Unlock()
+
+	f.recordAndProcess(t, "d-long", "issue_comment", issueCommentJSON(t, reviseComment(43)))
+
+	if got := f.deliveryStatus(t, "d-long"); got != "processed" {
+		t.Fatalf("delivery status = %q", got)
+	}
+	attempts := f.attempts(t, tk.ID)
+	if len(attempts) != 2 || attempts[1].Instructions == nil {
+		t.Fatalf("attempts = %+v", attempts)
+	}
+	instructions := *attempts[1].Instructions
+	if len(instructions) > instructionLimit || !utf8.ValidString(instructions) {
+		t.Fatalf("instructions len=%d valid=%v", len(instructions), utf8.ValidString(instructions))
+	}
+	if !strings.Contains(instructions, "[comment by @alice at") {
+		t.Fatalf("truncated instructions lost the feedback label:\n%.300s", instructions)
+	}
+}
+
+func TestFirstRevisionTakesEveryHumanComment(t *testing.T) {
+	f := newFixture(t)
+	tk := f.taskAt(t, task.StatusAwaitingReview)
+	f.setPullRequest(reviewBranch, 501)
+	f.api.mu.Lock()
+	f.api.reviews = []Review{{ID: 1, Body: "early review", State: "COMMENTED",
+		User: Author{Login: "bob", Type: "User"}, SubmittedAt: time.Now().Add(-48 * time.Hour)}}
+	f.api.mu.Unlock()
+
+	f.recordAndProcess(t, "d-nocutoff", "issue_comment", issueCommentJSON(t, reviseComment(44)))
+
+	attempts := f.attempts(t, tk.ID)
+	if len(attempts) != 2 || !strings.Contains(*attempts[1].Instructions, "early review") {
+		t.Fatalf("attempts = %+v", attempts)
 	}
 }
