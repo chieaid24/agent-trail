@@ -2,7 +2,7 @@
 
 A more secure way to run coding agents.
 
-Comment `/agent-trail run` on a GitHub issue and it creates a task, runs an agent in an isolated container, streams every action to a dashboard, validates the result, and opens a draft pull request with evidence report. Review the pull request, then comment `/agent-trail revise` and the agent continues the same branch with your feedback; merging the pull request completes the task.
+Comment `/agent-trail run` on a GitHub issue and it creates a task, runs an agent in an isolated container, streams every action to a dashboard, validates the result, and opens a draft pull request with evidence report.
 
 
 <p align="center">
@@ -62,43 +62,6 @@ make test     # unit tests for both apps
 http://127.0.0.1:3300.
 
 
-## Production Deployment
-
-Terraform in `deploy/terraform/envs/prod` provisions everything on AWS: VPC,
-RDS, ECR, the Fargate API and dashboard, the EKS runner cluster, and
-CloudWatch. You need an AWS account, a Route 53 hosted zone, and an S3 bucket
-for Terraform state.
-
-1. Build and push the `control-plane`, `web`, and `runner` images from
-   `deploy/docker/Dockerfile` to ECR (ARM64).
-2. Apply Terraform with your domain and image tags, then fill in the Secrets
-   Manager entries it creates (GitHub App key, webhook secret, agent API key,
-   dashboard auth secret).
-
-   ```bash
-   terraform -chdir=deploy/terraform/envs/prod init -backend-config="bucket=<state-bucket>"
-   terraform -chdir=deploy/terraform/envs/prod apply -var-file=prod.tfvars
-   ```
-
-3. Run `migrate up` from the `tools` image against RDS, then apply
-   `deploy/k8s/runner/` to the EKS cluster with `RUNNER_IMAGE` set to the
-   runner image.
-4. Register a GitHub App pointing at `https://<domain>/webhooks/github`,
-   subscribed to the `issue_comment` and `pull_request` events, install it
-   on a repository, and comment `/agent-trail run` on an issue. Once the
-   draft pull request is open, leave review feedback and comment
-   `/agent-trail revise` on it to start a revision. Each repository allows
-   `max_attempts` attempts per task (default 5); set it through the
-   repository settings API, and the repository page shows it. The dashboard
-   task page gains an attempt selector once a revision exists: the timeline,
-   trace, logs, validations, evidence, and files follow the selected attempt,
-   the header names who requested each revision and its base and final
-   commits, and `GET /api/v1/tasks/{taskId}/attempts` plus the `attempt=N`
-   query on `/evidence` and `/trace` back it. Completed and cancelled tasks
-   show why they ended (for example `pull request #7 merged`) on every task
-   list.
-
-
 ## Layout
 
 - `apps/api/` - Go control plane: `api` (HTTP), `worker` (process runner or Kubernetes controller), `migrate` (goose)
@@ -108,5 +71,5 @@ for Terraform state.
 - `deploy/k8s/` - `runner/` controller and Job manifests, `local/` kind verification manifests
 - `deploy/terraform/` - AWS foundations: `modules/` and one root per environment under `envs/`
 - `scripts/` - `gate.sh` (the CI gate), `dev.sh` (app runner), `verify-local-telemetry.sh` (Grafana LGTM smoke), `verify-production-telemetry.sh` (CloudWatch agent config check), `verify-web-image.sh` (dashboard image check), `verify-k8s-runner.sh` (kind verifier)
-- `docs/` - `adr/` decision records, `observability/` contracts, `testing/` verification notes, benchmark plans, and measured results
+- `docs/` - benchmark plans and measured results
 
