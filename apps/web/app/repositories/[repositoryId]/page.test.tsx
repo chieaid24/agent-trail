@@ -33,6 +33,7 @@ test("renders repository settings, metrics, and task sections", async () => {
     settings: {
       default_policy: "restricted",
       validation_file: ".agent-trail/validation.yaml",
+      max_attempts: 5,
     },
     metrics: {
       total_tasks: 3,
@@ -61,6 +62,8 @@ test("renders repository settings, metrics, and task sections", async () => {
   expect(await screen.findByText("chieaid24/agent-trail")).toBeDefined();
   expect(screen.getByText("restricted")).toBeDefined();
   expect(screen.getByText(".agent-trail/validation.yaml")).toBeDefined();
+  expect(screen.getByText("revision limit")).toBeDefined();
+  expect(screen.getByText("5 attempts")).toBeDefined();
   expect(screen.getByText("50%")).toBeDefined();
   expect(screen.getByText("No active tasks.")).toBeDefined();
 });

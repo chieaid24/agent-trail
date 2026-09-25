@@ -141,6 +141,7 @@ function repositoryDetail() {
     settings: {
       default_policy: "restricted-network-and-filesystem",
       validation_file: ".agent-trail/validation.yaml",
+      max_attempts: 5,
     },
     active_task_count: 0,
     recent_task_count: 1,

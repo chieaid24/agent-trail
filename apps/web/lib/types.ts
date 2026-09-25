@@ -230,6 +230,8 @@ export interface Organization {
 export interface RepositorySettings {
   default_policy: string;
   validation_file: string;
+  // revision limit: revise commands beyond this attempt count are refused
+  max_attempts: number;
 }
 
 export interface Repository {

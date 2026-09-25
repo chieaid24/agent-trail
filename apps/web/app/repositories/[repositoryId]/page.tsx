@@ -87,7 +87,7 @@ function RepositoryView({ repository }: { repository: RepositoryDetail }) {
           </div>
         </div>
 
-        <dl className="mt-6 grid grid-cols-2 gap-4 text-sm xl:grid-cols-4">
+        <dl className="mt-6 grid grid-cols-2 gap-4 text-sm md:grid-cols-3 xl:grid-cols-5">
           <Meta label="default branch" value={repository.default_branch} mono />
           <Meta
             label="default policy"
@@ -97,6 +97,10 @@ function RepositoryView({ repository }: { repository: RepositoryDetail }) {
             label="validation"
             value={repository.settings.validation_file}
             mono
+          />
+          <Meta
+            label="revision limit"
+            value={formatAttempts(repository.settings.max_attempts)}
           />
           <Meta label="synced" value={formatDateTime(repository.updated_at)} />
         </dl>
@@ -141,6 +145,10 @@ function RepositoryView({ repository }: { repository: RepositoryDetail }) {
       />
     </article>
   );
+}
+
+function formatAttempts(n: number): string {
+  return n === 1 ? "1 attempt" : `${n} attempts`;
 }
 
 function FactBadge({

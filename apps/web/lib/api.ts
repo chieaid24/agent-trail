@@ -131,6 +131,20 @@ export function getRepositorySettings(
   );
 }
 
+export function updateRepositorySettings(
+  repositoryId: string,
+  patch: { max_attempts: number },
+): Promise<RepositorySettings> {
+  return request<RepositorySettings>(
+    `/repositories/${encodeURIComponent(repositoryId)}/settings`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
 export async function listRunners(): Promise<Runner[]> {
   const body = await request<{ runners: Runner[] }>("/runners");
   return body.runners;
